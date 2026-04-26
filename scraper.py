@@ -32,28 +32,6 @@ SCRAPE_INTERVAL  = int(os.getenv("SCRAPE_INTERVAL_SECONDS", "900"))  # 15 min de
 MORNING_BRIEF_HOUR = int(os.getenv("MORNING_BRIEF_HOUR", "7"))       # 7am ET
 
 
-def parse_cookie_string(cookie_str: str) -> list[dict]:
-    """Parse a browser cookie header string into Playwright cookie dicts."""
-    cookies = []
-    for part in cookie_str.split(";"):
-        part = part.strip()
-        if "=" not in part:
-            continue
-        name, _, value = part.partition("=")
-        # Use url (not domain+path) — more reliable with Playwright's add_cookies
-        cookies.append({
-            "name":  name.strip(),
-            "value": value.strip(),
-            "url":   "https://app.hedgeye.com",
-        })
-    return cookies
-
-
-def setup_session(context):
-    """Inject stored cookies so Playwright acts as an authenticated browser."""
-    cookies = parse_cookie_string(HEDGEYE_COOKIE)
-    context.add_cookies(cookies)
-    log.info(f"Injected {len(cookies)} cookies — skipping login form entirely.")
 
 
 def is_logged_in(page) -> bool:
@@ -241,10 +219,10 @@ def main():
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            extra_http_headers={"Cookie": HEDGEYE_COOKIE},
         )
-
-        setup_session(context)
+        log.info("Cookie loaded into browser context — skipping login form.")
         page = context.new_page()
 
         if not check_session(page):
