@@ -10,6 +10,7 @@ import email
 import time
 import logging
 import re
+from datetime import datetime, timedelta
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
@@ -172,37 +173,63 @@ def connect_imap() -> imaplib.IMAP4_SSL:
 
 
 def fetch_new_hedgeye_emails(conn: imaplib.IMAP4_SSL, seen_ids: set) -> list[dict]:
-    """Search for unseen Hedgeye emails and return parsed items."""
-    items = []
+    """
+    Search for Hedgeye emails from the last 2 days and return unprocessed ones.
 
-    try:
-        # Search for unread emails from Hedgeye domains
-        for domain in ["hedgeye.com", "tier1alpha.com"]:
-            _, data = conn.search(None, f'(UNSEEN FROM "{domain}")')
+    Uses SINCE instead of UNSEEN so emails already read in a mail client are
+    still caught. Deduplication is handled by seen_ids (backed by the DB).
+    Searches broadly by sender keyword so all hedgeye.com subdomains match.
+    """
+    items        = []
+    since        = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
+    candidate_uids: set[bytes] = set()
+
+    for keyword in ["hedgeye", "tier1alpha"]:
+        try:
+            _, data = conn.search(None, f'(SINCE {since} FROM "{keyword}")')
             uids = data[0].split() if data[0] else []
+            candidate_uids.update(uids)
+        except imaplib.IMAP4.error as e:
+            log.error(f"IMAP search error (FROM {keyword!r}): {e}")
 
-            for uid in uids:
-                uid_str = uid.decode()
-                email_id = f"email_{uid_str}"
+    log.info(f"Email check: {len(candidate_uids)} candidate message(s) since {since}")
 
-                if email_id in seen_ids:
-                    continue
+    for uid in sorted(candidate_uids):
+        uid_str  = uid.decode()
+        email_id = f"email_{uid_str}"
 
-                _, raw = conn.fetch(uid, "(RFC822)")
-                if not raw or not raw[0]:
-                    continue
+        # Fetch headers cheaply so we can log every message we see
+        try:
+            _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT)])")
+            hdr_bytes   = hdr_data[0][1] if hdr_data and isinstance(hdr_data[0], tuple) else b""
+            hdr_msg     = email.message_from_bytes(hdr_bytes)
+            from_addr   = decode_mime_header(hdr_msg.get("From", ""))
+            subject     = decode_mime_header(hdr_msg.get("Subject", "(no subject)"))
+            status      = "already processed" if email_id in seen_ids else "new"
+            log.info(f"  [{uid_str}] {status} | from={from_addr!r} | subject={subject[:70]!r}")
+        except Exception as e:
+            log.warning(f"  [{uid_str}] could not fetch headers: {e}")
+            from_addr, subject = "", ""
 
-                raw_bytes = raw[0][1] if isinstance(raw[0], tuple) else None
-                if not raw_bytes:
-                    continue
+        if email_id in seen_ids:
+            continue
 
-                item = parse_email_message(raw_bytes, uid_str)
-                if item:
-                    items.append(item)
-                    seen_ids.add(email_id)
+        try:
+            _, raw = conn.fetch(uid, "(RFC822)")
+            if not raw or not raw[0]:
+                continue
+            raw_bytes = raw[0][1] if isinstance(raw[0], tuple) else None
+            if not raw_bytes:
+                continue
 
-    except imaplib.IMAP4.error as e:
-        log.error(f"IMAP error: {e}")
+            item = parse_email_message(raw_bytes, uid_str)
+            if item:
+                items.append(item)
+            # Mark seen regardless — avoids re-fetching non-Hedgeye matches
+            seen_ids.add(email_id)
+
+        except Exception as e:
+            log.error(f"  [{uid_str}] fetch/parse error: {e}")
 
     return items
 
