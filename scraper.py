@@ -40,11 +40,11 @@ def parse_cookie_string(cookie_str: str) -> list[dict]:
         if "=" not in part:
             continue
         name, _, value = part.partition("=")
+        # Use url (not domain+path) — more reliable with Playwright's add_cookies
         cookies.append({
-            "name":   name.strip(),
-            "value":  value.strip(),
-            "domain": "app.hedgeye.com",
-            "path":   "/",
+            "name":  name.strip(),
+            "value": value.strip(),
+            "url":   "https://app.hedgeye.com",
         })
     return cookies
 
@@ -53,7 +53,7 @@ def setup_session(context):
     """Inject stored cookies so Playwright acts as an authenticated browser."""
     cookies = parse_cookie_string(HEDGEYE_COOKIE)
     context.add_cookies(cookies)
-    log.info(f"Injected {len(cookies)} cookies into browser context.")
+    log.info(f"Injected {len(cookies)} cookies — skipping login form entirely.")
 
 
 def is_logged_in(page) -> bool:
@@ -63,24 +63,27 @@ def is_logged_in(page) -> bool:
 
 def check_session(page) -> bool:
     """
-    Navigate to the feed and verify we're authenticated.
+    Navigate to the feed and verify the cookie authenticated us.
     Returns True if session is valid, False if cookie has expired.
     """
     try:
         page.goto("https://app.hedgeye.com/feed_items", wait_until="networkidle", timeout=20000)
+        log.info(f"Session check landed on: {page.url}")
         if not is_logged_in(page):
             log.error(
-                "Session cookie has expired. Log into app.hedgeye.com in your browser, "
-                "copy the new Cookie header, and update HEDGEYE_COOKIE in your .env / Railway variables."
+                f"Cookie rejected — redirected to {page.url}. "
+                "Refresh HEDGEYE_COOKIE: log into app.hedgeye.com, open DevTools → "
+                "Network → any request → Request Headers → copy the Cookie value."
             )
             send_notification(
                 "⚠️ Hedgeye Bot: session cookie expired. "
-                "Log in at app.hedgeye.com, copy the cookie, and update HEDGEYE_COOKIE."
+                "Log in at app.hedgeye.com, copy the Cookie header, and update HEDGEYE_COOKIE."
             )
             return False
+        log.info("Session cookie valid — proceeding to scrape.")
         return True
     except PlaywrightTimeout:
-        log.warning("Timeout checking session.")
+        log.warning("Timeout during session check.")
         return False
 
 
