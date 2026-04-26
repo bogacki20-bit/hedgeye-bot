@@ -71,6 +71,71 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_items_type      ON items(classified_type);
         CREATE INDEX IF NOT EXISTS idx_items_timestamp ON items(timestamp);
         CREATE INDEX IF NOT EXISTS idx_signals_ticker  ON signals(ticker);
+
+        CREATE TABLE IF NOT EXISTS portfolio_positions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_date   TEXT NOT NULL,
+            account_number  TEXT,
+            account_name    TEXT,
+            symbol          TEXT NOT NULL,
+            description     TEXT,
+            quantity        REAL,
+            last_price      REAL,
+            current_value   REAL,
+            today_gl_dollar REAL,
+            today_gl_pct    REAL,
+            total_gl_dollar REAL,
+            total_gl_pct    REAL,
+            pct_of_account  REAL,
+            cost_basis      REAL,
+            avg_cost_basis  REAL,
+            account_type    TEXT,
+            ingested_at     TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS portfolio_transactions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_date        TEXT,
+            account         TEXT,
+            action          TEXT,
+            symbol          TEXT,
+            description     TEXT,
+            security_type   TEXT,
+            quantity        REAL,
+            price           REAL,
+            amount          REAL,
+            commission      REAL,
+            fees            REAL,
+            settlement_date TEXT,
+            source_file     TEXT,
+            row_hash        TEXT UNIQUE,
+            ingested_at     TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS trade_recommendations (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_item_id      TEXT REFERENCES items(id),
+            ticker              TEXT NOT NULL,
+            direction           TEXT,            -- Long / Short
+            conviction          TEXT,            -- Best Idea / Adding / Monitor / Reducing / Remove
+            account             TEXT,            -- target account number
+            action              TEXT,            -- BUY / SELL / SHORT / COVER / SKIP
+            recommended_dollars REAL,
+            recommended_shares  REAL,
+            reference_price     REAL,
+            current_shares      REAL,
+            reasoning           TEXT,
+            status              TEXT DEFAULT 'proposed',  -- proposed / approved / rejected / executed
+            created_at          TEXT DEFAULT (datetime('now')),
+            decided_at          TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_positions_date   ON portfolio_positions(snapshot_date);
+        CREATE INDEX IF NOT EXISTS idx_positions_symbol ON portfolio_positions(symbol);
+        CREATE INDEX IF NOT EXISTS idx_txn_symbol       ON portfolio_transactions(symbol);
+        CREATE INDEX IF NOT EXISTS idx_txn_date         ON portfolio_transactions(run_date);
+        CREATE INDEX IF NOT EXISTS idx_recs_ticker      ON trade_recommendations(ticker);
+        CREATE INDEX IF NOT EXISTS idx_recs_status      ON trade_recommendations(status);
         """)
     log.info(f"Database initialized at {DB_PATH}")
 

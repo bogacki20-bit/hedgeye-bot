@@ -258,6 +258,15 @@ def run_email_loop():
 
                     item = classify_and_extract(item)
                     save_item(item)
+
+                    # If this email contains a trade signal, generate and push a recommendation
+                    if item.get("classified_type") == "trade_signal" and item.get("ticker"):
+                        from recommender import recommend_from_signal, format_for_pushover
+                        rec = recommend_from_signal(item)
+                        if rec:
+                            title, msg = format_for_pushover(rec)
+                            send_notification(msg, title=title)
+                            log.info(f"  Recommendation #{rec['id']}: {rec['action']} {rec['ticker']}")
             else:
                 log.info("No new Hedgeye emails.")
 
