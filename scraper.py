@@ -28,15 +28,70 @@ MORNING_BRIEF_HOUR = int(os.getenv("MORNING_BRIEF_HOUR", "7"))       # 7am ET
 
 
 def login(page):
-    """Authenticate with Hedgeye."""
+    """Authenticate with Hedgeye - tries multiple selectors."""
     log.info("Logging into Hedgeye...")
-    page.goto("https://app.hedgeye.com/users/sign_in", wait_until="networkidle")
-    page.fill('input[name="user[email]"]', HEDGEYE_EMAIL)
-    page.fill('input[name="user[password]"]', HEDGEYE_PASSWORD)
-    page.click('input[type="submit"], button[type="submit"]')
-    page.wait_for_url("**/feed_items**", timeout=15000)
-    log.info("Login successful.")
+    page.goto("https://app.hedgeye.com/users/sign_in", wait_until="domcontentloaded")
+    time.sleep(3)
 
+    # Try multiple selectors for email field
+    for sel in [
+        'input[name="user[email]"]',
+        'input[type="email"]',
+        'input[id="user_email"]',
+        'input[placeholder*="mail" i]',
+        'input[autocomplete="email"]',
+    ]:
+        try:
+            page.wait_for_selector(sel, timeout=5000)
+            page.fill(sel, HEDGEYE_EMAIL)
+            log.info(f"Email filled using: {sel}")
+            break
+        except Exception:
+            continue
+
+    # Try multiple selectors for password field
+    for sel in [
+        'input[name="user[password]"]',
+        'input[type="password"]',
+        'input[id="user_password"]',
+        'input[autocomplete="current-password"]',
+    ]:
+        try:
+            page.wait_for_selector(sel, timeout=5000)
+            page.fill(sel, HEDGEYE_PASSWORD)
+            log.info(f"Password filled using: {sel}")
+            break
+        except Exception:
+            continue
+
+    # Submit the form
+    for sel in [
+        'input[type="submit"]',
+        'button[type="submit"]',
+        'button:has-text("Sign in")',
+        'button:has-text("Log in")',
+        'button:has-text("Login")',
+        '.btn-primary',
+        '[data-testid="login-button"]',
+    ]:
+        try:
+            page.click(sel, timeout=5000)
+            log.info(f"Submitted using: {sel}")
+            break
+        except Exception:
+            continue
+
+    try:
+        page.wait_for_url("**/feed_items**", timeout=20000)
+        log.info("Login successful.")
+    except Exception:
+        time.sleep(3)
+        current_url = page.url
+        log.info(f"Post-login URL: {current_url}")
+        if "sign_in" in current_url:
+            log.error("Still on login page - check credentials")
+        else:
+            log.info("Login appears successful")
 
 def scrape_feed(page) -> list[dict]:
     """Scrape the main feed and return list of raw items."""
@@ -244,3 +299,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
