@@ -32,7 +32,8 @@ def run_email_parser():
 def check_env():
     """Verify all required environment variables are set."""
     required = [
-        "HEDGEYE_COOKIE",
+        "HEDGEYE_EMAIL",
+        "HEDGEYE_PASSWORD",
         "ICLOUD_EMAIL",
         "ICLOUD_APP_PASSWORD",
         "ANTHROPIC_API_KEY",

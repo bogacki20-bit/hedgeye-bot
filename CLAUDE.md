@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Hedgeye Bot — a Python service that monitors Hedgeye Risk Management content (portal + email), classifies it with Claude AI, and sends SMS trade alerts via Twilio.
+Hedgeye Bot — a Python service that monitors Hedgeye Risk Management content (portal + email), classifies it with Claude AI, and sends push notifications via Pushover for trade signals.
 
 ## Running locally
 
@@ -38,20 +38,20 @@ Set all `.env` values in the Railway dashboard under **Variables → Raw Editor*
 
 Two daemon threads run concurrently from `main.py`:
 
-**Scraper thread** (`scraper.py`) — Playwright (headless Chromium) logs into `app.hedgeye.com`, polls the feed every 15 minutes, fetches full article content for new items, then classifies each one.
+**Scraper thread** (`scraper.py`) — Playwright (headless Chromium) logs into `app.hedgeye.com` with email/password, polls the feed every 15 minutes, fetches full article content for new items, then classifies each one. Anti-automation flags (`--disable-blink-features=AutomationControlled`) and a `navigator.webdriver` override are applied to reduce reCAPTCHA friction. If a reCAPTCHA challenge is detected, the bot sends a Pushover alert and stops.
 
 **Email thread** (`email_parser.py`) — Connects to iCloud IMAP (`imap.mail.me.com:993`) using an app-specific password, polls every 15 minutes for unread messages from `hedgeye.com` / `tier1alpha.com`, parses and classifies each one.
 
 Both threads share the same pipeline:
 ```
-raw item dict → classify_and_extract() → save_item() → send_text() [if high-conviction]
+raw item dict → classify_and_extract() → save_item() → send_notification() [if high-conviction]
 ```
 
 **Classifier** (`classifier.py`) — Sends content to `claude-sonnet-4-20250514` with a strict JSON-only system prompt. Returns a structured dict with `classified_type`, `tickers[]`, `conviction`, `macro_regime`, `spx_levels`, etc. The full model response is merged directly into the item dict.
 
 **Database** (`database.py`) — SQLite at `DB_PATH` (default `/data/hedgeye.db`). Three tables: `items` (all content), `signals` (per-ticker rows extracted from items), `morning_briefs` (deduplication for daily brief). `init_db()` runs on import.
 
-**Notifier** (`notifier.py`) — Wraps Twilio; truncates messages at 1600 chars.
+**Notifier** (`notifier.py`) — Pushover via stdlib `urllib`; truncates at 1024 chars.
 
 ## Alert logic
 
@@ -62,7 +62,7 @@ raw item dict → classify_and_extract() → save_item() → send_text() [if hig
 
 | Variable | Purpose |
 |---|---|
-| `HEDGEYE_COOKIE` | Full cookie string from authenticated browser session (see below) |
+| `HEDGEYE_EMAIL` / `HEDGEYE_PASSWORD` | Portal login credentials |
 | `ICLOUD_EMAIL` / `ICLOUD_APP_PASSWORD` | IMAP (app-specific password, not your Apple ID password) |
 | `ANTHROPIC_API_KEY` | Claude API |
 | `PUSHOVER_TOKEN` | Pushover application API token |
@@ -71,17 +71,6 @@ raw item dict → classify_and_extract() → save_item() → send_text() [if hig
 | `SCRAPE_INTERVAL_SECONDS` | Portal poll interval (default `900`) |
 | `EMAIL_CHECK_INTERVAL` | Email poll interval (default `900`) |
 | `MORNING_BRIEF_HOUR` | Hour to send brief (default `7`) |
-
-## Getting the Hedgeye session cookie
-
-The scraper can't log in automatically (reCAPTCHA blocks headless browsers), so it reuses your authenticated browser session:
-
-1. Log into [app.hedgeye.com](https://app.hedgeye.com) in Chrome/Safari
-2. Open DevTools → Network tab → click any request to `app.hedgeye.com`
-3. Under **Request Headers**, find `Cookie:` and copy the entire value
-4. Set `HEDGEYE_COOKIE=<pasted value>` in Railway variables
-
-When the cookie expires the bot will send a Pushover alert telling you to refresh it.
 
 ## Common modifications
 
