@@ -34,6 +34,10 @@ def check_env():
 if __name__ == "__main__":
     check_env()
 
+    from notifier import send_notification
+    send_notification("Hedgeye Bot Online", title="Hedgeye Bot")
+    log.info("Startup notification sent.")
+
     from email_parser import run_email_loop
     log.info("Hedgeye bot running — email parser only.")
     run_email_loop()
