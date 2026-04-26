@@ -251,21 +251,13 @@ def run_email_loop():
             new_emails = fetch_new_hedgeye_emails(conn, seen_ids)
 
             if new_emails:
-                log.info(f"Found {len(new_emails)} new Hedgeye emails")
+                log.info(f"Found {len(new_emails)} new Hedgeye email(s) — notifying and classifying...")
                 for item in new_emails:
-                    log.info(f"  Processing: {item['title'][:70]}")
+                    log.info(f"  Sending notification: {item['title'][:70]}")
+                    send_notification(item["body"], title=item["subject"])
+
                     item = classify_and_extract(item)
                     save_item(item)
-
-                    # Immediate alert for trade signals
-                    if item.get("classified_type") == "trade_signal" and item.get("action_required"):
-                        tickers = item.get("tickers", [])
-                        if tickers:
-                            ticker_str = ", ".join(
-                                f"{t.get('direction','Long')} {t.get('ticker','?')} ({t.get('conviction','')})"
-                                for t in tickers[:3]
-                            )
-                            send_notification(f"🚨 Hedgeye signal via email:\n{ticker_str}\n\n{item.get('summary','')[:120]}")
             else:
                 log.info("No new Hedgeye emails.")
 
