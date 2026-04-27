@@ -15,8 +15,8 @@ PUSHOVER_USER  = os.environ["PUSHOVER_USER"]
 PUSHOVER_URL   = "https://api.pushover.net/1/messages.json"
 
 
-def send_notification(message: str, title: str = "Hedgeye Bot"):
-    """Send a push notification via Pushover."""
+def send_pushover(title: str, message: str):
+    """Send a Pushover notification. Title-first for natural call sites."""
     payload = urllib.parse.urlencode({
         "token":   PUSHOVER_TOKEN,
         "user":    PUSHOVER_USER,
@@ -27,6 +27,11 @@ def send_notification(message: str, title: str = "Hedgeye Bot"):
     try:
         req = urllib.request.Request(PUSHOVER_URL, data=payload, method="POST")
         with urllib.request.urlopen(req, timeout=10) as resp:
-            log.info(f"Pushover notification sent (status {resp.status}).")
+            log.info(f"Pushover sent (status {resp.status}): {title!r}")
     except Exception as e:
         log.error(f"Pushover send failed: {e}")
+
+
+def send_notification(message: str, title: str = "Hedgeye Bot"):
+    """Backward-compat alias — prefer send_pushover(title, message)."""
+    return send_pushover(title, message)
