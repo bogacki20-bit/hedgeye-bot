@@ -26,12 +26,10 @@ IMAP_HOST       = "imap.mail.me.com"
 IMAP_PORT       = 993
 CHECK_INTERVAL  = int(os.getenv("EMAIL_CHECK_INTERVAL", "900"))  # 15 min
 
-HEDGEYE_SENDERS = [
-    "hedgeye.com",
-    "tier1alpha.com",
-    "email.hedgeye.com",
-    "url63.hedgeye.com"
-]
+# Substring keywords. Match anything from any *.hedgeye.* or *.tier1alpha.*
+# subdomain so we never silently drop a legitimate sender that the IMAP
+# search picked up but a hardcoded domain list missed.
+HEDGEYE_KEYWORDS = ["hedgeye", "tier1alpha"]
 
 
 class HTMLTextExtractor(HTMLParser):
@@ -117,18 +115,19 @@ def html_to_text(html: str) -> str:
 
 
 def is_hedgeye_sender(from_addr: str) -> bool:
-    """Check if email is from Hedgeye."""
-    from_lower = from_addr.lower()
-    return any(domain in from_lower for domain in HEDGEYE_SENDERS)
+    """Permissive substring match — anything containing 'hedgeye' or 'tier1alpha'."""
+    from_lower = (from_addr or "").lower()
+    return any(kw in from_lower for kw in HEDGEYE_KEYWORDS)
 
 
 def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
-    """Parse raw email bytes into structured item dict."""
+    """Parse raw email bytes into structured item dict. Logs reason on drop."""
     try:
         msg = email.message_from_bytes(raw_bytes)
 
         from_addr = decode_mime_header(msg.get("From", ""))
         if not is_hedgeye_sender(from_addr):
+            log.warning(f"  [{uid}] dropped — sender {from_addr!r} not a Hedgeye keyword match")
             return None
 
         subject   = decode_mime_header(msg.get("Subject", ""))
@@ -140,11 +139,10 @@ def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
             timestamp = datetime.now(timezone.utc).isoformat()
 
         plain, html = extract_body(msg)
-
-        # Prefer plain text; fall back to stripped HTML
         body = plain.strip() if plain.strip() else html_to_text(html)
 
         if len(body) < 20:
+            log.warning(f"  [{uid}] dropped — body too short ({len(body)} chars), subject={subject!r}")
             return None
 
         return {
@@ -158,7 +156,7 @@ def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
         }
 
     except Exception as e:
-        log.error(f"Error parsing email uid={uid}: {e}")
+        log.error(f"  [{uid}] parse error: {e}")
         return None
 
 
