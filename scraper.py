@@ -11,7 +11,7 @@ import hashlib
 from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from classifier import classify_and_extract
-from notifier import send_notification
+from notifier import send_pushover
 from database import save_item, get_seen_ids, mark_morning_brief_sent, was_morning_brief_sent
 
 logging.basicConfig(
@@ -84,7 +84,7 @@ def _handle_login_failure(page):
             "Try reducing SCRAPE_INTERVAL_SECONDS or check Railway logs."
         )
         log.error("reCAPTCHA detected on login page.")
-        send_notification(msg)
+        send_pushover("Hedgeye Bot — reCAPTCHA", msg)
         raise RuntimeError("reCAPTCHA blocked login")
 
     error_el = page.query_selector(".alert, .flash-error, #error_explanation")
@@ -260,15 +260,15 @@ def main():
                 for item in new_items:
                     if item.get("classified_type") == "trade_signal" and \
                        item.get("conviction") in ("Best Idea", "Adding"):
-                        send_notification(
-                            f"🚨 Hedgeye Signal\n"
+                        send_pushover(
+                            "Hedgeye Signal",
                             f"{item.get('direction','Long')} {item.get('ticker','?')} "
                             f"— {item.get('conviction','')}\n"
                             f"{item.get('summary','')[:100]}"
                         )
 
                 if should_send_morning_brief():
-                    send_notification(build_morning_brief(overnight_items))
+                    send_pushover("Hedgeye Morning Brief", build_morning_brief(overnight_items))
                     mark_morning_brief_sent(datetime.now().date())
                     overnight_items = []
                     log.info("Morning brief sent.")
