@@ -22,16 +22,51 @@
 
 ---
 
-## Step 2 — Get a free Twilio account (for texts)
+## Step 2 — Set up Pushover (for phone notifications)
 
-1. Go to https://twilio.com and click **Sign up free**
-2. Verify your phone number
-3. On your dashboard you'll see:
-   - **Account SID** — copy this
-   - **Auth Token** — copy this
-4. Click **Get a phone number** — this is the number that will text you
-5. Copy that number too
-6. Paste all three into your `.env` file
+Pushover is a push-notification service. The bot uses it to alert you on
+your phone whenever a Hedgeye email arrives, with a sized trade
+recommendation for high-conviction signals.
+
+1. **Create a Pushover account.** Go to https://pushover.net and click
+   **Login or Signup** → **Signup**. Free; verify your email address.
+
+2. **Install the Pushover app on your phone.** It's a one-time $5 license
+   per platform (iOS or Android), unlocked after the 30-day free trial.
+   - iOS:     https://apps.apple.com/app/pushover-notifications/id506088175
+   - Android: https://play.google.com/store/apps/details?id=net.superblock.pushover
+
+   Sign in with the account you just created. Your phone is now registered
+   to receive notifications.
+
+3. **Copy your User Key.** Once logged into pushover.net, your **User Key**
+   is shown in a box at the top-right of the dashboard — a 30-character
+   string. Copy it. This is `PUSHOVER_USER`.
+
+4. **Create an Application/API Token.**
+   - On the dashboard, scroll to **Your Applications** → click
+     **Create an Application/API Token**.
+   - Name it `Hedgeye Bot`. Type can stay as **Application**.
+   - Accept the terms and click **Create Application**.
+   - The next page shows your **API Token/Key** — another 30-character
+     string. Copy it. This is `PUSHOVER_TOKEN`.
+
+5. **Add both values to Railway.**
+   - Open https://railway.app and select your project → service.
+   - Click the **Variables** tab.
+   - Click **+ New Variable** and add:
+     ```
+     PUSHOVER_USER=<your user key from Step 3>
+     PUSHOVER_TOKEN=<your api token from Step 4>
+     ```
+   - Click **Add** for each. Railway will redeploy automatically.
+
+   On startup the bot sends a test ping titled **"Hedgeye Bot"** with the
+   message **"Bot started on Railway. Pushover OK."** — if it lands on
+   your phone, both values are correct.
+
+   (If you also keep a local `.env` for development, add the same two
+   lines there.)
 
 ---
 
@@ -51,7 +86,6 @@ Open `.env.example`, rename it to `.env`, and fill in:
 - `HEDGEYE_EMAIL` — your Hedgeye login email
 - `HEDGEYE_PASSWORD` — your Hedgeye password
 - `ICLOUD_EMAIL` — Bogacki20@icloud.com
-- `ALERT_PHONE_NUMBER` — your cell (e.g. +12035551234)
 
 ---
 
@@ -124,6 +158,6 @@ app.hedgeye.com
 
 ## Cost estimate (monthly)
 - Railway: ~$5/mo (Hobby plan)
-- Twilio: ~$1/mo for texts + $1/mo phone number
+- Pushover: free for the first 10,000 notifications/month, then a one-time $5 license fee per platform (iOS/Android)
 - Anthropic API: ~$3-8/mo depending on volume (35-50 emails/day × ~$0.003 each)
 - **Total: ~$10-15/month**
