@@ -6,6 +6,8 @@ import logging
 import sys
 import os
 
+from telegram_handler import start_telegram_listener
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
@@ -22,6 +24,8 @@ def check_env():
         "ANTHROPIC_API_KEY",
         "PUSHOVER_TOKEN",
         "PUSHOVER_USER",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
     ]
     missing = [k for k in required if not os.getenv(k)]
     if missing:
@@ -40,5 +44,6 @@ if __name__ == "__main__":
 
     from email_parser import init_processed_table, run_email_loop
     init_processed_table()
+    start_telegram_listener()
     log.info("Hedgeye bot running — email parser only.")
     run_email_loop()
