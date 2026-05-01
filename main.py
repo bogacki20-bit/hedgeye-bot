@@ -9,32 +9,31 @@ import os
 from telegram_handler import start_telegram_listener
 
 logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)]
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
-
 log = logging.getLogger(__name__)
 
 
 def check_env():
-        required = [
-                    "ICLOUD_EMAIL",
-                    "ICLOUD_APP_PASSWORD",
-                    "ANTHROPIC_API_KEY",
-                    "TELEGRAM_BOT_TOKEN",
-                    "TELEGRAM_CHAT_ID",
-        ]
-        missing = [k for k in required if not os.getenv(k)]
-        if missing:
-                    log.error(f"Missing environment variables: {', '.join(missing)}")
-                    log.error("Create a .env file with these values. See .env.example")
-                    sys.exit(1)
-                log.info("All environment variables present.")
+    required = [
+        "ICLOUD_EMAIL",
+        "ICLOUD_APP_PASSWORD",
+        "ANTHROPIC_API_KEY",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+    ]
+    missing = [k for k in required if not os.getenv(k)]
+    if missing:
+        log.error(f"Missing environment variables: {', '.join(missing)}")
+        log.error("Create a .env file with these values. See .env.example")
+        sys.exit(1)
+    log.info("All environment variables present.")
 
 
 if __name__ == "__main__":
-        check_env()
+    check_env()
 
     from notifier import send_telegram
     send_telegram("Hedgeye Bot", "Bot started on Railway. Telegram OK.")
@@ -45,5 +44,4 @@ if __name__ == "__main__":
 
     start_telegram_listener()
     log.info("Hedgeye bot running — email parser only.")
-
     run_email_loop()
