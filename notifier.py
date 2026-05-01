@@ -4,23 +4,41 @@ import requests
 
 log = logging.getLogger("notifier")
 
-def send_pushover(title, message, priority=1):
-    """Send a Pushover notification. Returns True on success."""
+TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+
+
+def send_telegram(title, message, priority=1):
+        """
+            Send a Telegram notification. Returns True on success.
+
+                The priority argument is accepted for backwards compatibility with the
+                    old Pushover signature but is ignored — Telegram has no priority levels.
+                        """
+        token   = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+                log.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; cannot send.")
+                return False
+
+    text = f"*{title}*\n\n{message}" if title else message
+
     try:
-        response = requests.post(
-            "https://api.pushover.net/1/messages.json",
-            data={
-                "token": os.environ["PUSHOVER_TOKEN"],
-                "user": os.environ["PUSHOVER_USER"],
-                "title": title,
-                "message": message,
-                "priority": priority,
-            },
-            timeout=10
-        )
-        response.raise_for_status()
-        log.info(f"Pushover sent: {title}")
-        return True
-    except Exception as e:
-        log.error(f"Pushover failed: {e}")
-        return False
+                response = requests.post(
+                                TELEGRAM_API.format(token=token),
+                                data={
+                                                    "chat_id":    chat_id,
+                                                    "text":       text,
+                                                    "parse_mode": "Markdown",
+                                },
+                                timeout=10,
+                )
+                response.raise_for_status()
+                log.info(f"Telegram sent: {title}")
+                return True
+except Exception as e:
+            log.error(f"Telegram send failed: {e}")
+            return False
+
+
+send_pushover = send_telegram
