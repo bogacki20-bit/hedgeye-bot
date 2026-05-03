@@ -1,15 +1,28 @@
 """
-iCloud Email Parser
-Connects to iCloud IMAP, watches for Hedgeye emails, classifies them,
-and pushes notifications. Dedupes via a dedicated processed_emails
-SQLite table keyed by IMAP UID.
+iCloud Email Parser — Postgres email-lake edition.
+
+Connects to iCloud IMAP, watches for Hedgeye emails, saves the raw email
+verbatim into hedgeye_emails_raw (the email lake), classifies the content
+for immediate Telegram notification, and (for trade signals) hands off to
+the recommender.
+
+Dedup is now via hedgeye_emails_raw.message_id (RFC 5322 Message-ID) with
+ON CONFLICT DO NOTHING — the SQLite processed_emails table is no longer used.
+
+The classifier output is intentionally NOT persisted into typed tables here.
+That's the job of dedicated parsers running over the lake (Risk Range parser,
+ETF Pro parser, Quad Nowcast parser, etc.). This module's job is:
+  - get the email
+  - put the bytes in the lake
+  - fire the immediate notification
+  - call the recommender for trade signals (recommender still writes to SQLite
+    trade_recommendations for now; that migration is queued separately)
 
 Environment:
   BACKFILL_MODE = off | silent | notify
-    off    (default) — normal operation, Pushover for every new email
-    silent           — process and store everything, NO Pushover
-    notify           — process AND Pushover (use sparingly; can flood)
-
+    off    (default) — normal operation, Telegram for every new email
+    silent           — process and store everything, NO Telegram
+    notify           — process AND Telegram (use sparingly; can flood)
   EMAIL_CHECK_INTERVAL — poll interval in seconds (default 900 / 15 min)
 """
 
@@ -19,14 +32,14 @@ import email
 import time
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 
 from classifier import classify_and_extract
 from notifier import send_pushover
-from database import save_item, get_conn
+import db_pg
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +49,7 @@ IMAP_HOST       = "imap.mail.me.com"
 IMAP_PORT       = 993
 CHECK_INTERVAL  = int(os.getenv("EMAIL_CHECK_INTERVAL", "900"))
 
-LOOKBACK_DAYS   = 90
+LOOKBACK_DAYS   = int(os.getenv("EMAIL_LOOKBACK_DAYS", "90"))
 BACKFILL_MODE   = os.environ.get("BACKFILL_MODE", "off").lower()
 
 # Substring keywords for the IMAP FROM search and the post-fetch sender check.
@@ -44,38 +57,7 @@ BACKFILL_MODE   = os.environ.get("BACKFILL_MODE", "off").lower()
 HEDGEYE_KEYWORDS = ["hedgeye.com", "tier1alpha"]
 
 
-# ───────────────── SQLite dedup helpers ─────────────────
-
-def init_processed_table():
-    """Create processed_emails (idempotent). Keyed by IMAP UID."""
-    with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS processed_emails (
-                uid           TEXT PRIMARY KEY,
-                subject       TEXT,
-                sender        TEXT,
-                processed_at  TEXT DEFAULT (datetime('now'))
-            )
-        """)
-
-
-def is_processed(uid: str) -> bool:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM processed_emails WHERE uid = ?", (uid,)
-        ).fetchone()
-        return row is not None
-
-
-def mark_processed(uid: str, subject: str = "", sender: str = ""):
-    with get_conn() as conn:
-        conn.execute("""
-            INSERT OR IGNORE INTO processed_emails (uid, subject, sender)
-            VALUES (?, ?, ?)
-        """, (uid, subject, sender))
-
-
-# ───────────────── Email parsing ─────────────────
+# ───────────────── Email body parsing ─────────────────
 
 class HTMLTextExtractor(HTMLParser):
     """Strip HTML tags and return plain text."""
@@ -153,13 +135,62 @@ def html_to_text(html: str) -> str:
 
 
 def is_hedgeye_sender(from_addr: str) -> bool:
-    """Match any sender containing one of the HEDGEYE_KEYWORDS."""
     from_lower = (from_addr or "").lower()
     return any(kw in from_lower for kw in HEDGEYE_KEYWORDS)
 
 
+def detect_teaser(html: str, text: str) -> tuple[str, str | None]:
+    """
+    Heuristic: is this a teaser email (with a "click here to read full report"
+    link) or does it contain the full content?
+
+    Returns (content_status, full_report_url):
+      content_status: 'complete' | 'teaser' | 'unknown'
+      full_report_url: the URL of the linked full report, if detected
+    """
+    if not html and not text:
+        return "unknown", None
+    body = (html or "") + " " + (text or "")
+    body_lower = body.lower()
+
+    # Common teaser phrases
+    teaser_phrases = [
+        "click here to read",
+        "read the full",
+        "view the full",
+        "continue reading",
+        "read more",
+    ]
+    is_teaser = any(p in body_lower for p in teaser_phrases)
+
+    # Try to extract a hedgeye.com portal URL from anchor hrefs in the HTML
+    full_url = None
+    if html:
+        m = re.search(
+            r'<a[^>]+href=["\'](https?://[^"\']*hedgeye[^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        )
+        if m:
+            full_url = m.group(1)
+
+    if is_teaser and full_url:
+        return "teaser", full_url
+    if is_teaser:
+        return "teaser", None
+    # If we have substantial body content (>1000 chars after strip) and no
+    # teaser markers, treat as complete.
+    if len(body.strip()) > 1000:
+        return "complete", None
+    return "unknown", full_url
+
+
 def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
-    """Parse raw email bytes into structured item dict. Logs reason on drop."""
+    """Parse raw email bytes into a structured dict for the lake save.
+
+    Returns None if the email should be dropped (non-Hedgeye sender, body too
+    short, or unparseable).
+    """
     try:
         msg = email.message_from_bytes(raw_bytes)
 
@@ -168,13 +199,18 @@ def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
             log.warning(f"  [{uid}] dropped — sender {from_addr!r} not a Hedgeye keyword match")
             return None
 
+        # Message-ID is the RFC 5322 globally-unique id. Strip surrounding < >.
+        raw_msg_id = decode_mime_header(msg.get("Message-ID", "")).strip().strip("<>")
+        message_id = raw_msg_id if raw_msg_id else f"imap_uid_{uid}"
+
         subject  = decode_mime_header(msg.get("Subject", ""))
         date_str = msg.get("Date", "")
         try:
-            timestamp = parsedate_to_datetime(date_str).isoformat()
+            received_at = parsedate_to_datetime(date_str)
+            if received_at is None:
+                received_at = datetime.now(timezone.utc)
         except Exception:
-            from datetime import timezone
-            timestamp = datetime.now(timezone.utc).isoformat()
+            received_at = datetime.now(timezone.utc)
 
         plain, html = extract_body(msg)
         body = plain.strip() if plain.strip() else html_to_text(html)
@@ -183,14 +219,21 @@ def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
             log.warning(f"  [{uid}] dropped — body too short ({len(body)} chars), subject={subject!r}")
             return None
 
+        content_status, full_url = detect_teaser(html, plain)
+
         return {
-            "id":        f"email_{uid}",
-            "title":     subject,
-            "subject":   subject,
-            "body":      body[:4000],
-            "from":      from_addr,
-            "timestamp": timestamp,
-            "source":    "email",
+            "message_id":      message_id,
+            "imap_uid":        uid,
+            "sender":          from_addr,
+            "subject":         subject,
+            "received_at":     received_at,
+            "html_body":       html or None,
+            "text_body":       plain or None,
+            "full_report_url": full_url,
+            "content_status":  content_status,
+            "raw_size_bytes":  len(raw_bytes),
+            # Convenience fields used by classifier/recommender (in-memory only)
+            "_body_for_classifier": body[:4000],
         }
 
     except Exception as e:
@@ -210,12 +253,7 @@ def connect_imap() -> imaplib.IMAP4_SSL:
 
 
 def check_email(conn: imaplib.IMAP4_SSL) -> int:
-    """
-    One polling cycle. Searches by SINCE date (LOOKBACK_DAYS), uses the
-    processed_emails SQLite table for dedup, and respects BACKFILL_MODE
-    when deciding whether to send Pushover.
-    Returns the number of newly processed emails.
-    """
+    """One polling cycle. Returns the number of newly-saved emails this cycle."""
     since = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
     candidate_uids: set[bytes] = set()
 
@@ -230,12 +268,12 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
     log.info(f"Email check: {len(candidate_uids)} candidate(s) since {since} "
              f"(BACKFILL_MODE={BACKFILL_MODE})")
 
-    processed_count = 0
+    new_count = 0
 
     for uid in sorted(candidate_uids):
         uid_str = uid.decode()
 
-        # Cheap header fetch so we log every email we see, even skipped ones
+        # Cheap header peek for logging context
         from_addr, subject = "", ""
         try:
             _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT)])")
@@ -246,13 +284,8 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
         except Exception as e:
             log.warning(f"  [{uid_str}] could not fetch headers: {e}")
 
-        if is_processed(uid_str):
-            log.info(f"  [{uid_str}] skip (already processed) | from={from_addr!r} | subject={subject[:70]!r}")
-            continue
-
-        log.info(f"  [{uid_str}] NEW | from={from_addr!r} | subject={subject[:70]!r}")
-
-        # Fetch full message
+        # Fetch the full message and try to insert into the lake. ON CONFLICT
+        # DO NOTHING means already-seen message_ids are silently skipped.
         try:
             _, raw = conn.fetch(uid, "(RFC822)")
             if not raw or not raw[0]:
@@ -262,53 +295,88 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
             if not raw_bytes:
                 continue
 
-            item = parse_email_message(raw_bytes, uid_str)
-            if not item:
-                # parse_email_message already logged the reason; mark processed
-                # so we don't keep reprocessing the same drop every 15 min.
-                mark_processed(uid_str, subject=subject, sender=from_addr)
+            parsed = parse_email_message(raw_bytes, uid_str)
+            if not parsed:
+                continue  # logged already
+
+            inserted = db_pg.save_raw_email(
+                message_id      = parsed["message_id"],
+                sender          = parsed["sender"],
+                subject         = parsed["subject"],
+                received_at     = parsed["received_at"],
+                html_body       = parsed["html_body"],
+                text_body       = parsed["text_body"],
+                imap_uid        = parsed["imap_uid"],
+                full_report_url = parsed["full_report_url"],
+                content_status  = parsed["content_status"],
+                raw_size_bytes  = parsed["raw_size_bytes"],
+            )
+
+            if not inserted:
+                log.info(f"  [{uid_str}] skip (already in lake) | subject={subject[:70]!r}")
                 continue
 
-            _process_item(item)
-            mark_processed(uid_str, subject=item["subject"], sender=item["from"])
-            processed_count += 1
+            log.info(f"  [{uid_str}] NEW → lake | from={from_addr!r} | "
+                     f"subject={subject[:70]!r} | status={parsed['content_status']}")
+            new_count += 1
+            _process_new_email(parsed)
 
         except Exception as e:
             log.error(f"  [{uid_str}] fetch/process error: {e}")
 
-    if BACKFILL_MODE in ("silent", "notify") and processed_count > 0:
-        log.info(f"BACKFILL COMPLETE — processed {processed_count} email(s) this cycle "
-                 f"(mode={BACKFILL_MODE})")
+    if BACKFILL_MODE in ("silent", "notify") and new_count > 0:
+        log.info(f"BACKFILL CYCLE COMPLETE — {new_count} new email(s) (mode={BACKFILL_MODE})")
 
-    return processed_count
+    return new_count
 
 
-def _process_item(item: dict):
-    """Classify, save, and (mode-permitting) push notifications."""
+def _process_new_email(parsed: dict) -> None:
+    """For a freshly-saved email, run classifier + notifier + recommender.
+
+    Classifier output is used in-memory for the immediate alert path. It is
+    NOT persisted into typed tables here — that's the job of dedicated parsers
+    that walk the lake separately (Risk Range parser, etc.).
+    """
     notify = BACKFILL_MODE != "silent"
+
+    item = {
+        "id":        parsed["message_id"],   # used downstream as signal_item_id
+        "title":     parsed["subject"],
+        "subject":   parsed["subject"],
+        "body":      parsed["_body_for_classifier"],
+        "from":      parsed["sender"],
+        "timestamp": parsed["received_at"].isoformat(),
+        "source":    "email",
+    }
 
     if notify:
         send_pushover(item["subject"] or "Hedgeye email", item["body"])
 
-    item = classify_and_extract(item)
-    save_item(item)
+    try:
+        item = classify_and_extract(item)
+    except Exception as e:
+        log.error(f"  classifier error on {parsed['message_id']}: {e}")
+        return
 
     if item.get("classified_type") == "trade_signal" and item.get("ticker"):
-        from recommender import recommend_from_signal, format_for_pushover
-        rec = recommend_from_signal(item)
-        if rec and notify:
-            title, msg = format_for_pushover(rec)
-            send_pushover(title, msg)
-            log.info(f"  Recommendation #{rec['id']}: {rec['action']} {rec['ticker']}")
-        elif rec:
-            log.info(f"  Recommendation #{rec['id']} (silent): {rec['action']} {rec['ticker']}")
+        # Recommender migration deferred to a separate task — both
+        # `portfolio.py` and `recommender.py` still talk to the (now
+        # abandoned) SQLite DB and need their own focused port to db_pg.
+        # Until then, the raw trade-signal email body is still pushed to
+        # Telegram by the send_pushover call above; we just don't generate
+        # the sized "BUY $X SPY in IRA" recommendation message yet.
+        log.info(
+            f"  trade_signal detected: {item.get('direction', '?')} "
+            f"{item.get('ticker')} (conviction={item.get('conviction', '?')!r}) "
+            f"— sized recommendation deferred (recommender migration pending)"
+        )
 
 
 # ───────────────── Main loop ─────────────────
 
 def run_email_loop():
-    log.info(f"Starting iCloud email parser — LOOKBACK_DAYS={LOOKBACK_DAYS}, BACKFILL_MODE={BACKFILL_MODE}")
-    init_processed_table()
+    log.info(f"Starting iCloud email parser — LOOKBACK_DAYS={LOOKBACK_DAYS}, "
+             f"BACKFILL_MODE={BACKFILL_MODE}")
     conn = None
 
     while True:
