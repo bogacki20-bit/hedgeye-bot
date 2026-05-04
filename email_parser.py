@@ -341,9 +341,15 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
         log.info(f"  [{uid_str}] NEW | from={from_addr!r} | subject={subject[:60]!r}")
 
         # Fetch the full message and insert into the lake.
+        # NOTE: Use BODY.PEEK[] not RFC822 — iCloud IMAP silently rejects the
+        # legacy RFC822 data item (returns "UID ()" with zero attributes). The
+        # modern BODY.PEEK[] spec returns the full message body and is honored
+        # by iCloud (and is non-destructive — doesn't set the \Seen flag, so
+        # the user's mail client doesn't show these emails as read by the bot).
+        # Diagnosed 2026-05-03 via the explicit empty_raw_bytes log line.
         try:
             log.info(f"  [{uid_str}] full body fetch...")  # heartbeat
-            _, raw = conn.fetch(uid, "(RFC822)")
+            _, raw = conn.fetch(uid, "(BODY.PEEK[])")
             full_fetches_done += 1
 
             if not raw or not raw[0]:
