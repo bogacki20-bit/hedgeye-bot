@@ -29,7 +29,7 @@ Environment:
 import os
 import imaplib
 import email
-import socket
+import threading
 import time
 import logging
 import re
@@ -38,16 +38,51 @@ from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 
-# Apply a global socket timeout BEFORE any IMAP connection is opened. This
-# catches stalled reads inside imaplib's internal recv loop on the SSL-wrapped
-# socket — a problem the IMAP4_SSL(timeout=...) constructor kwarg alone does
-# NOT solve (confirmed 2026-05-03 second-hang incident). Belt-and-suspenders:
-# both this default and the constructor kwarg below.
-socket.setdefaulttimeout(60)
-
 from classifier import classify_and_extract
 from notifier import send_pushover
 import db_pg
+
+
+# ─── IMAP fetch deadline helper ─────────────────────────────────────────────
+# 2026-05-03 incidents: iCloud IMAP can silently hang individual fetches with
+# no error and no log output. Two prior attempts to fix via socket-level
+# timeouts failed:
+#   - IMAP4_SSL(timeout=60) constructor kwarg alone — bot still hung silently.
+#   - socket.setdefaulttimeout(60) globally — broke SSL with BAD_LENGTH errors.
+# This third approach uses an application-level deadline that doesn't touch
+# socket flags: a threading.Timer that calls conn.shutdown() if a fetch runs
+# longer than the deadline. The blocked fetch then sees the socket close and
+# raises an OSError, which the existing try/except catches and reconnects.
+class IMAPFetchDeadline:
+    """Context manager that closes the IMAP connection if it doesn't return in time."""
+    def __init__(self, conn, seconds: int = 30):
+        self.conn = conn
+        self.seconds = seconds
+        self.timer: threading.Timer | None = None
+        self.fired = False
+
+    def _fire(self):
+        self.fired = True
+        try:
+            # Calling shutdown() on imaplib unblocks the fetch by closing the socket.
+            self.conn.shutdown()
+        except Exception:
+            pass  # best effort — socket may already be torn
+
+    def __enter__(self):
+        self.timer = threading.Timer(self.seconds, self._fire)
+        self.timer.daemon = True
+        self.timer.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.timer is not None:
+            self.timer.cancel()
+        # If we fired the deadline, raise so the outer try/except handles it.
+        # Don't suppress an existing exception.
+        if self.fired and exc_type is None:
+            raise TimeoutError(f"IMAP fetch exceeded {self.seconds}s deadline")
+        return False
 
 log = logging.getLogger(__name__)
 
@@ -288,25 +323,43 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
 
     for uid in sorted(candidate_uids):
         uid_str = uid.decode()
-        log.info(f"  [{uid_str}] start")  # heartbeat — proves the loop is iterating
 
-        # Cheap header peek for logging context
-        from_addr, subject = "", ""
+        # Cheap header peek including Message-ID, so we can dedup BEFORE the
+        # expensive full-body fetch. This is the structural fix that prevents
+        # blasting iCloud with 1500+ full RFC822 fetches on a fresh lake.
+        from_addr, subject, msg_id = "", "", ""
         try:
-            log.info(f"  [{uid_str}] fetching headers...")  # heartbeat before potentially-hanging fetch
-            _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT)])")
-            hdr_bytes   = hdr_data[0][1] if hdr_data and isinstance(hdr_data[0], tuple) else b""
-            hdr_msg     = email.message_from_bytes(hdr_bytes)
-            from_addr   = decode_mime_header(hdr_msg.get("From", ""))
-            subject     = decode_mime_header(hdr_msg.get("Subject", "(no subject)"))
+            log.info(f"  [{uid_str}] header peek...")  # heartbeat
+            with IMAPFetchDeadline(conn, seconds=30):
+                _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)])")
+            hdr_bytes = hdr_data[0][1] if hdr_data and isinstance(hdr_data[0], tuple) else b""
+            hdr_msg   = email.message_from_bytes(hdr_bytes)
+            from_addr = decode_mime_header(hdr_msg.get("From", ""))
+            subject   = decode_mime_header(hdr_msg.get("Subject", "(no subject)"))
+            msg_id    = decode_mime_header(hdr_msg.get("Message-ID", "")).strip().strip("<>")
         except Exception as e:
-            log.warning(f"  [{uid_str}] could not fetch headers: {e}")
+            log.warning(f"  [{uid_str}] header peek failed ({e}) — skipping")
+            # If header peek fails, mostly likely the connection is dead.
+            # Bubble it up so the outer loop reconnects.
+            raise
 
-        # Fetch the full message and try to insert into the lake. ON CONFLICT
-        # DO NOTHING means already-seen message_ids are silently skipped.
+        # Sender filter (cheap, before any further work)
+        if not is_hedgeye_sender(from_addr):
+            log.info(f"  [{uid_str}] skip — non-Hedgeye sender {from_addr!r}")
+            continue
+
+        # Lake dedup BEFORE the expensive full fetch
+        if msg_id and db_pg.is_email_seen(msg_id):
+            log.info(f"  [{uid_str}] skip (already in lake) | subject={subject[:60]!r}")
+            continue
+
+        log.info(f"  [{uid_str}] NEW | from={from_addr!r} | subject={subject[:60]!r}")
+
+        # Fetch the full message and insert into the lake.
         try:
-            log.info(f"  [{uid_str}] fetching full message...")  # heartbeat
-            _, raw = conn.fetch(uid, "(RFC822)")
+            log.info(f"  [{uid_str}] full body fetch...")  # heartbeat
+            with IMAPFetchDeadline(conn, seconds=60):
+                _, raw = conn.fetch(uid, "(RFC822)")
             if not raw or not raw[0]:
                 log.warning(f"  [{uid_str}] empty fetch result")
                 continue
