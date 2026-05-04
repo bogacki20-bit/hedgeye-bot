@@ -29,6 +29,7 @@ Environment:
 import os
 import imaplib
 import email
+import socket
 import time
 import logging
 import re
@@ -36,6 +37,13 @@ from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+
+# Apply a global socket timeout BEFORE any IMAP connection is opened. This
+# catches stalled reads inside imaplib's internal recv loop on the SSL-wrapped
+# socket — a problem the IMAP4_SSL(timeout=...) constructor kwarg alone does
+# NOT solve (confirmed 2026-05-03 second-hang incident). Belt-and-suspenders:
+# both this default and the constructor kwarg below.
+socket.setdefaulttimeout(60)
 
 from classifier import classify_and_extract
 from notifier import send_pushover
@@ -280,10 +288,12 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
 
     for uid in sorted(candidate_uids):
         uid_str = uid.decode()
+        log.info(f"  [{uid_str}] start")  # heartbeat — proves the loop is iterating
 
         # Cheap header peek for logging context
         from_addr, subject = "", ""
         try:
+            log.info(f"  [{uid_str}] fetching headers...")  # heartbeat before potentially-hanging fetch
             _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (FROM SUBJECT)])")
             hdr_bytes   = hdr_data[0][1] if hdr_data and isinstance(hdr_data[0], tuple) else b""
             hdr_msg     = email.message_from_bytes(hdr_bytes)
@@ -295,6 +305,7 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
         # Fetch the full message and try to insert into the lake. ON CONFLICT
         # DO NOTHING means already-seen message_ids are silently skipped.
         try:
+            log.info(f"  [{uid_str}] fetching full message...")  # heartbeat
             _, raw = conn.fetch(uid, "(RFC822)")
             if not raw or not raw[0]:
                 log.warning(f"  [{uid_str}] empty fetch result")
