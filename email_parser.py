@@ -244,8 +244,16 @@ def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
 # ───────────────── IMAP fetch ─────────────────
 
 def connect_imap() -> imaplib.IMAP4_SSL:
+    """Connect to iCloud IMAP with a hard socket timeout.
+
+    The timeout applies to the underlying socket, so subsequent search/fetch
+    calls inherit it. Without this, a stalled iCloud server causes Python's
+    imaplib to block forever with no error and no log output (root cause of
+    the 2026-05-03 silent-hang incident — bot looked alive but processed
+    zero emails after the "Email check: N candidates" line).
+    """
     log.info("Connecting to iCloud IMAP...")
-    conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+    conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=60)
     conn.login(ICLOUD_EMAIL, ICLOUD_PASSWORD)
     conn.select("INBOX")
     log.info("IMAP connected.")
