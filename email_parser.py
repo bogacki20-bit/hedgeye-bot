@@ -29,7 +29,6 @@ Environment:
 import os
 import imaplib
 import email
-import threading
 import time
 import logging
 import re
@@ -42,48 +41,6 @@ from classifier import classify_and_extract
 from notifier import send_pushover
 import db_pg
 
-
-# ─── IMAP fetch deadline helper ─────────────────────────────────────────────
-# 2026-05-03 incidents: iCloud IMAP can silently hang individual fetches with
-# no error and no log output. Two prior attempts to fix via socket-level
-# timeouts failed:
-#   - IMAP4_SSL(timeout=60) constructor kwarg alone — bot still hung silently.
-#   - socket.setdefaulttimeout(60) globally — broke SSL with BAD_LENGTH errors.
-# This third approach uses an application-level deadline that doesn't touch
-# socket flags: a threading.Timer that calls conn.shutdown() if a fetch runs
-# longer than the deadline. The blocked fetch then sees the socket close and
-# raises an OSError, which the existing try/except catches and reconnects.
-class IMAPFetchDeadline:
-    """Context manager that closes the IMAP connection if it doesn't return in time."""
-    def __init__(self, conn, seconds: int = 30):
-        self.conn = conn
-        self.seconds = seconds
-        self.timer: threading.Timer | None = None
-        self.fired = False
-
-    def _fire(self):
-        self.fired = True
-        try:
-            # Calling shutdown() on imaplib unblocks the fetch by closing the socket.
-            self.conn.shutdown()
-        except Exception:
-            pass  # best effort — socket may already be torn
-
-    def __enter__(self):
-        self.timer = threading.Timer(self.seconds, self._fire)
-        self.timer.daemon = True
-        self.timer.start()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.timer is not None:
-            self.timer.cancel()
-        # If we fired the deadline, raise so the outer try/except handles it.
-        # Don't suppress an existing exception.
-        if self.fired and exc_type is None:
-            raise TimeoutError(f"IMAP fetch exceeded {self.seconds}s deadline")
-        return False
-
 log = logging.getLogger(__name__)
 
 ICLOUD_EMAIL    = os.environ["ICLOUD_EMAIL"]
@@ -94,6 +51,14 @@ CHECK_INTERVAL  = int(os.getenv("EMAIL_CHECK_INTERVAL", "900"))
 
 LOOKBACK_DAYS   = int(os.getenv("EMAIL_LOOKBACK_DAYS", "90"))
 BACKFILL_MODE   = os.environ.get("BACKFILL_MODE", "off").lower()
+
+# Cap the number of full-body fetches per cycle to avoid hammering iCloud IMAP
+# with 1500+ rapid-fire fetches when the lake is fresh. Header peeks (cheap)
+# are not capped — only full RFC822 fetches that actually pull the body.
+# Backfill of historical emails clears at MAX_FULL_FETCHES * 4 cycles/hour,
+# so 100/cycle = 400/hour means a 4-year archive backfills in days, a 90-day
+# lookback in hours.
+MAX_FULL_FETCHES_PER_CYCLE = int(os.getenv("MAX_FULL_FETCHES_PER_CYCLE", "100"))
 
 # Substring keywords for the IMAP FROM search and the post-fetch sender check.
 # IMAP FROM is substring-match, so "hedgeye.com" catches every user@hedgeye.com.
@@ -287,19 +252,33 @@ def parse_email_message(raw_bytes: bytes, uid: str) -> dict | None:
 # ───────────────── IMAP fetch ─────────────────
 
 def connect_imap() -> imaplib.IMAP4_SSL:
-    """Connect to iCloud IMAP with a hard socket timeout.
+    """Connect to iCloud IMAP with a hard socket timeout set POST-handshake.
 
-    The timeout applies to the underlying socket, so subsequent search/fetch
-    calls inherit it. Without this, a stalled iCloud server causes Python's
-    imaplib to block forever with no error and no log output (root cause of
-    the 2026-05-03 silent-hang incident — bot looked alive but processed
-    zero emails after the "Email check: N candidates" line).
+    History (2026-05-03):
+      - No timeout: imaplib blocks indefinitely on stalled iCloud reads.
+      - IMAP4_SSL(timeout=60) ctor kwarg: still hung silently — appears not to
+        propagate properly to the SSL-wrapped socket on the imaplib read path.
+      - socket.setdefaulttimeout(60) globally: corrupts SSL state mid-handshake
+        (BAD_LENGTH errors) — DO NOT use; SSL frames straddle timeout boundaries.
+      - threading.Timer that closes the socket: works for hangs but races with
+        in-flight reads, returning empty data without raising (silent drops).
+      - This approach: do the TLS handshake at default blocking timeout, then
+        AFTER login+select succeeds, set a recv timeout on the established
+        socket. Same thread, no race, SSL state is already settled so framing
+        is stable. Stalled fetches surface as socket.timeout (an OSError),
+        which the existing try/except catches and reconnects.
     """
     log.info("Connecting to iCloud IMAP...")
-    conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT, timeout=60)
+    conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
     conn.login(ICLOUD_EMAIL, ICLOUD_PASSWORD)
     conn.select("INBOX")
-    log.info("IMAP connected.")
+    # Now that handshake + auth are done, install a recv timeout on the live
+    # SSL socket. Subsequent fetch/search/noop will respect this.
+    try:
+        conn.sock.settimeout(60)
+        log.info("IMAP connected. Recv timeout set to 60s on established socket.")
+    except Exception as e:
+        log.warning(f"Could not set socket timeout post-handshake: {e}")
     return conn
 
 
@@ -320,27 +299,27 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
              f"(BACKFILL_MODE={BACKFILL_MODE})")
 
     new_count = 0
+    full_fetches_done = 0
 
     for uid in sorted(candidate_uids):
         uid_str = uid.decode()
 
         # Cheap header peek including Message-ID, so we can dedup BEFORE the
-        # expensive full-body fetch. This is the structural fix that prevents
-        # blasting iCloud with 1500+ full RFC822 fetches on a fresh lake.
+        # expensive full-body fetch. Header peeks are NOT capped per cycle —
+        # only full RFC822 fetches are. This way we still process the entire
+        # candidate list each cycle, just bounded on how much body data we pull.
         from_addr, subject, msg_id = "", "", ""
         try:
             log.info(f"  [{uid_str}] header peek...")  # heartbeat
-            with IMAPFetchDeadline(conn, seconds=30):
-                _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)])")
+            _, hdr_data = conn.fetch(uid, "(BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)])")
             hdr_bytes = hdr_data[0][1] if hdr_data and isinstance(hdr_data[0], tuple) else b""
             hdr_msg   = email.message_from_bytes(hdr_bytes)
             from_addr = decode_mime_header(hdr_msg.get("From", ""))
             subject   = decode_mime_header(hdr_msg.get("Subject", "(no subject)"))
             msg_id    = decode_mime_header(hdr_msg.get("Message-ID", "")).strip().strip("<>")
         except Exception as e:
-            log.warning(f"  [{uid_str}] header peek failed ({e}) — skipping")
-            # If header peek fails, mostly likely the connection is dead.
-            # Bubble it up so the outer loop reconnects.
+            log.warning(f"  [{uid_str}] header peek failed ({e}) — bubbling up to reconnect")
+            # Connection-level error — let it propagate so run_email_loop reconnects.
             raise
 
         # Sender filter (cheap, before any further work)
@@ -353,18 +332,29 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
             log.info(f"  [{uid_str}] skip (already in lake) | subject={subject[:60]!r}")
             continue
 
+        # Cap full-body fetches per cycle so we don't overload iCloud on a fresh lake
+        if full_fetches_done >= MAX_FULL_FETCHES_PER_CYCLE:
+            log.info(f"  [{uid_str}] deferring full fetch (cycle cap of "
+                     f"{MAX_FULL_FETCHES_PER_CYCLE} reached)")
+            continue
+
         log.info(f"  [{uid_str}] NEW | from={from_addr!r} | subject={subject[:60]!r}")
 
         # Fetch the full message and insert into the lake.
         try:
             log.info(f"  [{uid_str}] full body fetch...")  # heartbeat
-            with IMAPFetchDeadline(conn, seconds=60):
-                _, raw = conn.fetch(uid, "(RFC822)")
+            _, raw = conn.fetch(uid, "(RFC822)")
+            full_fetches_done += 1
+
             if not raw or not raw[0]:
-                log.warning(f"  [{uid_str}] empty fetch result")
+                log.warning(f"  [{uid_str}] empty fetch result (no raw[0])")
                 continue
             raw_bytes = raw[0][1] if isinstance(raw[0], tuple) else None
             if not raw_bytes:
+                # Was previously a silent continue — now logged so this drop path
+                # is visible. raw[0] type tells us what iCloud returned.
+                log.warning(f"  [{uid_str}] empty raw_bytes — raw[0] type was "
+                            f"{type(raw[0]).__name__}, repr={raw[0]!r}"[:200])
                 continue
 
             parsed = parse_email_message(raw_bytes, uid_str)
@@ -385,16 +375,21 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
             )
 
             if not inserted:
-                log.info(f"  [{uid_str}] skip (already in lake) | subject={subject[:70]!r}")
+                log.info(f"  [{uid_str}] skip (already in lake — Message-ID race) "
+                         f"| subject={subject[:70]!r}")
                 continue
 
-            log.info(f"  [{uid_str}] NEW → lake | from={from_addr!r} | "
+            log.info(f"  [{uid_str}] saved to lake | "
                      f"subject={subject[:70]!r} | status={parsed['content_status']}")
             new_count += 1
             _process_new_email(parsed)
 
+        except (imaplib.IMAP4.abort, OSError) as e:
+            # Connection-level error — let it propagate so run_email_loop reconnects.
+            log.error(f"  [{uid_str}] connection error: {e} — reconnecting")
+            raise
         except Exception as e:
-            log.error(f"  [{uid_str}] fetch/process error: {e}")
+            log.error(f"  [{uid_str}] processing error: {e}")
 
     if BACKFILL_MODE in ("silent", "notify") and new_count > 0:
         log.info(f"BACKFILL CYCLE COMPLETE — {new_count} new email(s) (mode={BACKFILL_MODE})")
