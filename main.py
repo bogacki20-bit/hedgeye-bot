@@ -91,5 +91,18 @@ if __name__ == "__main__":
     else:
         log.info("Risk Range parser disabled (PARSER_ENABLED=false).")
 
+    # Live price monitor — polls yfinance, fires Telegram on range-edge events.
+    # Same daemon pattern. Toggle via MONITOR_ENABLED=false on Railway if alerts get noisy.
+    if os.getenv("MONITOR_ENABLED", "true").lower() in ("true", "1", "yes"):
+        from price_monitor import run_monitor_loop
+        threading.Thread(
+            target=run_monitor_loop,
+            daemon=True,
+            name="price_monitor",
+        ).start()
+        log.info("Price monitor thread started.")
+    else:
+        log.info("Price monitor disabled (MONITOR_ENABLED=false).")
+
     log.info("Hedgeye bot running — email parser → Postgres lake.")
     run_email_loop()
