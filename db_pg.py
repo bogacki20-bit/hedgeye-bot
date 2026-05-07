@@ -262,6 +262,108 @@ def get_latest_mfr_snapshot(ticker: str):
             return dict(row) if row else None
 
 
+# ─────────────────────────── Risk Range writes ───────────────────────────
+
+def save_risk_range_rows(rows: list[dict]) -> int:
+    """
+    Bulk-insert parsed Risk Range rows into hedgeye_risk_ranges.
+
+    Each row dict must include: ticker, signal_date, source_email_id.
+    Optional: trend, buy_trade, sell_trade, prev_close, description.
+
+    Idempotent — re-parsing the same email won't duplicate rows. Existing
+    (ticker, signal_date) PKs are updated with the new payload. This means a
+    re-parse with corrected logic overwrites bad data without manual cleanup.
+
+    Returns the number of rows written (inserted OR updated).
+    """
+    if not rows:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO hedgeye_risk_ranges
+                  (ticker, signal_date, trend, buy_trade, sell_trade,
+                   prev_close, description, source_email_id)
+                VALUES (%(ticker)s, %(signal_date)s, %(trend)s,
+                        %(buy_trade)s, %(sell_trade)s, %(prev_close)s,
+                        %(description)s, %(source_email_id)s)
+                ON CONFLICT (ticker, signal_date) DO UPDATE SET
+                  trend           = EXCLUDED.trend,
+                  buy_trade       = EXCLUDED.buy_trade,
+                  sell_trade      = EXCLUDED.sell_trade,
+                  prev_close      = EXCLUDED.prev_close,
+                  description     = EXCLUDED.description,
+                  source_email_id = EXCLUDED.source_email_id,
+                  parsed_at       = NOW()
+                """,
+                rows,
+                page_size=100,
+            )
+        conn.commit()
+    return len(rows)
+
+
+def save_signal_changes(rows: list[dict]) -> int:
+    """
+    Bulk-insert parsed signal-change rows into hedgeye_signal_changes.
+
+    Each row dict must include: ticker, change_type, signal_date,
+    source_email_id. Optional: prev_state, new_state.
+
+    Idempotent on (ticker, change_type, signal_date). Returns rows written.
+    """
+    if not rows:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO hedgeye_signal_changes
+                  (ticker, change_type, prev_state, new_state, signal_date, source_email_id)
+                VALUES (%(ticker)s, %(change_type)s, %(prev_state)s,
+                        %(new_state)s, %(signal_date)s, %(source_email_id)s)
+                ON CONFLICT (ticker, change_type, signal_date) DO UPDATE SET
+                  prev_state      = EXCLUDED.prev_state,
+                  new_state       = EXCLUDED.new_state,
+                  source_email_id = EXCLUDED.source_email_id,
+                  parsed_at       = NOW()
+                """,
+                rows,
+                page_size=100,
+            )
+        conn.commit()
+    return len(rows)
+
+
+def mark_email_classified(message_id: str, classified_as: str,
+                          confidence: float | None = None) -> None:
+    """
+    Update both classified_as and parsed_at on a raw email row.
+
+    Use this after a typed-table parser successfully processes an email.
+    If the parser failed (matched the filter but extracted nothing useful),
+    pass classified_as='<type>_parse_failed' so the row doesn't get reprocessed
+    in a loop while remaining flagged as failed for inspection.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE hedgeye_emails_raw
+                   SET classified_as         = %s,
+                       classifier_confidence = COALESCE(%s, classifier_confidence),
+                       parsed_at             = NOW()
+                 WHERE message_id            = %s
+                """,
+                (classified_as, confidence, message_id),
+            )
+        conn.commit()
+
+
 # ─────────────────────────── Risk Range queries ───────────────────────────
 
 def get_latest_risk_range(ticker: str):

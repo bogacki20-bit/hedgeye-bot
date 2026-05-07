@@ -1,0 +1,102 @@
+RISK RANGE™ SIGNALS
+ 05/05/26 07:44 AM EDT
+
+MAY 05, 2026
+
+How to use Risk Range Signals
+
+TREND CHANGE:
+
+ORCL changed from Neutral to Bullish
+
+Bullish Trend Bearish Trend Neutral
+INDEX	BUY TRADE	SELL TRADE	PREV. CLOSE
+UST30Y (BULLISH)
+30-Year U.S. Treasury Yield	4.93	5.04	5.02
+UST10Y (BULLISH)
+10-Year U.S. Treasury Yield	4.32	4.47	4.45
+UST2Y (BULLISH)
+2-Year U.S. Treasury Yield	3.82	4.00	3.95
+HYG (BULLISH)
+High Yield	79.67	80.22	79.80
+LQD (BEARISH)
+Investment Grade Corporate Bond ETF	107.8	109.3	108.3
+SPX (BULLISH)
+S&P 500	7,075	7,265	7,201
+COMPQ (BULLISH)
+NASDAQ Composite	24,356	25,240	25,068
+RUT (BULLISH)
+Russell 2000	2,747	2,835	2,796
+XLK (BULLISH)
+Technology Select Sector SPDR Fund	157	164	162
+XOP (BULLISH)
+SPDR S&P Oil & Gas Explore	171	184	181
+XTL (BULLISH)
+State Street SPDR S&P Telecom ETF	212.00	232.00	225.55
+XLI (BULLISH)
+Industrial Select Sector SPDR Fund	169	176	171
+SSEC (BULLISH)
+SHANGHAI COMPOSITE	4,045	4,136	4,112
+NIKK (BULLISH)
+Nikkei 225 Index	58,209	60,592	59,513
+DAX (BULLISH)
+German DAX Composite	23,890	24,398	23,991
+VIX (BEARISH)
+Volatility Index	16.38	19.94	18.29
+USD (BEARISH)
+U.S. Dollar Index	97.78	98.96	98.38
+EUR/USD (BULLISH)
+Euro to U.S. Dollar	1.167	1.175	1.169
+USD/YEN (BEARISH)
+U.S. Dollar to Japanese Yen	156.01	158.92	157.25
+GBP/USD (BULLISH)
+British Pound to U.S. Dollar	1.348	1.363	1.352
+CAD/USD (BULLISH)
+Canadian Dollar to U.S. Dollar	0.730	0.738	0.734
+WTIC (BULLISH)
+Light Crude Oil Continuous Contract	97.19	110.51	104.28
+BRENT (BULLISH)
+Brent Crude Oil Continuous Contract	103	116	113
+NATGAS (BEARISH)
+Natural Gas Continuous Contract	2.52	2.91	2.85
+GOLD (NEUTRAL)
+Gold Spot Price	4,476	4,699	4,542
+COPPER (BULLISH)
+Copper Spot Price	5.75	6.12	5.89
+SILVER (BEARISH)
+Silver Spot Price	71	77	73
+MSFT (BEARISH)
+Microsoft Corp.	404	428	414
+AAPL (BULLISH)
+Apple Inc.	270	282	277
+AMZN (BULLISH)
+Amazon Inc.	259	276	272
+META (BEARISH)
+Meta Platforms Inc.	590	651	610
+GOOGL (BULLISH)
+Alphabet Inc.	359	399	383
+NFLX (BEARISH)
+Netflix Inc.	89	94	91
+TSLA (BEARISH)
+Tesla Inc.	365	398	393
+NVDA (BULLISH)
+NVIDIA Corporation	195	217	198
+ORCL (BULLISH)
+Oracle Corporation	165	187	180
+BITCOIN (BULLISH)
+Bitcoin Spot Price	76,294	81,307	80,844
+#OUTBUCKET
+The #OutBucket are the tickers Hedgeye CEO Keith McCullough has recently removed from Risk Range™ Signals (for Macro fundamental or Signaling reasons) along with the current trend for that ticker.
+
+Aerospace & Defense ETF (ITA) = Bearish (8/22/2024)
+Simplify Healthcare ETF (PINK) = Neutral (10/23/2025)
+Real Estate Select Sector SPDR Fund (XLRE) = Bullish (11/8/2024)
+SPX Momentum (SPMO) = Bullish (3/5/2025)
+Consumer Staples Select Sector SPDR Fund (XLP) = Bullish (5/23/2025)
+iShares US Insurance ETF (IAK) = Bullish (5/29/2025)
+Energy Select Sector SPDR Fund (XLE) = Bullish (10/8/2025)
+Financial Select Sector SPDR Fund (XLF) = Bullish (10/13/2025)
+VanEck Gold Miners ETF (GDX) = Bearish (11/6/2025)
+Global X Uranium ETF (URA) = Bullish (11/11/2025)
+Consumer Discretionary Select Sector SPDR Fund (XLY) = Bullish (1/7/2026)
+Hedgeye's Risk Range™ Signals are thirty-seven immediate-term (TRADE) buy and sell levels, along with our intermediate-term (TREND) view. Click HERE for a video from Hedgeye CEO Keith McCullough on how to use these signals.

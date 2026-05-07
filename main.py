@@ -12,6 +12,7 @@ Boot order:
 import logging
 import sys
 import os
+import threading
 
 from telegram_handler import start_telegram_listener
 
@@ -75,5 +76,20 @@ if __name__ == "__main__":
 
     from email_parser import run_email_loop
     start_telegram_listener()
+
+    # Risk Range parser runs in a daemon thread alongside the email loop.
+    # Daemon = if it dies, main thread keeps going (the bot stays up).
+    # Toggle off via PARSER_ENABLED=false on Railway if needed.
+    if os.getenv("PARSER_ENABLED", "true").lower() in ("true", "1", "yes"):
+        from parser_risk_range import run_parser_loop as run_risk_range_parser
+        threading.Thread(
+            target=run_risk_range_parser,
+            daemon=True,
+            name="risk_range_parser",
+        ).start()
+        log.info("Risk Range parser thread started.")
+    else:
+        log.info("Risk Range parser disabled (PARSER_ENABLED=false).")
+
     log.info("Hedgeye bot running — email parser → Postgres lake.")
     run_email_loop()
