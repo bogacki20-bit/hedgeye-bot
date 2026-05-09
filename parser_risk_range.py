@@ -387,6 +387,38 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
         if change_rows:
             summary["signal_change_rows_written"] += db_pg.save_signal_changes(change_rows)
 
+        # Note each ticker in the inventory (running record of every ticker
+        # Hedgeye has signaled on, with current Quad regime tagged). Quad
+        # regime comes from project memory + most recent Macro Themes update;
+        # for now hardcoded to "Quad 2" until we wire a quad lookup.
+        try:
+            import ticker_inventory
+            from db_pg import get_conn
+            tickers_in_email = set()
+            for r in range_rows or []:
+                if r.get("ticker"):
+                    tickers_in_email.add(r["ticker"])
+            for r in change_rows or []:
+                if r.get("ticker"):
+                    tickers_in_email.add(r["ticker"])
+            if tickers_in_email:
+                ticker_inventory.note_tickers(
+                    tickers_in_email,
+                    source=ticker_inventory.SOURCE_RISK_RANGE,
+                    quad_regime="Quad 2",
+                    message_id=message_id,
+                )
+                # Trigger MFR refresh for any ticker mentioned (best effort).
+                try:
+                    import mfr_client
+                    mfr_summary = mfr_client.refresh_for_tickers(list(tickers_in_email))
+                    log.info(f"  [{message_id}] MFR refresh: ok={mfr_summary['ok']} "
+                             f"fail={mfr_summary['fail']} of {mfr_summary['tickers']}")
+                except Exception as e:
+                    log.warning(f"  [{message_id}] MFR refresh failed: {e}")
+        except Exception as e:
+            log.warning(f"  [{message_id}] ticker inventory hook failed: {e}")
+
         db_pg.mark_email_classified(message_id, "risk_range")
         summary["emails_parsed"] += 1
 

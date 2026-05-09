@@ -376,6 +376,29 @@ def format_alert_message(ticker: str, price: float, low: float, high: float,
 
 # ─────────────────────────── Cycle / loop ───────────────────────────
 
+def get_alert_ticker_universe() -> set:
+    """Return the set of tickers price_monitor should fire alerts for.
+
+    Prefers the SQL VIEW `monitored_tickers` (combines hedgeye_ticker_inventory
+    is_active rows + recent Risk Range mentions). Falls back to the hardcoded
+    ALERT_TICKERS set if the view is unavailable (db down, migration 004 not
+    yet applied, etc.) so we never silently mute the alert system.
+    """
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT ticker FROM monitored_tickers")
+                rows = cur.fetchall()
+                if rows:
+                    dynamic = {r[0] for r in rows if r[0]}
+                    if dynamic:
+                        return dynamic | ALERT_TICKERS  # union: never narrower than the static list
+    except Exception as e:
+        log.debug(f"monitored_tickers view query failed, falling back to ALERT_TICKERS: {e}")
+    return set(ALERT_TICKERS)
+
+
 def run_monitor_cycle(dry_run: bool = False) -> dict:
     """
     Process one monitor cycle. Returns summary dict.
@@ -405,6 +428,9 @@ def run_monitor_cycle(dry_run: bool = False) -> dict:
         return summary
 
     today = datetime.now(ET).date()
+    alert_universe = get_alert_ticker_universe()
+    log.info(f"Monitor cycle: {len(alert_universe)} tickers in alert universe "
+             f"(static={len(ALERT_TICKERS)}, dynamic VIEW union)")
 
     # Filter + map tickers, build symbol list for batch fetch
     candidates = []
@@ -423,8 +449,9 @@ def run_monitor_cycle(dry_run: bool = False) -> dict:
             log.debug(f"  no yfinance mapping for {ticker}")
             continue
 
-        if ticker not in ALERT_TICKERS:
-            # Mapped but not in alert universe (e.g. FX, yields). Skip silently.
+        if ticker not in alert_universe:
+            # Mapped but not in alert universe (e.g. FX, yields, or ticker not
+            # currently signaled-on by Hedgeye). Skip silently.
             continue
 
         candidates.append(row)
