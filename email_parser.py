@@ -444,6 +444,109 @@ def _process_new_email(parsed: dict) -> None:
             f"— sized recommendation deferred (recommender migration pending)"
         )
 
+    # ───────── Universal ticker inventory + MFR refresh ─────────
+    # Every Hedgeye email — RTA, Risk Range, Signal Strength, ETF Pro,
+    # Investing Ideas, Capital Allocation Pro, Financials/Retail Sector Pro,
+    # Macro Show, Early Look — flows through here. Pull tickers out of the
+    # classifier output and fire ticker_inventory.note_tickers + MFR refresh
+    # so EVERY product's ticker mentions populate the inventory and keep MFR
+    # snapshots current.
+    try:
+        tickers_in_msg = []
+        positions_by_ticker: dict = {}
+        for t in (item.get("tickers") or []):
+            sym = (t.get("ticker") or "").strip().upper()
+            if not sym:
+                continue
+            tickers_in_msg.append(sym)
+            direction = (t.get("direction") or "").strip().lower()
+            if direction in ("long", "buy", "bullish"):
+                positions_by_ticker[sym] = "long"
+            elif direction in ("short", "sell", "bearish"):
+                positions_by_ticker[sym] = "short"
+            elif direction in ("close", "remove", "exit"):
+                positions_by_ticker[sym] = "closed"
+
+        # If classifier dropped tickers but legacy item.ticker is set, include it
+        legacy = (item.get("ticker") or "").strip().upper()
+        if legacy and legacy not in tickers_in_msg:
+            tickers_in_msg.append(legacy)
+            legacy_dir = (item.get("direction") or "").strip().lower()
+            if legacy_dir in ("long", "buy"):
+                positions_by_ticker.setdefault(legacy, "long")
+            elif legacy_dir in ("short", "sell"):
+                positions_by_ticker.setdefault(legacy, "short")
+
+        if tickers_in_msg:
+            # Map subject + classified_type -> ticker_inventory source string.
+            subject_lower = (item.get("subject") or "").lower()
+            ctype = (item.get("classified_type") or "").lower()
+            if "real-time alert" in subject_lower or "rta" in subject_lower:
+                source = "rta"
+            elif "risk range" in subject_lower:
+                source = "risk_range"
+            elif "signal strength" in subject_lower:
+                source = "signal_strength"
+            elif "etf pro" in subject_lower:
+                source = "etf_pro"
+            elif "investing idea" in subject_lower:
+                source = "investing_ideas"
+            elif "capital allocation" in subject_lower:
+                source = "capital_allocation_pro"
+            elif "financial" in subject_lower and "sector" in subject_lower:
+                source = "financials_sector_pro"
+            elif "retail" in subject_lower and ("sector" in subject_lower or "pro" in subject_lower):
+                source = "retail_pro"
+            elif "reits" in subject_lower:
+                source = "reits_pro"
+            elif "macro show" in subject_lower:
+                source = "macro_show"
+            elif "early look" in subject_lower:
+                source = "early_look"
+            elif ctype == "sector_research":
+                source = "sector_pro"
+            elif ctype == "trade_signal":
+                source = "trade_signal"
+            else:
+                source = "other"
+
+            quad = item.get("macro_regime")  # classifier emits "Quad 1/2/3/4" or null
+
+            try:
+                import ticker_inventory
+                summary = ticker_inventory.note_tickers(
+                    tickers_in_msg,
+                    source=source,
+                    quad_regime=quad,
+                    message_id=item.get("message_id"),
+                )
+                # Per-ticker position upsert (note_tickers takes one position;
+                # tickers can have different positions in the same email, so
+                # do per-ticker calls when positions diverge).
+                for sym, pos in positions_by_ticker.items():
+                    ticker_inventory.note_ticker(
+                        sym, source=source, position=pos, quad_regime=quad,
+                        message_id=item.get("message_id"),
+                    )
+                log.info(
+                    f"  ticker_inventory: {summary['noted']}/{summary['tickers']} "
+                    f"noted (source={source}, quad={quad})"
+                )
+            except Exception as e:
+                log.warning(f"  ticker_inventory hook failed: {e}")
+
+            try:
+                import mfr_client
+                mfr_summary = mfr_client.refresh_for_tickers(tickers_in_msg)
+                log.info(
+                    f"  MFR refresh: ok={mfr_summary['ok']} fail={mfr_summary['fail']} "
+                    f"of {mfr_summary['tickers']}"
+                )
+            except Exception as e:
+                log.warning(f"  MFR refresh hook failed: {e}")
+    except Exception as e:
+        log.warning(f"  ticker/MFR hook outer error: {e}")
+
 
 # ───────────────── Main loop ─────────────────
 
