@@ -148,6 +148,69 @@ def discover_university(root: Path):
             }
 
 
+def discover_volsignals_paid(root: Path):
+    """data/snapshots/volsignals/paid_course/text/*.txt — Natenberg + VolStudies PDFs as text"""
+    base = root / "volsignals" / "paid_course" / "text"
+    if not base.exists():
+        return
+    for f in sorted(base.iterdir()):
+        if f.suffix != ".txt":
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        if len(text) < 200:
+            continue
+        # filename-derived ref (drop VS_ prefix)
+        ref = f.stem
+        if ref.startswith("VS_"):
+            ref = ref[3:]
+        d = date_cls.fromtimestamp(f.stat().st_mtime)
+        title = ref.replace("_", " ").strip()
+        # Categorize by filename heuristics
+        name = f.name.lower()
+        if "natenberg" in name and "second_edition" in name:
+            doc_subtype = "natenberg_book"
+        elif "trading_volatility" in name and "bennett" in name:
+            doc_subtype = "bennett_book"
+        elif "sinclair" in name:
+            doc_subtype = "sinclair_book"
+        elif "technical_analysis" in name:
+            doc_subtype = "ta_reference"
+        elif "squeezemetrics" in name:
+            doc_subtype = "squeezemetrics_paper"
+        elif "ubs_q-series" in name or "cta" in name:
+            doc_subtype = "systematics_research"
+        elif "volstudies_text" in name or "volstudies_-_chapter" in name:
+            doc_subtype = "volstudies_natenberg_chapter"
+        elif "volstudies_slides" in name:
+            doc_subtype = "volstudies_slides"
+        elif "syllabus" in name:
+            doc_subtype = "volstudies_syllabus"
+        elif "vip_mentorship" in name:
+            doc_subtype = "vip_mentorship"
+        elif "framework" in name:
+            doc_subtype = "volsignals_framework"
+        elif "hedging_flows" in name:
+            doc_subtype = "infographic"
+        elif "dhd" in name or "boot_camp" in name:
+            doc_subtype = "dealer_hedging_dynamics"
+        elif "systematics" in name:
+            doc_subtype = "systematics"
+        elif "core_greeks" in name:
+            doc_subtype = "core_greeks_refresher"
+        else:
+            doc_subtype = "other"
+        yield {
+            "source": "volsignals_paid_course",
+            "source_ref": ref,
+            "source_date": d,
+            "document_type": "transcript",   # PDF text body, treated as transcript-equivalent
+            "page_or_segment": None,
+            "title": title,
+            "full_text": text,
+            "metadata": {"file_name": f.name, "subtype": doc_subtype, "char_count": len(text)},
+        }
+
+
 def discover_volsignals(root: Path):
     """data/snapshots/volsignals/youtube/*.md"""
     base = root / "volsignals" / "youtube"
@@ -246,6 +309,7 @@ def main():
         discover_macro_show,
         discover_university,
         discover_volsignals,
+        discover_volsignals_paid,
         discover_spotgamma,
     ]
 

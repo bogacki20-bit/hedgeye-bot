@@ -252,7 +252,7 @@ def handle_telegram_send(args):
 
 
 def handle_python_script(args):
-    ALLOWED = {"parser_risk_range.py", "price_monitor.py", "apply_schema.py", "db_pg.py", "portfolio.py", "ingest_hedgeye_downloads.py", "fetch_volsignals_transcripts.py", "probe_hedgeye_email_count.py", "corpus_ingest.py", "apply_migration.py", "probe_hedgeye_email_count_v2.py", "clear_git_lock.py"}
+    ALLOWED = {"parser_risk_range.py", "price_monitor.py", "apply_schema.py", "db_pg.py", "portfolio.py", "ingest_hedgeye_downloads.py", "fetch_volsignals_transcripts.py", "probe_hedgeye_email_count.py", "corpus_ingest.py", "apply_migration.py", "probe_hedgeye_email_count_v2.py", "clear_git_lock.py", "ingest_volsignals_pdfs.py", "list_downloads.py", "download_volsignals_pdfs.py"}
     script = args.get("script")
     if script not in ALLOWED:
         return {"ok": False, "stderr": f"script {script!r} not allowed"}
