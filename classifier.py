@@ -8,6 +8,8 @@ import json
 import logging
 import anthropic
 
+from corpus_rag import fetch_and_format
+
 log = logging.getLogger(__name__)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -58,7 +60,16 @@ Return this exact JSON structure:
 
 If a field is not present in the content, use null for scalars and [] for arrays.
 For tickers[], only include if there are EXPLICIT ticker mentions with directional calls.
-Do not invent tickers that aren't in the content."""
+Do not invent tickers that aren't in the content.
+
+If the user message includes a <corpus_context> block, that's background reference
+material from prior Hedgeye Macro Show notes, VolStudies course material, SpotGamma
+reports, and Hedgeye University lessons. Use it ONLY to:
+  - Disambiguate quad regime / vol regime references in the email being classified
+  - Recognize sector themes and Hedgeye-specific terminology
+  - Inform the `tags[]` and `summary` fields with relevant prior context
+NEVER pull tickers, directions, or convictions from the corpus. Those come from
+the email content only. The corpus is background, not source data."""
 
 
 def classify_and_extract(item: dict) -> dict:
@@ -84,13 +95,42 @@ def classify_and_extract(item: dict) -> dict:
 
     content_str = "\n\n".join(content_parts)
 
+    # Pull corpus context based on tickers/themes mentioned in the email.
+    # Failure here is non-fatal — we proceed without context if anything goes wrong.
+    corpus_block = ""
+    try:
+        # Use subject + first ~2000 chars of content for term extraction.
+        seed_text = "\n".join([
+            item.get("subject") or "",
+            item.get("title") or "",
+            content_str[:2000],
+        ])
+        corpus_block, terms_used, hit_count = fetch_and_format(
+            seed_text, limit=4, snippet_chars=500, max_prompt_chars=3000,
+        )
+        if corpus_block:
+            log.info(f"Corpus RAG: {hit_count} hits for terms={terms_used}")
+    except Exception as e:
+        log.warning(f"Corpus RAG fetch failed (proceeding without context): {e}")
+        corpus_block = ""
+
+    user_message = f"Classify and extract from this Hedgeye content:\n\n{content_str}"
+    if corpus_block:
+        user_message = (
+            "Background reference material (do not extract tickers/convictions from this — "
+            "use it only for regime, theme, and terminology context):\n\n"
+            f"{corpus_block}\n\n"
+            "─────────────────────────────\n\n"
+            f"Now classify and extract from this Hedgeye content:\n\n{content_str}"
+        )
+
     try:
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1000,
             system=SYSTEM_PROMPT,
             messages=[
-                {"role": "user", "content": f"Classify and extract from this Hedgeye content:\n\n{content_str}"}
+                {"role": "user", "content": user_message}
             ]
         )
 
