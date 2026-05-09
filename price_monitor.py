@@ -249,12 +249,102 @@ ZONE_LABELS = {
 }
 
 
+def compose_recommendation(
+    ticker: str,
+    zone: str,
+    price: float,
+    low: float,
+    high: float,
+    trend: str | None,
+) -> dict:
+    """Translate a zone + Risk Range edge into a recommendation dict.
+
+    Returns keys (all optional / nullable):
+        text                 — human-readable suggestion ("ADD ~$1500 in OIH")
+        suggested_action     — verb: BUY / ADD / TRIM / SELL / WATCH
+        suggested_dollars    — float (None if no specific amount)
+        framework_alignment  — "aligned" / "counter" / "neutral" / "stale"
+        hedgeye_context      — dict snapshot (today's quad, vix bucket, etc)
+        spotgamma_context    — dict snapshot (call wall / put wall / hedge wall if known)
+
+    Logic mirrors Hedgeye U Ch2 framework: "top of range you sell, bottom of
+    range you buy" (Risk Range Signal Deep Dive). Style B sizing per
+    recommender.SIZING:
+        bottom_third  -> ADD  ~$1500 (3% of $50K, capped)
+        below_range   -> ADD  ~$1500 (range break, deeper opportunity)
+        top_third     -> TRIM (50% of position)
+        above_range   -> WATCH (range break above — let it ride or trim?)
+
+    The caller passes Style B parameters; this is just the alert-time hint.
+    Final position-sizing math lives in recommender.py.
+    """
+    icon, label = ZONE_LABELS.get(zone, ("", zone))
+
+    # Lazy import — Hedgeye/SpotGamma context functions are aspirational and
+    # come from corpus_documents queries we wire up later.
+    hedgeye_ctx = {"current_quad": "Quad 2", "vix_bucket": "investable"}
+    spotgamma_ctx: dict = {}
+
+    if zone == "bottom_third":
+        return {
+            "text": f"ADD ~$1500 {ticker} at {price:.2f} (bottom third of range, framework-aligned).",
+            "suggested_action": "ADD",
+            "suggested_dollars": 1500.0,
+            "framework_alignment": "aligned" if trend in ("bullish", "up") else "neutral",
+            "hedgeye_context": hedgeye_ctx,
+            "spotgamma_context": spotgamma_ctx,
+        }
+    if zone == "below_range":
+        return {
+            "text": f"BUY ~$1500 {ticker} at {price:.2f} (broken below range, contrarian add).",
+            "suggested_action": "BUY",
+            "suggested_dollars": 1500.0,
+            "framework_alignment": "neutral",
+            "hedgeye_context": hedgeye_ctx,
+            "spotgamma_context": spotgamma_ctx,
+        }
+    if zone == "top_third":
+        return {
+            "text": f"TRIM 50% {ticker} at {price:.2f} (top third of range, fade strength).",
+            "suggested_action": "TRIM",
+            "suggested_dollars": None,
+            "framework_alignment": "aligned" if trend in ("bullish", "up") else "neutral",
+            "hedgeye_context": hedgeye_ctx,
+            "spotgamma_context": spotgamma_ctx,
+        }
+    if zone == "above_range":
+        return {
+            "text": f"WATCH {ticker} at {price:.2f} — broke above range. Trim or let it run?",
+            "suggested_action": "WATCH",
+            "suggested_dollars": None,
+            "framework_alignment": "neutral",
+            "hedgeye_context": hedgeye_ctx,
+            "spotgamma_context": spotgamma_ctx,
+        }
+    return {
+        "text": f"{ticker} at {price:.2f} ({zone}) — no specific recommendation.",
+        "suggested_action": None,
+        "suggested_dollars": None,
+        "framework_alignment": "neutral",
+        "hedgeye_context": hedgeye_ctx,
+        "spotgamma_context": spotgamma_ctx,
+    }
+
+
 def format_alert_message(ticker: str, price: float, low: float, high: float,
                          prev_close: float | None, trend: str | None,
-                         zone: str, signal_date) -> tuple[str, str]:
-    """Returns (title, body) ready for send_telegram."""
+                         zone: str, signal_date,
+                         alert_id: int | None = None,
+                         recommendation_text: str | None = None) -> tuple[str, str]:
+    """Returns (title, body) ready for send_telegram.
+
+    When `alert_id` is provided, the body includes "Reply A{id} BUY/PASS/etc"
+    so the user can reply directly from Telegram and the parser links the
+    decision back to this alert in user_actions.
+    """
     icon, label = ZONE_LABELS.get(zone, ("ℹ️", zone))
-    title = f"{icon} {ticker} — {label}"
+    id_suffix = f" [A{alert_id}]" if alert_id else ""
+    title = f"{icon} {ticker}{id_suffix} — {label}"
 
     pct_in_range = ""
     if low and high and high > low:
@@ -275,6 +365,11 @@ def format_alert_message(ticker: str, price: float, low: float, high: float,
     wrapper = FX_EQUITY_WRAPPER.get(ticker)
     if wrapper:
         body += f"\nequity wrapper: {wrapper}"
+
+    if recommendation_text:
+        body += f"\n\n{recommendation_text}"
+    if alert_id:
+        body += f"\n\nReply A{alert_id} BUY/PASS/LATER (or A{alert_id} BUY $1500)."
 
     return title, body
 
@@ -369,26 +464,61 @@ def run_monitor_cycle(dry_run: bool = False) -> dict:
             log.debug(f"  {ticker}: already alerted on {boundary} for {signal_date}")
             continue
 
-        title, body = format_alert_message(
-            ticker, price, low, high, prev_close, trend, zone, signal_date
-        )
+        # Build recommendation first so we can record it with the alert.
+        rec = compose_recommendation(ticker, zone, price, low, high, trend)
+        range_at_fire = {"low": low, "high": high, "trend": trend}
 
         if dry_run:
+            # In dry-run we still build a synthetic alert id for message formatting.
+            title, body = format_alert_message(
+                ticker, price, low, high, prev_close, trend, zone, signal_date,
+                alert_id=0, recommendation_text=rec.get("text"),
+            )
             log.info(f"DRY-RUN ALERT — {title}\n{body}")
         else:
-            from notifier import send_telegram
-            sent = send_telegram(title, body)
-            range_at_fire = {"low": low, "high": high, "trend": trend}
-            db_pg.record_alert(
+            # Record the alert FIRST so we have an id to put in the Telegram message.
+            # Use a temporary placeholder notification_id; we'll learn whether
+            # send succeeded in a follow-up step.
+            alert_id = db_pg.record_alert(
                 ticker=ticker,
                 boundary=boundary,
                 signal_date=signal_date,
                 range_zone=zone,
                 price_at_fire=price,
                 range_at_fire=range_at_fire,
-                notification_id=("telegram_ok" if sent else "telegram_failed"),
+                notification_id="telegram_pending",
+                recommendation_text=rec.get("text"),
+                suggested_action=rec.get("suggested_action"),
+                suggested_dollars=rec.get("suggested_dollars"),
+                framework_alignment=rec.get("framework_alignment"),
+                hedgeye_context=rec.get("hedgeye_context"),
+                spotgamma_context=rec.get("spotgamma_context"),
             )
-            log.info(f"  ALERT fired: {ticker} {zone} at {price}")
+            if alert_id is None:
+                # ON CONFLICT collapsed - already alerted (rare race after has_alert_fired check)
+                log.debug(f"  {ticker}: alert id collision (already fired)")
+                continue
+
+            title, body = format_alert_message(
+                ticker, price, low, high, prev_close, trend, zone, signal_date,
+                alert_id=alert_id, recommendation_text=rec.get("text"),
+            )
+            from notifier import send_telegram
+            sent = send_telegram(title, body)
+
+            # Update notification_id on the alert row to reflect whether send worked.
+            try:
+                with db_pg.get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE alerts_fired SET notification_id=%s WHERE id=%s",
+                            ("telegram_ok" if sent else "telegram_failed", alert_id),
+                        )
+                    conn.commit()
+            except Exception as e:
+                log.warning(f"  failed to update notification_id for alert {alert_id}: {e}")
+
+            log.info(f"  ALERT fired: A{alert_id} {ticker} {zone} at {price}")
 
         summary["alerts_fired_new"] += 1
 

@@ -425,16 +425,30 @@ def record_alert(
     price_at_fire: float | None = None,
     range_at_fire: dict | None = None,
     notification_id: str | None = None,
+    recommendation_text: str | None = None,
+    suggested_action: str | None = None,
+    suggested_dollars: float | None = None,
+    framework_alignment: str | None = None,
+    hedgeye_context: dict | None = None,
+    spotgamma_context: dict | None = None,
 ) -> int | None:
-    """Record that an alert fired. Returns new id, or None if duplicate."""
+    """Record that an alert fired. Returns new id, or None if duplicate.
+
+    Extended columns (from migration 002) capture the dry-run framework
+    context: what the bot recommended, why it was framework-aligned, and
+    snapshots of the Hedgeye/SpotGamma reasoning at the moment of alert.
+    These let user_actions reference back to the alert for ML training.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO alerts_fired
                   (ticker, boundary, range_zone, signal_date,
-                   price_at_fire, range_at_fire, notification_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   price_at_fire, range_at_fire, notification_id,
+                   recommendation_text, suggested_action, suggested_dollars,
+                   framework_alignment, hedgeye_context, spotgamma_context)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (ticker, boundary, signal_date) DO NOTHING
                 RETURNING id
                 """,
@@ -443,11 +457,208 @@ def record_alert(
                     price_at_fire,
                     json.dumps(range_at_fire) if range_at_fire is not None else None,
                     notification_id,
+                    recommendation_text,
+                    suggested_action,
+                    suggested_dollars,
+                    framework_alignment,
+                    json.dumps(hedgeye_context) if hedgeye_context is not None else None,
+                    json.dumps(spotgamma_context) if spotgamma_context is not None else None,
                 ),
             )
             row = cur.fetchone()
         conn.commit()
         return row[0] if row else None
+
+
+def find_alert_by_id(alert_id: int):
+    """Fetch a single alerts_fired row by id. Returns dict or None.
+
+    Used by telegram_handler when the user replies with an alert id like
+    "A1234 BUY 100" — we look up the alert to associate the user_action
+    with the right recommendation context.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, ticker, boundary, range_zone, signal_date,
+                       fired_at, price_at_fire, range_at_fire,
+                       notification_id, recommendation_text, suggested_action,
+                       suggested_dollars, framework_alignment,
+                       hedgeye_context, spotgamma_context
+                FROM alerts_fired
+                WHERE id = %s
+                """,
+                (alert_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+
+def find_recent_alert_for_ticker(ticker: str, hours: int = 24):
+    """Fetch the most recent alerts_fired row for a ticker within the last N hours.
+
+    Used when the user replies with a ticker but no alert id (e.g. "OIH BUY 100")
+    — we infer they meant the most recent alert on that ticker.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, ticker, boundary, range_zone, signal_date,
+                       fired_at, price_at_fire, range_at_fire,
+                       notification_id, recommendation_text, suggested_action,
+                       suggested_dollars, framework_alignment,
+                       hedgeye_context, spotgamma_context
+                FROM alerts_fired
+                WHERE ticker = %s
+                  AND fired_at >= NOW() - (%s || ' hours')::INTERVAL
+                ORDER BY fired_at DESC
+                LIMIT 1
+                """,
+                (ticker, hours),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+
+def save_user_action(
+    ticker: str,
+    decision: str,
+    alert_id: int | None = None,
+    executed: bool = False,
+    executed_action: str | None = None,
+    executed_dollars: float | None = None,
+    executed_shares: float | None = None,
+    executed_price: float | None = None,
+    account: str | None = None,
+    fidelity_confirmation_id: str | None = None,
+    notes: str | None = None,
+    raw_telegram_text: str | None = None,
+) -> int:
+    """Insert a user_actions row capturing a decision from the user (typically
+    via Telegram reply). Returns new id.
+
+    `decision` is the parsed verb — BUY, SELL, ADD, TRIM, PASS, LATER, OVERRIDE.
+    `executed` is True only after the user confirms the trade was placed (in
+    Fidelity or wherever) — bot defaults False and the user updates later.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_actions
+                  (alert_id, ticker, decision, executed,
+                   executed_action, executed_dollars, executed_shares, executed_price,
+                   account, fidelity_confirmation_id, notes, raw_telegram_text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    alert_id, ticker, decision, executed,
+                    executed_action, executed_dollars, executed_shares, executed_price,
+                    account, fidelity_confirmation_id, notes, raw_telegram_text,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return row[0]
+
+
+def get_user_action(action_id: int):
+    """Fetch a single user_actions row by id. Returns dict or None."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, alert_id, ticker, decided_at, decision, executed,
+                       executed_action, executed_dollars, executed_shares,
+                       executed_price, account, fidelity_confirmation_id,
+                       notes, raw_telegram_text, created_at
+                FROM user_actions
+                WHERE id = %s
+                """,
+                (action_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
+
+
+def update_user_action_executed(
+    action_id: int,
+    executed_action: str,
+    executed_dollars: float | None = None,
+    executed_shares: float | None = None,
+    executed_price: float | None = None,
+    account: str | None = None,
+    fidelity_confirmation_id: str | None = None,
+) -> bool:
+    """Mark a user_action as executed (i.e. the trade was placed). Used when
+    the user follows up later with "DONE A1234 OIH 100sh @ 419.50"."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE user_actions
+                SET executed = TRUE,
+                    executed_action = COALESCE(%s, executed_action),
+                    executed_dollars = COALESCE(%s, executed_dollars),
+                    executed_shares = COALESCE(%s, executed_shares),
+                    executed_price = COALESCE(%s, executed_price),
+                    account = COALESCE(%s, account),
+                    fidelity_confirmation_id = COALESCE(%s, fidelity_confirmation_id)
+                WHERE id = %s
+                """,
+                (
+                    executed_action, executed_dollars, executed_shares,
+                    executed_price, account, fidelity_confirmation_id,
+                    action_id,
+                ),
+            )
+            updated = cur.rowcount
+        conn.commit()
+        return updated > 0
+
+
+def save_outcome_followup(
+    action_id: int,
+    days_after: int,
+    price_at_followup: float,
+    pnl_dollars: float | None = None,
+    pnl_pct: float | None = None,
+    notes: str | None = None,
+) -> int:
+    """Record a 1d/5d/20d outcome for a user_action. Idempotent on
+    (action_id, days_after) — re-running updates."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO outcome_followups
+                  (action_id, days_after, price_at_followup, pnl_dollars, pnl_pct, notes)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (action_id, days_after) DO UPDATE SET
+                  measured_at = NOW(),
+                  price_at_followup = EXCLUDED.price_at_followup,
+                  pnl_dollars = EXCLUDED.pnl_dollars,
+                  pnl_pct = EXCLUDED.pnl_pct,
+                  notes = EXCLUDED.notes
+                RETURNING id
+                """,
+                (action_id, days_after, price_at_followup, pnl_dollars, pnl_pct, notes),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return row[0]
 
 
 # ─────────────────────────── Trade recommendations ───────────────────────────

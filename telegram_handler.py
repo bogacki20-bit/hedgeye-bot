@@ -67,6 +67,197 @@ def _drain_pending_updates(token):
         return None
 
 
+# ─────────────────────────── Decision parser ───────────────────────────
+
+import re
+
+# Recognised decision verbs the user can reply with. Lowercased for matching.
+# These map to user_actions.decision values; canonical form is uppercase.
+DECISION_VERBS = {
+    "buy", "sell",
+    "add", "trim",
+    "long", "short",
+    "pass", "skip", "ignore",
+    "later", "wait", "hold",
+    "override",
+    "done", "filled", "executed",
+}
+
+# Pattern A: "A1234 ACTION amount?"  e.g. "A1234 BUY 100"
+ALERT_ID_PATTERN = re.compile(
+    r"^\s*A\s*(?P<alert_id>\d+)\s+(?P<verb>\w+)(?:\s+(?P<rest>.*))?\s*$",
+    re.IGNORECASE,
+)
+
+# Pattern B: "TICKER ACTION amount?"  e.g. "OIH BUY 100"
+TICKER_PATTERN = re.compile(
+    r"^\s*(?P<ticker>[A-Z][A-Z0-9./\-]{0,9})\s+(?P<verb>\w+)(?:\s+(?P<rest>.*))?\s*$"
+)
+
+# Pattern C: "DONE A1234 100sh @ 419.50" or "FILLED A1234 100sh @419.50"
+EXECUTION_PATTERN = re.compile(
+    r"^\s*(?:DONE|FILLED|EXECUTED)\s+A\s*(?P<alert_id>\d+)"
+    r"(?:\s+(?P<shares>\d+(?:\.\d+)?)\s*(?:sh|shs|shares)?)?"
+    r"(?:\s*@\s*(?P<price>\d+(?:\.\d+)?))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_amount(rest: str | None) -> tuple[float | None, str | None]:
+    """Pull a dollar amount or share count out of the trailing text.
+    Returns (dollars, shares) - either may be None.
+
+    Heuristic: "100" or "$100" -> dollars. "100sh" or "100 shares" -> shares.
+    """
+    if not rest:
+        return None, None
+    rest = rest.strip()
+    m = re.match(r"^\$?(\d+(?:\.\d+)?)\s*(sh|shs|shares)?\s*$", rest, re.IGNORECASE)
+    if not m:
+        return None, None
+    n = float(m.group(1))
+    if m.group(2):
+        return None, n
+    return n, None
+
+
+def parse_decision(text: str) -> dict | None:
+    """Parse a user's Telegram message into a structured decision.
+
+    Returns None if the message doesn't look like a decision command.
+    Returned dict keys:
+        verb         — uppercase verb (BUY/SELL/PASS/etc), required
+        alert_id     — int if user referenced an alert id, else None
+        ticker       — uppercase ticker if no alert id provided, else None
+        is_execution — True for DONE/FILLED messages
+        shares       — float or None
+        dollars      — float or None
+        raw_text     — original text
+    """
+    if not text or not text.strip():
+        return None
+
+    # First check execution-confirmation pattern (DONE A1234 100sh @ 419.50)
+    m = EXECUTION_PATTERN.match(text)
+    if m:
+        return {
+            "verb": "DONE",
+            "alert_id": int(m.group("alert_id")),
+            "ticker": None,
+            "is_execution": True,
+            "shares": float(m.group("shares")) if m.group("shares") else None,
+            "dollars": None,
+            "price": float(m.group("price")) if m.group("price") else None,
+            "raw_text": text,
+        }
+
+    # Then alert-id pattern (A1234 BUY 100)
+    m = ALERT_ID_PATTERN.match(text)
+    if m and m.group("verb").lower() in DECISION_VERBS:
+        dollars, shares = _parse_amount(m.group("rest"))
+        return {
+            "verb": m.group("verb").upper(),
+            "alert_id": int(m.group("alert_id")),
+            "ticker": None,
+            "is_execution": False,
+            "shares": shares,
+            "dollars": dollars,
+            "price": None,
+            "raw_text": text,
+        }
+
+    # Then ticker-only pattern (OIH BUY 100)
+    m = TICKER_PATTERN.match(text)
+    if m and m.group("verb").lower() in DECISION_VERBS:
+        dollars, shares = _parse_amount(m.group("rest"))
+        return {
+            "verb": m.group("verb").upper(),
+            "alert_id": None,
+            "ticker": m.group("ticker").upper(),
+            "is_execution": False,
+            "shares": shares,
+            "dollars": dollars,
+            "price": None,
+            "raw_text": text,
+        }
+
+    return None
+
+
+def handle_decision(decision: dict) -> str:
+    """Resolve a parsed decision: look up the alert, save user_action, return reply text."""
+    try:
+        import db_pg
+    except ImportError:
+        return "Decision noted but db layer unavailable: " + decision.get("raw_text", "")
+
+    # Resolve which alert this decision is about
+    alert = None
+    alert_id = decision.get("alert_id")
+    ticker = decision.get("ticker")
+    if alert_id:
+        alert = db_pg.find_alert_by_id(alert_id)
+        if not alert:
+            return f"Alert A{alert_id} not found in db. Decision not logged."
+        ticker_resolved = alert["ticker"]
+    elif ticker:
+        alert = db_pg.find_recent_alert_for_ticker(ticker, hours=48)
+        if alert:
+            ticker_resolved = alert["ticker"]
+            alert_id = alert["id"]
+        else:
+            ticker_resolved = ticker  # log decision without an alert link
+    else:
+        return "Could not resolve which trade you mean (no alert id, no ticker)."
+
+    if decision["is_execution"]:
+        # DONE A1234 - update existing user_action to executed=True. Find the most
+        # recent un-executed user_action for this alert.
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id FROM user_actions
+                    WHERE alert_id = %s AND executed = FALSE
+                    ORDER BY decided_at DESC LIMIT 1
+                    """,
+                    (alert_id,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return f"No un-executed action found for alert A{alert_id}."
+        action_id = row[0]
+        db_pg.update_user_action_executed(
+            action_id,
+            executed_action="EXECUTED",
+            executed_shares=decision.get("shares"),
+            executed_price=decision.get("price"),
+        )
+        return (
+            f"Marked action #{action_id} on A{alert_id} {ticker_resolved} as EXECUTED"
+            + (f" ({decision['shares']:.0f}sh @ ${decision['price']:.2f})" if decision.get("shares") and decision.get("price") else "")
+            + "."
+        )
+
+    # Regular decision: save a new user_action row
+    action_id = db_pg.save_user_action(
+        ticker=ticker_resolved,
+        decision=decision["verb"],
+        alert_id=alert_id,
+        executed=False,
+        executed_dollars=decision.get("dollars"),
+        executed_shares=decision.get("shares"),
+        raw_telegram_text=decision["raw_text"],
+    )
+    suffix = f"A{alert_id}" if alert_id else "(no recent alert)"
+    return (
+        f"Logged decision #{action_id}: {decision['verb']} {ticker_resolved} {suffix}"
+        + (f" ${decision['dollars']:.0f}" if decision.get("dollars") else "")
+        + (f" {decision['shares']:.0f}sh" if decision.get("shares") else "")
+        + ". Reply DONE A<id> sh @ price when filled."
+    )
+
+
 def _run_listener(token, allowed_chat_id):
     _delete_webhook(token)
     offset = _drain_pending_updates(token)
@@ -117,7 +308,17 @@ def _run_listener(token, allowed_chat_id):
                     continue
 
                 log.info(f"Received from {chat_id}: {text!r}")
-                _send_message(token, chat_id, f"Got it: {text}")
+                # Try to parse as a structured decision; fall back to echo if not.
+                decision = parse_decision(text)
+                if decision:
+                    try:
+                        reply = handle_decision(decision)
+                    except Exception as e:
+                        log.error(f"handle_decision failed: {e}", exc_info=True)
+                        reply = f"Decision parsing error: {e}"
+                    _send_message(token, chat_id, reply)
+                else:
+                    _send_message(token, chat_id, f"Got it: {text}")
 
         except Exception as e:
             log.error(f"Listener loop error: {e}. Sleeping {GENERAL_ERROR_SLEEP}s.")
