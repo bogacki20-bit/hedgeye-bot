@@ -3,3 +3,13 @@
 __pycache__/
 *.pyc
 .playwright/
+
+# Bridge daemon runtime files
+bridge.log
+bridge.log.*
+bridge.startup.log
+bridge.watchdog.log
+.commands/
+
+# Local capture corpus (staged for ingestion to Postgres, not for git)
+data/snapshots/
