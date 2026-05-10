@@ -251,8 +251,14 @@ def get_spotgamma_ctx(ticker: str) -> dict:
     ctx: dict = {}
     try:
         # Per-ticker equity hub capture first, then the broad PM founders note.
+        # `spotgamma_equityhub` is the dedicated source corpus_ingest assigns
+        # to files under .../equityhub/ and .../equityhub_eod/ — these have
+        # the most specific Call/Put/Hedge wall numbers per ticker. We also
+        # check `spotgamma_other` as a fallback for any earlier captures
+        # written at the root of a date dir before the equityhub subfolder
+        # convention was adopted.
         doc = (
-            _fetch_latest_doc(["spotgamma_other"], ticker=ticker) or
+            _fetch_latest_doc(["spotgamma_equityhub", "spotgamma_other"], ticker=ticker) or
             _fetch_latest_doc(["spotgamma_founders_note"])
         )
         if doc:
