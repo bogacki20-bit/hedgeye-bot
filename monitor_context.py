@@ -226,20 +226,97 @@ def _parse_spotgamma_fields(text: str) -> dict:
     return out
 
 
+def _fetch_typed_spotgamma(ticker: str) -> Optional[dict]:
+    """Read the most-recent spotgamma_snapshots row for a ticker.
+
+    Preferred over the corpus_documents regex path because columns are typed
+    and exact (no regex false positives). Returns None on miss or DB error.
+    Returned dict matches the shape get_spotgamma_ctx exposes:
+      ticker, gamma_regime, key_levels{call_wall,put_wall,hedge_wall},
+      iv_rank, skew_rank, top_gamma_exp, source, source_date, source_ref.
+    """
+    try:
+        # Lazy import — slice 1 added spotgamma_client.py; we keep monitor_context
+        # functional even if spotgamma_client is somehow unimportable.
+        import spotgamma_client
+        row = spotgamma_client.latest(ticker)
+    except Exception as e:
+        log.warning(f"spotgamma_client.latest({ticker}) raised: {e}")
+        return None
+    if not row:
+        return None
+
+    # Build key_levels from non-null typed columns.
+    levels: dict = {}
+    for col in ("call_wall", "put_wall", "hedge_wall",
+                "key_gamma_strike", "key_delta_strike"):
+        v = row.get(col)
+        if v is not None:
+            try:
+                levels[col] = float(v)
+            except (TypeError, ValueError):
+                pass
+
+    # Gamma regime — typed columns don't carry the literal "positive/negative
+    # gamma" label, but call_gamma + put_gamma signs imply it. Negative call
+    # gamma + negative put gamma = dealers are short gamma overall (the typical
+    # SpotGamma "negative gamma" regime).
+    gamma_regime = None
+    cg, pg = row.get("call_gamma"), row.get("put_gamma")
+    try:
+        if cg is not None and pg is not None:
+            net = float(cg) + float(pg)
+            gamma_regime = "negative_gamma" if net < 0 else "positive_gamma"
+    except (TypeError, ValueError):
+        pass
+
+    return {
+        "ticker": (row.get("ticker") or ticker).upper(),
+        "gamma_regime": gamma_regime,
+        "key_levels": levels,
+        "iv_rank":    float(row["iv_rank"])    if row.get("iv_rank")    is not None else None,
+        "skew_rank":  float(row["skew_rank"])  if row.get("skew_rank")  is not None else None,
+        "top_gamma_exp": (
+            row["top_gamma_exp"].isoformat()
+            if row.get("top_gamma_exp") is not None
+            else None
+        ),
+        "source": "spotgamma_snapshots",
+        "source_date": (
+            row["snapshot_date"].isoformat()
+            if row.get("snapshot_date") is not None
+            else None
+        ),
+        "source_ref": row.get("source_ref"),
+        "capture_type": row.get("capture_type"),
+    }
+
+
 def get_spotgamma_ctx(ticker: str) -> dict:
     """Return per-ticker SpotGamma context as a dict.
 
-    Shape (all fields nullable; provenance + raw_snippet always present on hit):
+    Two-tier read:
+      1. spotgamma_snapshots (typed columns, populated by spotgamma_client)
+      2. corpus_documents regex over spotgamma_equityhub / _other / founders_note
+    Tier 1 is preferred because columns are exact; tier 2 is the fallback for
+    tickers that don't yet have a typed row (e.g. before populator runs, or
+    for SpotGamma-only docs that aren't equity hubs).
+
+    Shape (all fields nullable; provenance always present on hit):
         ticker         — input ticker, uppercased
         gamma_regime   — "positive_gamma" / "negative_gamma" / None
         key_levels     — {"call_wall": float, "put_wall": float, ...} (may be {})
-        source         — corpus source value
-        source_date    — ISO date the doc was published
-        source_ref     — corpus_documents.source_ref
-        raw_snippet    — first 1500 chars of body
+        iv_rank        — percent (e.g. 36.55), tier-1 only
+        skew_rank      — percent, tier-1 only
+        top_gamma_exp  — ISO date, tier-1 only
+        capture_type   — premarket / eod / on_demand, tier-1 only
+        source         — "spotgamma_snapshots" or corpus source value
+        source_date    — ISO date the row/doc was captured
+        source_ref     — file path or corpus_documents.source_ref
+        raw_snippet    — tier-2 only: first 1500 chars of body
 
-    Returns {} if `ticker` is empty, on DB error, or if neither a per-ticker
-    hub capture nor a recent founders note exists. Never raises.
+    Returns {} if `ticker` is empty, on DB error, or if neither a typed row
+    nor a corpus doc exists. Never raises.
     """
     if not ticker:
         return {}
@@ -249,34 +326,36 @@ def get_spotgamma_ctx(ticker: str) -> dict:
         return cached
 
     ctx: dict = {}
+    # Tier 1: typed read
     try:
-        # Per-ticker equity hub capture first, then the broad PM founders note.
-        # `spotgamma_equityhub` is the dedicated source corpus_ingest assigns
-        # to files under .../equityhub/ and .../equityhub_eod/ — these have
-        # the most specific Call/Put/Hedge wall numbers per ticker. We also
-        # check `spotgamma_other` as a fallback for any earlier captures
-        # written at the root of a date dir before the equityhub subfolder
-        # convention was adopted.
-        doc = (
-            _fetch_latest_doc(["spotgamma_equityhub", "spotgamma_other"], ticker=ticker) or
-            _fetch_latest_doc(["spotgamma_founders_note"])
-        )
-        if doc:
-            body = doc.get("body") or ""
-            fields = _parse_spotgamma_fields(body)
-            ctx = {
-                "ticker": ticker.upper(),
-                **fields,
-                "source": doc.get("source"),
-                "source_date": (
-                    str(doc["source_date"]) if doc.get("source_date") else None
-                ),
-                "source_ref": doc.get("source_ref"),
-                "raw_snippet": body[:1500],
-            }
+        typed = _fetch_typed_spotgamma(ticker)
+        if typed:
+            ctx = typed
     except Exception as e:
-        log.warning(f"get_spotgamma_ctx({ticker}) failed (returning empty): {e}")
-        ctx = {}
+        log.warning(f"typed spotgamma read for {ticker} raised: {e}")
+
+    # Tier 2: corpus_documents regex fallback (only if tier 1 missed)
+    if not ctx:
+        try:
+            doc = (
+                _fetch_latest_doc(["spotgamma_equityhub", "spotgamma_other"], ticker=ticker) or
+                _fetch_latest_doc(["spotgamma_founders_note"])
+            )
+            if doc:
+                body = doc.get("body") or ""
+                fields = _parse_spotgamma_fields(body)
+                ctx = {
+                    "ticker": ticker.upper(),
+                    **fields,
+                    "source": doc.get("source"),
+                    "source_date": (
+                        str(doc["source_date"]) if doc.get("source_date") else None
+                    ),
+                    "source_ref": doc.get("source_ref"),
+                    "raw_snippet": body[:1500],
+                }
+        except Exception as e:
+            log.warning(f"get_spotgamma_ctx({ticker}) tier-2 failed: {e}")
 
     _cache_put(cache_key, ctx)
     return ctx

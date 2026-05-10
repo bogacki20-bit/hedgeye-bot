@@ -198,6 +198,84 @@ CREATE INDEX IF NOT EXISTS idx_mfr_payload    ON mfr_snapshots USING GIN (full_p
 
 
 -- ============================================================================
+-- SPOTGAMMA EQUITY HUB SNAPSHOTS — typed per-ticker capture
+-- ============================================================================
+-- Mirrors the mfr_snapshots pattern but for SpotGamma's equity-hub data.
+-- Populated from data/snapshots/spotgamma/{date}/equityhub*/{TICKER}.md by
+-- spotgamma_client.populate_from_snapshots, and from on-demand chrome scrapes
+-- by spotgamma_client.refresh_via_chrome (slice 2). Read by
+-- monitor_context.get_spotgamma_ctx as the preferred path before falling back
+-- to corpus_documents regex.
+--
+-- capture_type values:
+--   'premarket'  — from data/snapshots/spotgamma/{date}/equityhub/{TICKER}.md
+--   'eod'        — from data/snapshots/spotgamma/{date}/equityhub_eod/{TICKER}.md
+--   'on_demand'  — from spotgamma_client.refresh_via_chrome (slice 2)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS spotgamma_snapshots (
+    ticker                  TEXT NOT NULL,
+    snapshot_date           DATE NOT NULL,
+    capture_type            TEXT NOT NULL,                   -- premarket / eod / on_demand
+
+    -- Headline data
+    price                   NUMERIC(14,4),
+    prev_close              NUMERIC(14,4),
+    daily_change_pct        NUMERIC(8,4),
+    stock_volume            BIGINT,
+    high_52w                NUMERIC(14,4),
+    low_52w                 NUMERIC(14,4),
+    earnings_date           DATE,
+
+    -- Key SpotGamma levels
+    call_wall               NUMERIC(14,4),
+    put_wall                NUMERIC(14,4),
+    hedge_wall              NUMERIC(14,4),
+    key_gamma_strike        NUMERIC(14,4),
+    key_delta_strike        NUMERIC(14,4),
+
+    -- Gamma posture (call_gamma / put_gamma stored as raw $ notional —
+    -- SpotGamma's "-2.31M" display is parsed to -2310000.00 here)
+    call_gamma              NUMERIC(20,4),
+    put_gamma               NUMERIC(20,4),
+    top_gamma_exp           DATE,
+    top_delta_exp           DATE,
+    gamma_hedge_est         NUMERIC(14,4),
+
+    -- Options activity (rank/percent fields stored as percent, e.g. 36.55)
+    call_volume             BIGINT,
+    put_volume              BIGINT,
+    put_call_oi_ratio       NUMERIC(8,4),
+    iv_1m                   NUMERIC(8,4),
+    rv_1m                   NUMERIC(8,4),
+    iv_rank                 NUMERIC(8,4),
+    skew_rank               NUMERIC(8,4),
+    garch_rank              NUMERIC(8,4),
+    options_implied_move    NUMERIC(14,4),
+
+    -- Provenance
+    source_ref              TEXT,                            -- file path or URL
+    raw_text                TEXT,                            -- full markdown body for ML fallback
+    full_payload            JSONB NOT NULL,                  -- all parsed fields as dict
+    fetched_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (ticker, snapshot_date, capture_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sg_ticker   ON spotgamma_snapshots(ticker);
+CREATE INDEX IF NOT EXISTS idx_sg_date     ON spotgamma_snapshots(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_sg_fetched  ON spotgamma_snapshots(fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sg_payload  ON spotgamma_snapshots USING GIN (full_payload);
+
+-- Widen gamma columns if the table was created with the original NUMERIC(14,4)
+-- footprint. Index ETFs (SPY/QQQ) can have $-billions of gamma which doesn't
+-- fit in 14 digits before the decimal. Idempotent: ALTER ... TYPE to the same
+-- shape is a no-op.
+ALTER TABLE spotgamma_snapshots ALTER COLUMN call_gamma TYPE NUMERIC(20,4);
+ALTER TABLE spotgamma_snapshots ALTER COLUMN put_gamma  TYPE NUMERIC(20,4);
+
+
+-- ============================================================================
 -- ALERTS FIRED — dedup so we don't re-alert same ticker/boundary same day
 -- ============================================================================
 
