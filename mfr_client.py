@@ -133,12 +133,117 @@ def _flatten_for_save(payload: dict) -> dict:
     return out
 
 
-def fetch_and_save(ticker: str, snapshot_date: date | None = None) -> dict | None:
-    """Fetch MFR for a ticker and persist to mfr_snapshots. Returns the saved
-    payload dict, or None if fetch failed.
+def _format_corpus_markdown(ticker: str, snapshot_date: date, flat: dict, payload: dict) -> str:
+    """Build a human-readable markdown body for the corpus_documents row.
 
-    Idempotent: PRIMARY KEY (ticker, snapshot_date) on the table — re-running
-    the same day overwrites via ON CONFLICT in save_mfr_snapshot.
+    Includes the typed fields (range, hurst, IV/RV, momentum, trend) plus a
+    raw JSON appendix so anything not in `flat` is still searchable via FTS.
+    """
+    def _fmt(v, suffix=""):
+        if v is None:
+            return "—"
+        try:
+            return f"{float(v):.4f}{suffix}"
+        except (TypeError, ValueError):
+            return str(v)
+
+    lines = [
+        f"# MFR Snapshot — {ticker} ({snapshot_date.isoformat()})",
+        "",
+        f"Source: MyFractalRange API (`https://myfractalrange.com/v2/asset/{payload.get('_mfr_ticker_used', ticker)}`)",
+        "",
+        "## Range & Trend",
+        "",
+        f"- **Range Low:**  {_fmt(flat.get('range_low'))}",
+        f"- **Range High:** {_fmt(flat.get('range_high'))}",
+        f"- **Price:**      {_fmt(flat.get('price'))}",
+        f"- **Trend Signal:**    {flat.get('trend_signal') or '—'}",
+        f"- **Momentum Signal:** {flat.get('momentum_signal') or '—'}",
+        "",
+        "## Volatility & Statistics",
+        "",
+        f"- **Hurst (daily):** {_fmt(flat.get('hurst'))}",
+        f"- **Hurst (3-month):** {_fmt(flat.get('hurst_3mo'))}",
+        f"- **Implied Vol (IV):** {_fmt(flat.get('iv'), '%')}",
+        f"- **Realized Vol (RV):** {_fmt(flat.get('rv'), '%')}",
+        f"- **Daily Change:** {_fmt(flat.get('daily_pct_change'), '%')}",
+        f"- **Previous Day Volume:** {flat.get('previous_day_volume') or '—'}",
+        "",
+        "## Raw payload",
+        "",
+        "```json",
+        json.dumps(payload, indent=2, default=str)[:4000],  # cap to keep FTS index sane
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def _save_to_corpus(ticker: str, snapshot_date: date, flat: dict, payload: dict) -> bool:
+    """Upsert an MFR snapshot into corpus_documents so it's searchable via FTS
+    alongside Hedgeye/SpotGamma/VolStudies content. Uses ON CONFLICT DO UPDATE
+    so re-fetching the same (ticker, date) overwrites stale text — opposite
+    of corpus_ingest's DO NOTHING semantics, which is correct for MFR since
+    the API returns refined values intra-day.
+
+    Returns True on success, False on any error. Never raises.
+    """
+    try:
+        import db_pg
+        body = _format_corpus_markdown(ticker, snapshot_date, flat, payload)
+        title = f"{ticker} MFR snapshot {snapshot_date.isoformat()}"
+        # Compact metadata: the typed `flat` fields plus the MFR ticker
+        # variant actually used (handles aliases like BITCOIN -> BTCUSD).
+        metadata = {
+            **{k: v for k, v in flat.items() if v is not None},
+            "_mfr_ticker_used": payload.get("_mfr_ticker_used", ticker),
+        }
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO corpus_documents (
+                        source, source_date, source_ref,
+                        document_type, page_or_segment,
+                        title, full_text, metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source, COALESCE(source_ref, ''), source_date, COALESCE(page_or_segment, -1))
+                    DO UPDATE SET
+                        title     = EXCLUDED.title,
+                        full_text = EXCLUDED.full_text,
+                        metadata  = EXCLUDED.metadata
+                    """,
+                    (
+                        "mfr_snapshot",
+                        snapshot_date,
+                        ticker,                  # source_ref = ticker symbol
+                        "mfr_signal",
+                        None,                    # page_or_segment unused
+                        title,
+                        body,
+                        json.dumps(metadata, default=str),
+                    ),
+                )
+            conn.commit()
+        return True
+    except Exception as e:
+        log.warning("MFR -> corpus_documents write failed for %s: %s", ticker, e)
+        return False
+
+
+def fetch_and_save(ticker: str, snapshot_date: date | None = None) -> dict | None:
+    """Fetch MFR for a ticker and persist to mfr_snapshots + corpus_documents.
+
+    Returns the saved payload dict, or None if fetch failed.
+
+    Dual-write semantics:
+      - mfr_snapshots: typed columns, idempotent on (ticker, snapshot_date).
+      - corpus_documents: searchable markdown body, upsert on (mfr_snapshot,
+        ticker, snapshot_date, NULL) so FTS over the corpus surfaces MFR
+        commentary alongside Hedgeye/SpotGamma/VolStudies docs.
+
+    Either save can fail independently — a corpus write failure does not
+    discard the typed mfr_snapshots row.
     """
     payload = fetch_raw(ticker)
     if not payload:
@@ -167,10 +272,54 @@ def fetch_and_save(ticker: str, snapshot_date: date | None = None) -> dict | Non
         except Exception as e:
             # Inventory table may not exist yet (migration 004 not applied).
             log.debug("could not update inventory.last_mfr_fetched_at for %s: %s", ticker, e)
+        # Mirror to corpus_documents (best-effort, non-fatal).
+        _save_to_corpus(ticker, snapshot_date, flat, payload)
         return payload
     except Exception as e:
         log.warning("MFR save failed for %s: %s", ticker, e)
         return None
+
+
+def backfill_corpus_from_snapshots(*, since: date | None = None) -> dict:
+    """Walk existing mfr_snapshots rows and write a corpus_documents row for
+    each. Useful one-time after deploying the MFR-to-corpus hook so historical
+    snapshots become searchable via FTS.
+
+    Args:
+        since: optional date floor; only rows with snapshot_date >= since
+            are processed. None means all rows.
+
+    Returns {"considered": N, "written": M, "failed": F}.
+    """
+    summary = {"considered": 0, "written": 0, "failed": 0}
+    sql = "SELECT ticker, snapshot_date, full_payload FROM mfr_snapshots"
+    params: list = []
+    if since is not None:
+        sql += " WHERE snapshot_date >= %s"
+        params.append(since)
+    sql += " ORDER BY snapshot_date DESC, ticker"
+
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+    except Exception as e:
+        log.warning("backfill_corpus_from_snapshots query failed: %s", e)
+        return summary
+
+    for ticker, snap_date, full_payload in rows:
+        summary["considered"] += 1
+        # full_payload arrives as dict from psycopg2 JSONB
+        payload = full_payload if isinstance(full_payload, dict) else {}
+        flat = _flatten_for_save(payload)
+        ok = _save_to_corpus(ticker, snap_date, flat, payload)
+        if ok:
+            summary["written"] += 1
+        else:
+            summary["failed"] += 1
+    return summary
 
 
 def refresh_for_tickers(tickers: list[str]) -> dict:
@@ -196,3 +345,73 @@ def refresh_for_tickers(tickers: list[str]) -> dict:
             log.exception("MFR refresh failed for %s: %s", t, e)
             summary["fail"] += 1
     return summary
+
+
+# ─────────────────────────── CLI smoke test ───────────────────────────
+
+def _cli() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="mfr_client CLI — refresh tickers, backfill corpus from existing snapshots"
+    )
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--refresh", action="store_true",
+                   help="With --tickers, fetch+save (and mirror to corpus_documents)")
+    g.add_argument("--backfill-corpus", action="store_true",
+                   help="Walk existing mfr_snapshots rows and write corpus_documents rows")
+    g.add_argument("--latest", metavar="TICKER",
+                   help="Print the latest mfr_snapshots row for TICKER")
+    ap.add_argument("--tickers", nargs="+", help="Ticker list for --refresh")
+    ap.add_argument("--since", metavar="YYYY-MM-DD",
+                    help="Backfill: only process snapshots on/after this date")
+    args = ap.parse_args()
+
+    if args.refresh:
+        if not args.tickers:
+            print("--refresh requires --tickers TICKER1 TICKER2 ...")
+            return
+        summary = refresh_for_tickers(args.tickers)
+        print(json.dumps(summary, indent=2))
+        return
+
+    if args.backfill_corpus:
+        since_d = None
+        if args.since:
+            try:
+                since_d = date.fromisoformat(args.since)
+            except ValueError:
+                print(f"--since must be YYYY-MM-DD, got {args.since!r}")
+                return
+        summary = backfill_corpus_from_snapshots(since=since_d)
+        print(json.dumps(summary, indent=2))
+        return
+
+    if args.latest:
+        try:
+            import db_pg
+            with db_pg.get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT ticker, snapshot_date, price, range_low, range_high, "
+                        "       trend_signal, momentum_signal, hurst, iv, rv "
+                        "  FROM mfr_snapshots WHERE ticker = %s "
+                        " ORDER BY snapshot_date DESC LIMIT 1",
+                        (args.latest.upper(),),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        print(f"no rows for {args.latest!r}")
+                        return
+                    cols = [d[0] for d in cur.description]
+                    print(json.dumps(dict(zip(cols, row)), indent=2, default=str))
+        except Exception as e:
+            print(f"latest({args.latest}) failed: {e}")
+        return
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    )
+    _cli()
