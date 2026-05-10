@@ -30,6 +30,13 @@ BRIDGE_SCRIPT  = REPO_ROOT / "command_bridge.py"
 
 HEARTBEAT_STALE_SECONDS = int(os.environ.get("BRIDGE_STALE_SECONDS", "180"))
 
+# Suppress console-window flashes for every subprocess call. The watchdog runs
+# every ~5 min via Task Scheduler; without this flag the tasklist / taskkill
+# / railway / urlopen subprocesses each pop a black window briefly. Combined
+# with the Task Scheduler entry using pyw.exe (windowless Python), this gives
+# a fully silent watchdog cycle on healthy runs.
+CREATE_NO_WINDOW = 0x08000000
+
 
 def _log(msg):
     line = f"{datetime.utcnow().isoformat()}Z [watchdog] {msg}\n"
@@ -71,7 +78,8 @@ def _telegram_send(text):
                     if not os.environ.get(var):
                         cp = subprocess.run(
                             ["railway", "variables"], cwd=str(REPO_ROOT),
-                            capture_output=True, text=True, timeout=20, shell=False
+                            capture_output=True, text=True, timeout=20, shell=False,
+                            creationflags=CREATE_NO_WINDOW,
                         )
                         if cp.returncode == 0:
                             for line in cp.stdout.splitlines():
@@ -107,6 +115,7 @@ def _pid_alive(pid):
         cp = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
             capture_output=True, text=True, timeout=15, shell=False,
+            creationflags=CREATE_NO_WINDOW,
         )
         return cp.returncode == 0 and (str(pid) in cp.stdout)
     except Exception:
@@ -120,6 +129,7 @@ def _kill_pid(pid):
         subprocess.run(
             ["taskkill", "/F", "/PID", str(pid)],
             capture_output=True, text=True, timeout=15, shell=False,
+            creationflags=CREATE_NO_WINDOW,
         )
     except Exception:
         pass
@@ -175,11 +185,26 @@ def _relaunch_bridge():
     """
     DETACHED_PROCESS = 0x00000008
     CREATE_NEW_PROCESS_GROUP = 0x00000200
-    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    # CREATE_NO_WINDOW guarantees no console window for python.exe relaunch.
+    # DETACHED_PROCESS alone *can* leave a brief flash on some Windows builds.
+    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     log_handle = open(STARTUP_LOG, "a", encoding="utf-8")
-    # Use sys.executable so we use whatever python launched us (py.exe or python.exe).
+    # Prefer pythonw.exe (windowless) over python.exe to ensure the relaunched
+    # bridge has no console at all. Fall back to sys.executable if pyw isn't
+    # alongside python.exe.
+    py = sys.executable
+    if py.lower().endswith("python.exe"):
+        candidate = py[:-len("python.exe")] + "pythonw.exe"
+        from pathlib import Path as _P
+        if _P(candidate).exists():
+            py = candidate
+    elif py.lower().endswith("py.exe"):
+        candidate = py[:-len("py.exe")] + "pyw.exe"
+        from pathlib import Path as _P
+        if _P(candidate).exists():
+            py = candidate
     proc = subprocess.Popen(
-        [sys.executable, str(BRIDGE_SCRIPT)],
+        [py, str(BRIDGE_SCRIPT)],
         cwd=str(REPO_ROOT),
         stdout=log_handle,
         stderr=log_handle,
