@@ -432,17 +432,77 @@ def _process_new_email(parsed: dict) -> None:
         return
 
     if item.get("classified_type") == "trade_signal" and item.get("ticker"):
-        # Recommender migration deferred to a separate task — both
-        # `portfolio.py` and `recommender.py` still talk to the (now
-        # abandoned) SQLite DB and need their own focused port to db_pg.
-        # Until then, the raw trade-signal email body is still pushed to
-        # Telegram by the send_pushover call above; we just don't generate
-        # the sized "BUY $X SPY in IRA" recommendation message yet.
-        log.info(
-            f"  trade_signal detected: {item.get('direction', '?')} "
-            f"{item.get('ticker')} (conviction={item.get('conviction', '?')!r}) "
-            f"— sized recommendation deferred (recommender migration pending)"
-        )
+        # Sized recommendation via decision_engine (slice 0c). For every
+        # trade-signal email, call the Claude-backed decision_engine with
+        # the classifier-tagged conviction and the multi-source context
+        # (Hedgeye Quad + Risk Range + SpotGamma + MFR + Yahoo + corpus
+        # FTS). decision_engine returns a structured decision dict — we
+        # format it as a Telegram message and ping the user for approval.
+        #
+        # Non-fatal: any failure here logs a warning and falls through to
+        # the universal ticker-inventory + lockstep refresh block below.
+        # decision_engine.decide() returns None on missing API key or
+        # API error, so we just check truthiness.
+        try:
+            import decision_engine
+            ticker = item.get("ticker") or ""
+            decision = decision_engine.decide(
+                ticker.upper(),
+                signal_origin="rta",
+                signal_conviction=item.get("conviction"),
+            )
+            if decision:
+                # Build a Telegram-friendly message body. Same shape as
+                # price_monitor's alert text so the user sees a uniform
+                # format whether the trigger was an email or a range edge.
+                bps        = decision.get("bps")
+                dollars    = decision.get("recommended_dollars")
+                conf       = decision.get("confidence")
+                reasoning  = decision.get("reasoning") or ""
+                evidence   = decision.get("evidence") or []
+                action     = decision.get("action") or "WATCH"
+                conviction_tier = decision.get("conviction") or item.get("conviction", "?")
+
+                size_str = (
+                    f"${dollars:.0f} ({bps} bps)" if dollars and bps
+                    else "no size"
+                )
+                title = f"Hedgeye: {action} {ticker.upper()} — {conviction_tier}"
+                lines = [
+                    f"→ {action} {ticker.upper()}  size {size_str}",
+                    f"confidence: {conf:.0%}" if isinstance(conf, (int, float)) else "",
+                    "",
+                    reasoning[:400],
+                ]
+                if evidence:
+                    lines.append("")
+                    lines.append("evidence:")
+                    for e in evidence[:5]:
+                        lines.append(f"  • {str(e)[:120]}")
+                msg = "\n".join(L for L in lines if L is not None)
+
+                try:
+                    from notifier import send_telegram
+                    send_telegram(title, msg[:1024])
+                    log.info(
+                        f"  decision_engine fired: action={action} bps={bps} "
+                        f"dollars={dollars} conviction={conviction_tier}"
+                    )
+                except Exception as te:
+                    log.warning(f"  decision_engine telegram send failed: {te}")
+            else:
+                log.info(
+                    f"  trade_signal detected: {item.get('direction', '?')} "
+                    f"{item.get('ticker')} — decision_engine returned None "
+                    f"(check ANTHROPIC_API_KEY)"
+                )
+        except Exception as e:
+            log.warning(f"  decision_engine call failed: {e}")
+            log.info(
+                f"  trade_signal detected: {item.get('direction', '?')} "
+                f"{item.get('ticker')} (conviction={item.get('conviction', '?')!r}) "
+                f"— decision engine errored, falling through"
+            )
 
     # ───────── Universal ticker inventory + MFR refresh ─────────
     # Every Hedgeye email — RTA, Risk Range, Signal Strength, ETF Pro,
