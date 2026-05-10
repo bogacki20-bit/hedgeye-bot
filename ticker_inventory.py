@@ -33,15 +33,41 @@ POS_SHORT   = "short"
 POS_NEUTRAL = "neutral"
 POS_CLOSED  = "closed"
 
-# Source canonical values
-SOURCE_RISK_RANGE     = "risk_range"
-SOURCE_RTA            = "rta"
-SOURCE_INVESTING_IDEA = "investing_ideas"
-SOURCE_MACRO_SHOW     = "macro_show"
-SOURCE_SIGNAL_CHANGE  = "signal_change"
-SOURCE_SECTOR_PRO     = "sector_pro"
-SOURCE_ETF_PRO        = "etf_pro"
-SOURCE_OTHER          = "other"
+# Source canonical values — must stay in sync with the subject-classifier
+# in email_parser.py (the strings flow through to hedgeye_ticker_history.source).
+# Order roughly mirrors product priority / signal volume.
+#
+# Tier-1 daily-signal products (every Hedgeye email parser routes here):
+SOURCE_RISK_RANGE             = "risk_range"
+SOURCE_RTA                    = "rta"
+SOURCE_SIGNAL_CHANGE          = "signal_change"
+
+# Pro Risk Manager — the $8K/year flagship bundle. Many bundled products
+# emit emails under their own branding (Risk Range, RTA, etc) and are
+# matched above; emails branded *as Pro Risk Manager* land here.
+SOURCE_PRO_RISK_MANAGER       = "pro_risk_manager"
+
+# Sector / specialty Pro products Kristian subscribes to as of 2026-05-07:
+SOURCE_RETAIL_PRO             = "retail_pro"
+SOURCE_FINANCIALS_SECTOR_PRO  = "financials_sector_pro"
+SOURCE_REITS_PRO              = "reits_pro"
+SOURCE_CAPITAL_ALLOCATION_PRO = "capital_allocation_pro"
+SOURCE_HEDGAI_SIGNALS         = "hedgai_signals"
+SOURCE_BITCOIN_TREND_TRACKER  = "bitcoin_trend_tracker"
+SOURCE_MARKET_SITUATION_REPORT = "market_situation_report"
+
+# Other Hedgeye content streams (not subscribed standalone but emails arrive
+# via bundles or free distribution):
+SOURCE_INVESTING_IDEA         = "investing_ideas"
+SOURCE_MACRO_SHOW             = "macro_show"
+SOURCE_EARLY_LOOK             = "early_look"
+SOURCE_ETF_PRO                = "etf_pro"
+SOURCE_SIGNAL_STRENGTH        = "signal_strength"
+
+# Catch-alls for classifier-tagged categories the subject regex can't match:
+SOURCE_SECTOR_PRO             = "sector_pro"        # generic sector_research without a specific Pro
+SOURCE_TRADE_SIGNAL           = "trade_signal"      # classifier-tagged signal w/o Hedgeye-product hint
+SOURCE_OTHER                  = "other"
 
 
 def note_ticker(

@@ -479,18 +479,22 @@ def _process_new_email(parsed: dict) -> None:
 
         if tickers_in_msg:
             # Map subject + classified_type -> ticker_inventory source string.
+            # Order matters: more-specific matchers first. Subject substrings
+            # are checked against the lowercased subject. Source values must
+            # match the SOURCE_* constants in ticker_inventory.py.
             subject_lower = (item.get("subject") or "").lower()
             ctype = (item.get("classified_type") or "").lower()
-            if "real-time alert" in subject_lower or "rta" in subject_lower:
+
+            # Tier-1 daily-signal products. The RTA matcher uses a word-
+            # boundary regex so "RTA:" / "RTA -" / "Daily RTA" all match
+            # without false-positive on things like "EXTRACT" or "PORTAL".
+            if "real-time alert" in subject_lower or re.search(r"\brta\b", subject_lower):
                 source = "rta"
             elif "risk range" in subject_lower:
                 source = "risk_range"
-            elif "signal strength" in subject_lower:
-                source = "signal_strength"
-            elif "etf pro" in subject_lower:
-                source = "etf_pro"
-            elif "investing idea" in subject_lower:
-                source = "investing_ideas"
+
+            # Sector / specialty Pro products (active subscriptions per
+            # data/snapshots/hedgeye/2026-05-07/subscriptions_inventory.md)
             elif "capital allocation" in subject_lower:
                 source = "capital_allocation_pro"
             elif "financial" in subject_lower and "sector" in subject_lower:
@@ -499,10 +503,30 @@ def _process_new_email(parsed: dict) -> None:
                 source = "retail_pro"
             elif "reits" in subject_lower:
                 source = "reits_pro"
+            elif "hedgai" in subject_lower:
+                source = "hedgai_signals"
+            elif "bitcoin trend tracker" in subject_lower:
+                source = "bitcoin_trend_tracker"
+            elif "market situation report" in subject_lower:
+                source = "market_situation_report"
+            elif "pro risk manager" in subject_lower or "prm:" in subject_lower:
+                # Branded Pro Risk Manager content not already caught by the
+                # bundled-product matchers above.
+                source = "pro_risk_manager"
+
+            # Other Hedgeye content streams
+            elif "signal strength" in subject_lower:
+                source = "signal_strength"
+            elif "etf pro" in subject_lower:
+                source = "etf_pro"
+            elif "investing idea" in subject_lower:
+                source = "investing_ideas"
             elif "macro show" in subject_lower:
                 source = "macro_show"
             elif "early look" in subject_lower:
                 source = "early_look"
+
+            # Fallbacks driven by the classifier's structural categorization
             elif ctype == "sector_research":
                 source = "sector_pro"
             elif ctype == "trade_signal":
