@@ -395,9 +395,11 @@ def latest(ticker: str) -> Optional[dict]:
         return None
 
 
-def is_stale(ticker: str, max_age_minutes: int = 60) -> bool:
+def is_stale(ticker: str, max_age_minutes: int = 240) -> bool:
     """Return True if the latest snapshot for ticker is older than max_age_minutes
-    (or if no snapshot exists). Used by slice 2 to decide whether to chrome-scrape.
+    (or if no snapshot exists). Default threshold 4 hours = roughly between AM
+    and EOD daily sweeps; an in-session refresh request older than that probably
+    misses real intraday move-in.
     """
     row = latest(ticker)
     if not row:
@@ -407,6 +409,75 @@ def is_stale(ticker: str, max_age_minutes: int = 60) -> bool:
         return True
     age_minutes = (datetime.now(fetched.tzinfo) - fetched).total_seconds() / 60.0
     return age_minutes > max_age_minutes
+
+
+def tickers_needing_refresh(tickers: list[str], max_age_minutes: int = 240) -> list[str]:
+    """Filter `tickers` down to those whose latest snapshot is missing or stale."""
+    return [t.upper().strip() for t in tickers
+            if t and is_stale(t.upper().strip(), max_age_minutes)]
+
+
+# ─────────────────────────── Refresh queue ───────────────────────────
+# Cowork-side bridge between Python (which knows what's stale) and the
+# spotgamma-refresh-queue SKILL (which uses Chrome MCP to actually scrape).
+# ─────────────────────────────────────────────────────────────────────
+
+REFRESH_QUEUE_PATH = Path(__file__).parent / ".commands" / "spotgamma_refresh_queue.json"
+
+
+def queue_refresh(tickers: list[str], *, reason: str = "manual") -> dict:
+    """Write `tickers` to the SpotGamma refresh queue file.
+
+    Idempotent: if the queue already has entries, the new tickers are merged
+    in (deduped, uppercased). The Cowork-side SKILL drains this file when it
+    runs.
+
+    Returns {"queued": N, "queue_size": M, "path": ...}.
+    """
+    new_tickers = sorted({t.upper().strip() for t in tickers if t and t.strip()})
+    if not new_tickers:
+        return {"queued": 0, "queue_size": 0, "path": str(REFRESH_QUEUE_PATH)}
+
+    REFRESH_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing: dict = {"tickers": [], "queued_at": None, "reason": None}
+    if REFRESH_QUEUE_PATH.exists():
+        try:
+            existing = json.loads(REFRESH_QUEUE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {"tickers": [], "queued_at": None, "reason": None}
+
+    merged = sorted(set(existing.get("tickers") or []) | set(new_tickers))
+    payload = {
+        "queued_at": datetime.now().astimezone().isoformat(),
+        "reason": reason,
+        "tickers": merged,
+    }
+    REFRESH_QUEUE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return {
+        "queued": len(new_tickers),
+        "queue_size": len(merged),
+        "path": str(REFRESH_QUEUE_PATH),
+    }
+
+
+def read_refresh_queue(*, drain: bool = False) -> dict:
+    """Return the current refresh queue as {"tickers": [...], "queued_at": ..., "reason": ...}.
+
+    If `drain=True`, deletes the queue file after reading. Used by the Cowork
+    SKILL after it has successfully scraped + ingested.
+    """
+    if not REFRESH_QUEUE_PATH.exists():
+        return {"tickers": [], "queued_at": None, "reason": None}
+    try:
+        data = json.loads(REFRESH_QUEUE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        data = {"tickers": [], "queued_at": None, "reason": None}
+    if drain:
+        try:
+            REFRESH_QUEUE_PATH.unlink()
+        except OSError:
+            pass
+    return data
 
 
 # ─────────────────────────── CLI smoke test ───────────────────────────
@@ -422,6 +493,19 @@ def _cli() -> None:
                    help="Print the latest spotgamma_snapshots row for TICKER")
     g.add_argument("--parse", metavar="PATH",
                    help="Parse a single equity hub markdown file and print the dict (no DB)")
+    g.add_argument("--stale", action="store_true",
+                   help="With --tickers, print which of the listed tickers need a refresh")
+    g.add_argument("--queue", action="store_true",
+                   help="With --tickers, queue those tickers for chrome-driven refresh")
+    g.add_argument("--queue-status", action="store_true",
+                   help="Print the current refresh queue contents")
+    g.add_argument("--queue-drain", action="store_true",
+                   help="Read the refresh queue then delete the file (used by the SKILL after scrape+ingest succeeds)")
+    ap.add_argument("--tickers", nargs="+", help="Ticker list for --stale / --queue")
+    ap.add_argument("--max-age-minutes", type=int, default=240,
+                    help="Staleness threshold for --stale (default 240 = 4h)")
+    ap.add_argument("--reason", default="manual",
+                    help="Reason annotation for --queue (e.g. 'hedgeye_email')")
     ap.add_argument("--root", help="Override snapshots root (defaults to repo data/snapshots/spotgamma)")
     args = ap.parse_args()
 
@@ -448,6 +532,30 @@ def _cli() -> None:
             return
         printable = {k: v for k, v in parsed.items() if k != "_raw_text"}
         print(json.dumps(printable, indent=2, default=str))
+        return
+
+    if args.stale:
+        if not args.tickers:
+            print("--stale requires --tickers TICKER1 TICKER2 ...")
+            return
+        stale = tickers_needing_refresh(args.tickers, max_age_minutes=args.max_age_minutes)
+        print(json.dumps({"max_age_minutes": args.max_age_minutes, "stale": stale}, indent=2))
+        return
+
+    if args.queue:
+        if not args.tickers:
+            print("--queue requires --tickers TICKER1 TICKER2 ...")
+            return
+        result = queue_refresh(args.tickers, reason=args.reason)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.queue_status:
+        print(json.dumps(read_refresh_queue(), indent=2))
+        return
+
+    if args.queue_drain:
+        print(json.dumps(read_refresh_queue(drain=True), indent=2))
         return
 
 
