@@ -260,18 +260,20 @@ def compose_recommendation(
     """Translate a zone + Risk Range edge into a recommendation dict.
 
     Returns keys (all optional / nullable):
-        text                 — human-readable suggestion ("ADD ~$1500 in OIH")
+        text                 — human-readable suggestion (e.g. "ADD ~$250 OIH (50 bps)")
         suggested_action     — verb: BUY / ADD / TRIM / SELL / WATCH
         suggested_dollars    — float (None if no specific amount)
+        suggested_bps        — int (50 or 100; None for trim/watch)
         framework_alignment  — "aligned" / "counter" / "neutral" / "stale"
         hedgeye_context      — dict snapshot (today's quad, vix bucket, etc)
         spotgamma_context    — dict snapshot (call wall / put wall / hedge wall if known)
 
     Logic mirrors Hedgeye U Ch2 framework: "top of range you sell, bottom of
-    range you buy" (Risk Range Signal Deep Dive). Style B sizing per
-    recommender.SIZING:
-        bottom_third  -> ADD  ~$1500 (3% of $50K, capped)
-        below_range   -> ADD  ~$1500 (range break, deeper opportunity)
+    range you buy" (Risk Range Signal Deep Dive). Sizing uses bps per
+    framework_quotes_compiled.md Ch3 Lessons 2 + 4 (100 bps starter, 50 bps
+    adds, $1K real-world ceiling):
+        bottom_third  -> ADD  at ADD_BPS_LOW (50 bps of account, $1K cap)
+        below_range   -> BUY  at STARTER_BPS (100 bps starter, broken range)
         top_third     -> TRIM (50% of position)
         above_range   -> WATCH (range break above — let it ride or trim?)
 
@@ -293,20 +295,38 @@ def compose_recommendation(
         hedgeye_ctx = {}
         spotgamma_ctx = {}
 
+    # Suggested $ size: bps × account value, clamped at $1K per-fill ceiling.
+    # Single source of truth for sizing math is recommender.size_from_bps.
+    # The decision_engine (slice 0b) will eventually replace these inline
+    # calculations with a Claude API call synthesizing multi-source context.
+    try:
+        from recommender import size_from_bps, STARTER_BPS, ADD_BPS_LOW
+        from portfolio import account_value, hedgeye_target_account
+        _acct = hedgeye_target_account(direction="Long")
+        _acct_val = account_value(_acct) or 0
+        _starter_usd = size_from_bps(STARTER_BPS, _acct_val) if _acct_val else 500.0
+        _add_usd     = size_from_bps(ADD_BPS_LOW, _acct_val) if _acct_val else 500.0
+    except Exception as e:
+        log.warning(f"size_from_bps lookup failed; using $500 placeholder: {e}")
+        _starter_usd, _add_usd = 500.0, 500.0
+        STARTER_BPS, ADD_BPS_LOW = 100, 50
+
     if zone == "bottom_third":
         return {
-            "text": f"ADD ~$1500 {ticker} at {price:.2f} (bottom third of range, framework-aligned).",
+            "text": f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, bottom third of range, framework-aligned).",
             "suggested_action": "ADD",
-            "suggested_dollars": 1500.0,
+            "suggested_dollars": _add_usd,
+            "suggested_bps": ADD_BPS_LOW,
             "framework_alignment": "aligned" if trend in ("bullish", "up") else "neutral",
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "below_range":
         return {
-            "text": f"BUY ~$1500 {ticker} at {price:.2f} (broken below range, contrarian add).",
+            "text": f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, broken below range, contrarian add).",
             "suggested_action": "BUY",
-            "suggested_dollars": 1500.0,
+            "suggested_dollars": _starter_usd,
+            "suggested_bps": STARTER_BPS,
             "framework_alignment": "neutral",
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
@@ -316,6 +336,7 @@ def compose_recommendation(
             "text": f"TRIM 50% {ticker} at {price:.2f} (top third of range, fade strength).",
             "suggested_action": "TRIM",
             "suggested_dollars": None,
+            "suggested_bps": None,
             "framework_alignment": "aligned" if trend in ("bullish", "up") else "neutral",
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
@@ -325,6 +346,7 @@ def compose_recommendation(
             "text": f"WATCH {ticker} at {price:.2f} — broke above range. Trim or let it run?",
             "suggested_action": "WATCH",
             "suggested_dollars": None,
+            "suggested_bps": None,
             "framework_alignment": "neutral",
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
@@ -333,6 +355,7 @@ def compose_recommendation(
         "text": f"{ticker} at {price:.2f} ({zone}) — no specific recommendation.",
         "suggested_action": None,
         "suggested_dollars": None,
+        "suggested_bps": None,
         "framework_alignment": "neutral",
         "hedgeye_context": hedgeye_ctx,
         "spotgamma_context": spotgamma_ctx,
@@ -377,7 +400,7 @@ def format_alert_message(ticker: str, price: float, low: float, high: float,
     if recommendation_text:
         body += f"\n\n{recommendation_text}"
     if alert_id:
-        body += f"\n\nReply A{alert_id} BUY/PASS/LATER (or A{alert_id} BUY $1500)."
+        body += f"\n\nReply A{alert_id} BUY/PASS/LATER (or A{alert_id} BUY $<amount>)."
 
     return title, body
 

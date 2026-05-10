@@ -4,12 +4,28 @@ Takes a classified Hedgeye signal (from classifier.py) and the current
 portfolio state (from portfolio.py), decides on a sized recommendation,
 logs it to SQLite, and returns a Pushover-ready summary.
 
-Sizing (tunable via constants below):
-  Best Idea  → 5% of target-account value, capped at $2,500
-  Adding     → 3% of target-account value, capped at $1,500
-  Reducing   → trim 50% of current position
-  Remove     → close 100% of current position
-  Monitor    → skip (notify only)
+SIZING FRAMEWORK (per Kristian + Hedgeye U Ch3 + framework_quotes_compiled.md)
+─────────────────────────────────────────────────────────────────────────────
+The trade size is computed from a basis-points-of-account-value (bps) starter
+or add, then clamped to a hard real-world per-fill dollar ceiling. The bps
+values + ceiling are the CONSTRAINT — the decision engine (Claude API) chooses
+the bps within these tiers when proposing a trade. Hardcoded calculation here
+is the safety net + the format that gets persisted on trade_recommendations.
+
+  Starter position (first BUY for a ticker):   100 bps  (= 1.0% of account)
+  Add to existing position:                     50 bps  (= 0.5%) or 100 bps
+  Per-fill ceiling (hard cap, regardless):   $1,000     (real-world risk cap)
+  Incremental build:    cap any single fill at ~33% of target position size
+
+  Trim (Reducing conviction):   50% of current position
+  Remove (Remove conviction):  100% of current position
+  Monitor:                      no trade, notify only
+
+CITATIONS (in corpus_documents):
+  - framework_quotes_compiled.md  → Ch3 Lesson 2 "A Refresher On Position Sizing"
+  - framework_quotes_compiled.md  → Ch3 Lesson 4 "Buy & Sell Incrementally"
+  - hedgeye_u_lesson_transcript / chapter3/a-refresher-on-position-sizing  (Keith's verbatim words)
+  - hedgeye_u_lesson_transcript / chapter3/strategy-tactics-buy-sell-incrementally
 """
 
 import logging
@@ -28,12 +44,53 @@ from portfolio import (
 
 log = logging.getLogger(__name__)
 
+# ─────────────────────────── Sizing constants ───────────────────────────
+# These constants are also the OUTPUT SCHEMA for decision_engine.py — when
+# Claude proposes a trade, the `bps` field MUST be one of {STARTER_BPS,
+# ADD_BPS_LOW, ADD_BPS_HIGH} and the dollar value implied is then clamped
+# to PER_FILL_CEILING_USD. Editing these constants ripples through both the
+# rule-based recommend_from_signal AND the AI decision engine's output
+# validation.
+
+STARTER_BPS         = 100     # First entry / new ticker. 1% of account.
+ADD_BPS_LOW         = 50      # Conservative add. 0.5%.
+ADD_BPS_HIGH        = 100     # Aggressive add (still in framework). 1%.
+PER_FILL_CEILING_USD = 1000   # Hard real-world cap, regardless of bps math.
+INCREMENTAL_FILL_CAP_PCT = 0.33  # Single fill ≤ 33% of target — enforces "build
+                                # incrementally, not 0→full in one BUY"
+
+# Allowed bps values the decision engine can emit. Schema validation rejects
+# anything outside this set.
+ALLOWED_BPS = (ADD_BPS_LOW, ADD_BPS_HIGH, STARTER_BPS)
+
+
 SIZING = {
-    "Best Idea": {"pct": 0.05, "cap": 2_500},
-    "Adding":    {"pct": 0.03, "cap": 1_500},
-    "Reducing":  {"trim": 0.50},
-    "Remove":    {"trim": 1.00},
+    # Tier metadata — Claude's `conviction` field maps to one of these keys.
+    # `bps_default` is the default size in basis points; the decision engine
+    # may override to ADD_BPS_LOW within the same conviction tier.
+    "Best Idea": {"bps_default": STARTER_BPS,  "is_close": False, "trim": None},
+    "Adding":    {"bps_default": ADD_BPS_LOW,  "is_close": False, "trim": None},
+    "Reducing":  {"bps_default": None,         "is_close": False, "trim": 0.50},
+    "Remove":    {"bps_default": None,         "is_close": True,  "trim": 1.00},
+    "Monitor":   {"bps_default": None,         "is_close": False, "trim": None},
 }
+
+
+def size_from_bps(bps: int, acct_value: float) -> float:
+    """Compute the recommended dollar size from a bps target.
+
+    Clamps to PER_FILL_CEILING_USD. Returns the rounded dollar value the
+    bot will propose. This is the *single source of truth* for any code
+    path that converts a conviction → dollars.
+
+      starter 100 bps on $50k → $500   (under $1K cap)
+      starter 100 bps on $200k → $2000 → clamped to $1000 (hits cap)
+      add 50 bps on $50k → $250  (under $1K cap)
+    """
+    if bps not in ALLOWED_BPS:
+        raise ValueError(f"bps={bps} not in ALLOWED_BPS={ALLOWED_BPS}")
+    raw = acct_value * (bps / 10_000.0)
+    return round(min(raw, PER_FILL_CEILING_USD), 2)
 
 
 def recommend_from_signal(item: dict) -> dict | None:
@@ -103,11 +160,12 @@ def recommend_from_signal(item: dict) -> dict | None:
         )
         return _save(rec, current)
 
-    # Best Idea / Adding → open or add
-    pct          = SIZING[conviction]["pct"]
-    cap          = SIZING[conviction]["cap"]
+    # Best Idea / Adding → open or add. Size from bps × account value, clamp
+    # to $1K per-fill ceiling. See size_from_bps() and the SIZING FRAMEWORK
+    # block at the top of this file for the canonical rule.
+    bps          = SIZING[conviction]["bps_default"]
     acct_value   = account_value(account)
-    raw_dollars  = round(min(acct_value * pct, cap), 2)
+    raw_dollars  = size_from_bps(bps, acct_value)
     dollars      = _respect_buffer(account, raw_dollars, direction)
     shares       = round(dollars / last_price, 3) if last_price and last_price > 0 else None
 
@@ -115,7 +173,7 @@ def recommend_from_signal(item: dict) -> dict | None:
     rec["recommended_dollars"] = dollars
     rec["recommended_shares"]  = shares
     rec["reasoning"] = _explain_size(
-        conviction, ticker, dollars, raw_dollars, acct_value, pct, cap, account, held_shares
+        conviction, ticker, dollars, raw_dollars, acct_value, bps, account, held_shares
     )
     return _save(rec, current)
 
@@ -134,11 +192,17 @@ def _respect_buffer(account, dollars, direction):
     return round(min(dollars, headroom), 2)
 
 
-def _explain_size(conviction, ticker, dollars, raw, acct_value, pct, cap, account, held):
+def _explain_size(conviction, ticker, dollars, raw, acct_value, bps, account, held):
+    """Build the human-readable reasoning string saved with the recommendation.
+
+    Format: '{conviction} {ticker}: ${dollars} in {acct} ({bps} bps of
+    ${acct_value}, per-fill cap ${cap}). [Reduced from $X to preserve $Y
+    margin buffer.] [Already hold N shares.]'
+    """
     name = ACCOUNTS[account]["name"]
     parts = [
         f"{conviction} {ticker}: ${dollars:,.0f} in {name} "
-        f"({pct * 100:.0f}% of ${acct_value:,.0f}, cap ${cap:,.0f})."
+        f"({bps} bps of ${acct_value:,.0f}, per-fill cap ${PER_FILL_CEILING_USD:,.0f})."
     ]
     if dollars < raw:
         parts.append(f"Reduced from ${raw:,.0f} to preserve ${MARGIN_BUFFER_USD:,.0f} margin buffer.")
