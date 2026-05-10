@@ -535,56 +535,23 @@ def _process_new_email(parsed: dict) -> None:
             except Exception as e:
                 log.warning(f"  ticker_inventory hook failed: {e}")
 
+            # Lockstep refresh of MFR + SpotGamma + Yahoo via the unified
+            # orchestrator. Per project_north_star_architecture.md, every
+            # Hedgeye-originated ticker mention triggers all three tools to
+            # update together. Each leg is independently wrapped — a failure
+            # in one source doesn't block the others.
             try:
-                import mfr_client
-                mfr_summary = mfr_client.refresh_for_tickers(tickers_in_msg)
-                log.info(
-                    f"  MFR refresh: ok={mfr_summary['ok']} fail={mfr_summary['fail']} "
-                    f"of {mfr_summary['tickers']}"
+                import unified_refresh
+                refresh_summary = unified_refresh.refresh_all_for_tickers(
+                    tickers_in_msg,
+                    capture_type="email_arrival",
+                    spotgamma_reason=f"hedgeye_email:{source}",
                 )
+                log.info("  " + unified_refresh._format_summary_log(refresh_summary))
             except Exception as e:
-                log.warning(f"  MFR refresh hook failed: {e}")
-
-            # Yahoo Finance refresh — third leg of the lockstep trio. Pulls
-            # today's OHLCV + prev close into yahoo_snapshots so the bot has
-            # a point-in-time price record aligned with MFR + SpotGamma.
-            try:
-                import yfinance_client
-                yf_summary = yfinance_client.refresh_for_tickers(
-                    tickers_in_msg, capture_type="email_arrival",
-                )
-                log.info(
-                    f"  Yahoo refresh: ok={yf_summary['ok']} fail={yf_summary['fail']} "
-                    f"of {yf_summary['tickers']}"
-                )
-            except Exception as e:
-                log.warning(f"  Yahoo refresh hook failed: {e}")
-
-            # SpotGamma top-up: per the north-star architecture (Hedgeye is the
-            # signal source; MFR/SpotGamma/Yahoo update in lockstep), queue a
-            # SpotGamma refresh for any mentioned ticker whose typed snapshot
-            # is stale. Cowork-side `spotgamma-refresh-queue` SKILL drains the
-            # queue via Chrome MCP. Best-effort, non-fatal.
-            try:
-                import spotgamma_client
-                stale = spotgamma_client.tickers_needing_refresh(tickers_in_msg)
-                if stale:
-                    sg_result = spotgamma_client.queue_refresh(
-                        stale, reason=f"hedgeye_email:{source}",
-                    )
-                    log.info(
-                        f"  SpotGamma queue: {sg_result['queued']} ticker(s) added "
-                        f"(stale {len(stale)}/{len(tickers_in_msg)} mentioned, "
-                        f"queue_size={sg_result['queue_size']})"
-                    )
-                else:
-                    log.debug(
-                        f"  SpotGamma queue: 0 stale of {len(tickers_in_msg)} mentioned — skipped"
-                    )
-            except Exception as e:
-                log.warning(f"  SpotGamma queue hook failed: {e}")
+                log.warning(f"  unified_refresh failed: {e}")
     except Exception as e:
-        log.warning(f"  ticker/MFR/SpotGamma hook outer error: {e}")
+        log.warning(f"  ticker/refresh hook outer error: {e}")
 
 
 # ───────────────── Main loop ─────────────────

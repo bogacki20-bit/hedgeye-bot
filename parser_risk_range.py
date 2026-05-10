@@ -450,38 +450,20 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
                     f"({len(ticker_to_position)} with position), quad={quad}"
                 )
 
-                # MFR refresh
+                # Lockstep refresh of MFR + SpotGamma + Yahoo via the unified
+                # orchestrator. Every Risk Range mention triggers all three
+                # tools to update together. Each leg independently wrapped.
                 try:
-                    import mfr_client
-                    mfr_summary = mfr_client.refresh_for_tickers(list(tickers_in_email))
-                    log.info(f"  [{message_id}] MFR refresh: ok={mfr_summary['ok']} "
-                             f"fail={mfr_summary['fail']} of {mfr_summary['tickers']}")
-                except Exception as e:
-                    log.warning(f"  [{message_id}] MFR refresh failed: {e}")
-
-                # Yahoo refresh — third leg of the lockstep trio.
-                try:
-                    import yfinance_client
-                    yf_summary = yfinance_client.refresh_for_tickers(
-                        list(tickers_in_email), capture_type="email_arrival",
+                    import unified_refresh
+                    refresh_summary = unified_refresh.refresh_all_for_tickers(
+                        list(tickers_in_email),
+                        capture_type="email_arrival",
+                        spotgamma_reason="risk_range",
                     )
-                    log.info(f"  [{message_id}] Yahoo refresh: ok={yf_summary['ok']} "
-                             f"fail={yf_summary['fail']} of {yf_summary['tickers']}")
+                    log.info(f"  [{message_id}] " +
+                             unified_refresh._format_summary_log(refresh_summary))
                 except Exception as e:
-                    log.warning(f"  [{message_id}] Yahoo refresh failed: {e}")
-
-                # SpotGamma queue — north-star lockstep. Best-effort, non-fatal.
-                try:
-                    import spotgamma_client
-                    stale = spotgamma_client.tickers_needing_refresh(list(tickers_in_email))
-                    if stale:
-                        sg_result = spotgamma_client.queue_refresh(stale, reason="risk_range")
-                        log.info(
-                            f"  [{message_id}] SpotGamma queue: {sg_result['queued']} ticker(s) "
-                            f"added (stale {len(stale)}/{len(tickers_in_email)})"
-                        )
-                except Exception as e:
-                    log.warning(f"  [{message_id}] SpotGamma queue hook failed: {e}")
+                    log.warning(f"  [{message_id}] unified_refresh failed: {e}")
         except Exception as e:
             log.warning(f"  [{message_id}] ticker inventory hook failed: {e}")
 
