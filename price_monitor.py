@@ -280,10 +280,18 @@ def compose_recommendation(
     """
     icon, label = ZONE_LABELS.get(zone, ("", zone))
 
-    # Lazy import — Hedgeye/SpotGamma context functions are aspirational and
-    # come from corpus_documents queries we wire up later.
-    hedgeye_ctx = {"current_quad": "Quad 2", "vix_bucket": "investable"}
-    spotgamma_ctx: dict = {}
+    # Hedgeye / SpotGamma context — pulled from recent corpus_documents by
+    # monitor_context. Both lookups are non-fatal (return {} on any error) and
+    # TTL-cached so a fanout cycle doesn't hammer the DB. Resulting dicts get
+    # persisted on alerts_fired (JSONB) for ML training context.
+    try:
+        from monitor_context import get_hedgeye_ctx, get_spotgamma_ctx
+        hedgeye_ctx = get_hedgeye_ctx() or {}
+        spotgamma_ctx = get_spotgamma_ctx(ticker) or {}
+    except Exception as e:
+        log.warning(f"monitor_context lookup failed (continuing with empty ctx): {e}")
+        hedgeye_ctx = {}
+        spotgamma_ctx = {}
 
     if zone == "bottom_third":
         return {
