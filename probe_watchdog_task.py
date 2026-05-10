@@ -69,6 +69,17 @@ def _find_bridge_watchdog_tasks(rows: list[dict]) -> list[dict]:
     return matches
 
 
+def _query_task_xml(task_name: str) -> str:
+    """Return the task's complete XML config — includes triggers, repetition,
+    actions, etc. Useful for diagnosing why the schedule isn't firing as
+    expected (e.g. a 5-minute MO that's actually running every 18 min).
+    """
+    res = _run_silent(["schtasks", "/Query", "/TN", task_name, "/XML"])
+    if not res["ok"]:
+        return f"<query xml failed: {res['stderr'][:200]}>"
+    return res["stdout"]
+
+
 def main() -> int:
     rows = _query_all_tasks_csv()
     if rows and rows[0].get("_error"):
@@ -85,14 +96,21 @@ def main() -> int:
 
     summary = []
     for m in matches:
+        name = m.get("TaskName") or ""
+        xml = _query_task_xml(name) if name else ""
+        # Pull just the <Triggers> section out of the XML for compact display
+        import re as _re
+        triggers_match = _re.search(r"<Triggers>.*?</Triggers>", xml, _re.DOTALL)
+        triggers_block = triggers_match.group(0) if triggers_match else "<no Triggers section in XML>"
         summary.append({
-            "TaskName":      m.get("TaskName"),
+            "TaskName":      name,
             "Status":        m.get("Status"),
             "Last Run Time": m.get("Last Run Time"),
             "Next Run Time": m.get("Next Run Time"),
             "Task To Run":   m.get("Task To Run"),
             "Schedule Type": m.get("Schedule Type") or m.get("Repeat: Every"),
             "Run As User":   m.get("Run As User"),
+            "Triggers XML":  triggers_block,
         })
     print(json.dumps({"matches": len(matches), "tasks": summary}, indent=2))
     return 0

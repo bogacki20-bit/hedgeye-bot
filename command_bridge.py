@@ -76,6 +76,13 @@ LAST_COMMAND       = None
 LAST_TG_HEARTBEAT  = 0.0
 LAST_HB_FILE_WRITE = 0.0
 
+# Set to True by handle_bridge_restart. The main command loop checks this
+# flag after each command's result is written and exits via os._exit(0).
+# Replaces the prior threading.Timer(1.0, os._exit) pattern, which proved
+# unreliable in production — process kept running for hours after restart
+# was requested.
+_SHUTDOWN_REQUESTED = False
+
 
 def _format_uptime(seconds):
     seconds = int(seconds)
@@ -101,6 +108,33 @@ def _write_heartbeat_file():
         HEARTBEAT_FILE.write_text(payload, encoding="utf-8")
     except Exception as e:
         log.warning(f"could not write heartbeat: {e}")
+
+
+def _heartbeat_daemon():
+    """Background daemon thread: writes heartbeat every HEARTBEAT_WRITE_INTERVAL
+    seconds, INDEPENDENT of the main command-processing loop. Without this
+    thread, a long subprocess.run (e.g. a 5-minute python_script batch) blocks
+    the main loop and the heartbeat file stays stale, which makes the
+    watchdog falsely flag the bridge as dead. The daemon thread keeps the
+    heartbeat fresh as long as the Python interpreter itself is alive.
+
+    Exits when _SHUTDOWN_REQUESTED is set so it doesn't outlive its parent.
+    """
+    while not _SHUTDOWN_REQUESTED:
+        try:
+            _write_heartbeat_file()
+        except Exception:
+            pass
+        # Tighter cadence than HEARTBEAT_WRITE_INTERVAL so a watchdog tick
+        # never sees a stale file under normal operation.
+        time.sleep(min(HEARTBEAT_WRITE_INTERVAL, 30))
+
+
+def _start_heartbeat_thread():
+    import threading
+    t = threading.Thread(target=_heartbeat_daemon, daemon=True, name="heartbeat")
+    t.start()
+    log.info("heartbeat daemon thread started")
 
 
 def _queue_depth():
@@ -305,10 +339,13 @@ def handle_bridge_status(args):
 
 
 def handle_bridge_restart(args):
-    log.info("bridge_restart requested - exiting; watchdog will relaunch")
-    import threading
-    threading.Timer(1.0, lambda: os._exit(0)).start()
-    return {"ok": True, "stdout": "graceful exit scheduled in 1s", "stderr": ""}
+    """Set shutdown flag. Main loop checks after writing this command's result
+    and calls os._exit(0). Deterministic: no Timer thread scheduling involved.
+    """
+    global _SHUTDOWN_REQUESTED
+    log.info("bridge_restart requested — shutdown flag set; exit will fire after result is written")
+    _SHUTDOWN_REQUESTED = True
+    return {"ok": True, "stdout": "shutdown flag set; bridge will exit after this result is written", "stderr": ""}
 
 
 def handle_bridge_log_tail(args):
@@ -420,6 +457,7 @@ def run_loop():
     setup_dirs()
     _write_pid_file()
     _write_heartbeat_file()
+    _start_heartbeat_thread()
     _keep_system_awake()
     startup_msg = (f"Bridge started - pid {os.getpid()} on "
                    f"{os.environ.get('COMPUTERNAME', 'host')}. "
@@ -432,7 +470,26 @@ def run_loop():
             pending = sorted(PENDING_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
             for p in pending:
                 process_command_file(p)
+                # After every command, check whether handle_bridge_restart
+                # set the shutdown flag. We do this *after* the command's
+                # result has been written by process_command_file, so the
+                # caller always sees a 200 OK response before the bridge
+                # actually dies.
+                if _SHUTDOWN_REQUESTED:
+                    log.info("shutdown flag set — flushing logs and calling os._exit(0)")
+                    # Brief pause so any pending log handler buffers flush.
+                    try:
+                        for h in logging.getLogger().handlers:
+                            try: h.flush()
+                            except Exception: pass
+                        time.sleep(0.5)
+                    except Exception:
+                        pass
+                    os._exit(0)
             now = time.time()
+            # Heartbeat is written by the _heartbeat_daemon thread now —
+            # this main-loop write is a redundant safety net (no harm in
+            # double-writing once per polling interval).
             if now - LAST_HB_FILE_WRITE >= HEARTBEAT_WRITE_INTERVAL:
                 _write_heartbeat_file()
                 LAST_HB_FILE_WRITE = now
