@@ -545,6 +545,21 @@ def _process_new_email(parsed: dict) -> None:
             except Exception as e:
                 log.warning(f"  MFR refresh hook failed: {e}")
 
+            # Yahoo Finance refresh — third leg of the lockstep trio. Pulls
+            # today's OHLCV + prev close into yahoo_snapshots so the bot has
+            # a point-in-time price record aligned with MFR + SpotGamma.
+            try:
+                import yfinance_client
+                yf_summary = yfinance_client.refresh_for_tickers(
+                    tickers_in_msg, capture_type="email_arrival",
+                )
+                log.info(
+                    f"  Yahoo refresh: ok={yf_summary['ok']} fail={yf_summary['fail']} "
+                    f"of {yf_summary['tickers']}"
+                )
+            except Exception as e:
+                log.warning(f"  Yahoo refresh hook failed: {e}")
+
             # SpotGamma top-up: per the north-star architecture (Hedgeye is the
             # signal source; MFR/SpotGamma/Yahoo update in lockstep), queue a
             # SpotGamma refresh for any mentioned ticker whose typed snapshot

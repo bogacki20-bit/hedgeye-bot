@@ -459,6 +459,17 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
                 except Exception as e:
                     log.warning(f"  [{message_id}] MFR refresh failed: {e}")
 
+                # Yahoo refresh — third leg of the lockstep trio.
+                try:
+                    import yfinance_client
+                    yf_summary = yfinance_client.refresh_for_tickers(
+                        list(tickers_in_email), capture_type="email_arrival",
+                    )
+                    log.info(f"  [{message_id}] Yahoo refresh: ok={yf_summary['ok']} "
+                             f"fail={yf_summary['fail']} of {yf_summary['tickers']}")
+                except Exception as e:
+                    log.warning(f"  [{message_id}] Yahoo refresh failed: {e}")
+
                 # SpotGamma queue — north-star lockstep. Best-effort, non-fatal.
                 try:
                     import spotgamma_client

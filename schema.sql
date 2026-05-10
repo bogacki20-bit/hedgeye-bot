@@ -276,6 +276,55 @@ ALTER TABLE spotgamma_snapshots ALTER COLUMN put_gamma  TYPE NUMERIC(20,4);
 
 
 -- ============================================================================
+-- YAHOO FINANCE SNAPSHOTS — typed per-ticker daily price capture
+-- ============================================================================
+-- Third leg of the lockstep refresh trio (MFR + SpotGamma + Yahoo). Populated
+-- by yfinance_client when Hedgeye surfaces a ticker, plus optionally by
+-- price_monitor on a daily roll-up. Read by analytics + the eventual unified
+-- decision layer.
+--
+-- capture_type values:
+--   'email_arrival'      — pulled when a Hedgeye email mentions this ticker
+--   'monitor_cycle'      — daily roll-up from price_monitor (overwrites today's row)
+--   'on_demand'          — manual / debug fetches
+--
+-- We deliberately don't store every intraday cycle here — that would explode
+-- table size for negligible v1 value. If a future ML run needs minute-level
+-- price, we'll add a separate yahoo_intraday table partitioned by date.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS yahoo_snapshots (
+    ticker              TEXT NOT NULL,
+    snapshot_date       DATE NOT NULL,
+    capture_type        TEXT NOT NULL,                   -- email_arrival / monitor_cycle / on_demand
+
+    -- Price + change. `price` is the most recent close (live during market
+    -- hours, daily close after); other OHLC fields are today's daily bar.
+    price               NUMERIC(14,4),
+    open                NUMERIC(14,4),
+    high                NUMERIC(14,4),
+    low                 NUMERIC(14,4),
+    close               NUMERIC(14,4),
+    prev_close          NUMERIC(14,4),
+    daily_change        NUMERIC(14,4),                   -- $
+    daily_change_pct    NUMERIC(8,4),                    -- %
+    volume              BIGINT,
+
+    -- Provenance
+    yf_symbol           TEXT,                            -- the actual Yahoo symbol (^GSPC / CL=F / BTC-USD)
+    full_payload        JSONB NOT NULL,                  -- raw OHLCV row + any extras
+    fetched_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (ticker, snapshot_date, capture_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_yf_ticker   ON yahoo_snapshots(ticker);
+CREATE INDEX IF NOT EXISTS idx_yf_date     ON yahoo_snapshots(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_yf_fetched  ON yahoo_snapshots(fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_yf_payload  ON yahoo_snapshots USING GIN (full_payload);
+
+
+-- ============================================================================
 -- ALERTS FIRED — dedup so we don't re-alert same ticker/boundary same day
 -- ============================================================================
 
