@@ -81,11 +81,23 @@ def fetch_raw(ticker: str) -> dict | None:
             except json.JSONDecodeError:
                 last_err = f"non-json response: {body[:200]}"
                 continue
-            # MFR returns {"success": true, "data": {...}} or {"success": false}
+            # MFR returns either {"success": false} (legacy) or — current
+            # production shape — {"id": "...", "payload": {ticker, latestPrice,
+            # rangeData, trendSignal, ...}}. Older code expected {"data": {...}}.
+            # Unwrap whichever envelope is present so downstream extractors see
+            # the asset fields at the top level.
             if isinstance(data, dict) and data.get("success") is False:
                 last_err = f"success=false ({cand})"
                 continue
-            payload = data.get("data") if isinstance(data, dict) and "data" in data else data
+            # The MFR API double-wraps: {"data": {"id": ..., "payload": {asset_fields}}}.
+            # Peel both levels so downstream extractors see latestPrice, hurst,
+            # rangeData etc at the top level. Tolerant of single-wrap legacy
+            # shapes too.
+            payload = data
+            if isinstance(payload, dict) and "data" in payload and isinstance(payload["data"], dict):
+                payload = payload["data"]
+            if isinstance(payload, dict) and "payload" in payload and isinstance(payload["payload"], dict):
+                payload = payload["payload"]
             if not isinstance(payload, dict):
                 last_err = "unexpected shape"
                 continue
@@ -109,7 +121,11 @@ def fetch_raw(ticker: str) -> dict | None:
 
 def _flatten_for_save(payload: dict) -> dict:
     """Pull canonical fields out of the MFR payload for the typed columns
-    in `mfr_snapshots`. Anything not extracted still goes into full_payload.
+    in `mfr_snapshots` (and our corpus markdown body). Anything not
+    extracted still goes into full_payload.
+
+    Key names match the actual API shape (camelCase), with snake_case
+    fallbacks kept for forward compatibility if MFR ever changes shape.
     """
     out: dict[str, Any] = {}
 
@@ -119,17 +135,32 @@ def _flatten_for_save(payload: dict) -> dict:
                 return payload[k]
         return None
 
-    out["price"]               = _try("price", "last", "last_price", "close")
-    out["range_low"]           = _try("range_low", "rangeLow", "low")
-    out["range_high"]          = _try("range_high", "rangeHigh", "high")
-    out["trend_signal"]        = _try("trend_signal", "trendSignal", "trend")
-    out["momentum_signal"]     = _try("momentum_signal", "momentumSignal", "momentum")
+    range_data = (payload.get("rangeData") or {}) if isinstance(payload, dict) else {}
+    lt_range_data = (payload.get("ltRangeData") or {}) if isinstance(payload, dict) else {}
+
+    out["price"]               = _try("latestPrice", "price", "last", "last_price", "close")
+    out["range_low"]           = (
+        range_data.get("lowerRange")
+        or _try("range_low", "rangeLow", "low")
+    )
+    out["range_high"]          = (
+        range_data.get("upperRange")
+        or _try("range_high", "rangeHigh", "high")
+    )
+    out["lt_range_low"]        = lt_range_data.get("lowerRange")
+    out["lt_range_high"]       = lt_range_data.get("upperRange")
+    out["trend_signal"]        = _try("trendSignal", "trend_signal", "trend")
+    out["momentum_signal"]     = _try("momentumSignal", "momentum_signal", "momentum")
     out["hurst"]               = _try("hurst", "hurst_daily")
-    out["hurst_3mo"]           = _try("hurst_3mo", "hurst3mo")
+    out["hurst_3mo"]           = _try("hurst3Mo", "hurst_3mo", "hurst3mo")
     out["iv"]                  = _try("iv", "implied_vol")
     out["rv"]                  = _try("rv", "realized_vol")
-    out["daily_pct_change"]    = _try("daily_pct_change", "dailyPctChange", "pct_change")
-    out["previous_day_volume"] = _try("previous_day_volume", "previousDayVolume", "volume")
+    out["daily_pct_change"]    = _try("dailyPercentChange", "daily_pct_change", "dailyPctChange", "pct_change")
+    out["previous_day_volume"] = _try("previousDayVolume", "previous_day_volume", "volume")
+    out["name"]                = _try("name")
+    out["sector"]              = _try("sector")
+    out["industry"]            = _try("industry")
+    out["latest_range_date"]   = _try("latestRangeDate", "latest_range_date")
     return out
 
 
@@ -152,7 +183,14 @@ def _format_corpus_markdown(ticker: str, snapshot_date: date, flat: dict, payloa
         "",
         f"Source: MyFractalRange API (`https://myfractalrange.com/v2/asset/{payload.get('_mfr_ticker_used', ticker)}`)",
         "",
-        "## Range & Trend",
+        "## Asset",
+        "",
+        f"- **Name:** {flat.get('name') or '—'}",
+        f"- **Sector:** {flat.get('sector') or '—'}",
+        f"- **Industry:** {flat.get('industry') or '—'}",
+        f"- **Latest range date:** {flat.get('latest_range_date') or '—'}",
+        "",
+        "## Daily Range & Trend",
         "",
         f"- **Range Low:**  {_fmt(flat.get('range_low'))}",
         f"- **Range High:** {_fmt(flat.get('range_high'))}",
@@ -160,13 +198,18 @@ def _format_corpus_markdown(ticker: str, snapshot_date: date, flat: dict, payloa
         f"- **Trend Signal:**    {flat.get('trend_signal') or '—'}",
         f"- **Momentum Signal:** {flat.get('momentum_signal') or '—'}",
         "",
+        "## Long-Term Range",
+        "",
+        f"- **LT Range Low:**  {_fmt(flat.get('lt_range_low'))}",
+        f"- **LT Range High:** {_fmt(flat.get('lt_range_high'))}",
+        "",
         "## Volatility & Statistics",
         "",
         f"- **Hurst (daily):** {_fmt(flat.get('hurst'))}",
         f"- **Hurst (3-month):** {_fmt(flat.get('hurst_3mo'))}",
         f"- **Implied Vol (IV):** {_fmt(flat.get('iv'), '%')}",
         f"- **Realized Vol (RV):** {_fmt(flat.get('rv'), '%')}",
-        f"- **Daily Change:** {_fmt(flat.get('daily_pct_change'), '%')}",
+        f"- **Daily % Change:** {_fmt(flat.get('daily_pct_change'), '%')}",
         f"- **Previous Day Volume:** {flat.get('previous_day_volume') or '—'}",
         "",
         "## Raw payload",
@@ -255,7 +298,12 @@ def fetch_and_save(ticker: str, snapshot_date: date | None = None) -> dict | Non
     try:
         # Lazy import so this module can be imported without psycopg2.
         import db_pg
-        db_pg.save_mfr_snapshot(ticker, snapshot_date, payload, flat)
+        # save_mfr_snapshot's 4th positional arg is `source_endpoint: str` —
+        # a previous version of mfr_client passed `flat` here, which silently
+        # typed-mismatched and caused psycopg2 'can't adapt type dict' once
+        # MFR_API_TOKEN was finally set. The DB function extracts the typed
+        # columns from `payload` directly, so `flat` isn't needed here at all.
+        db_pg.save_mfr_snapshot(ticker, snapshot_date, payload)
         # Also update the inventory table's last_mfr_fetched_at if available.
         try:
             with db_pg.get_conn() as conn:
@@ -393,7 +441,7 @@ def _cli() -> None:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT ticker, snapshot_date, price, range_low, range_high, "
-                        "       trend_signal, momentum_signal, hurst, iv, rv "
+                        "       trend_signal, momentum_signal, hurst, iv, rv, full_payload "
                         "  FROM mfr_snapshots WHERE ticker = %s "
                         " ORDER BY snapshot_date DESC LIMIT 1",
                         (args.latest.upper(),),
@@ -403,7 +451,16 @@ def _cli() -> None:
                         print(f"no rows for {args.latest!r}")
                         return
                     cols = [d[0] for d in cur.description]
-                    print(json.dumps(dict(zip(cols, row)), indent=2, default=str))
+                    record = dict(zip(cols, row))
+                    # Print typed columns first, then truncated raw payload
+                    typed = {k: v for k, v in record.items() if k != "full_payload"}
+                    print(json.dumps(typed, indent=2, default=str))
+                    print()
+                    print("=== full_payload (truncated to 3000 chars) ===")
+                    payload_str = json.dumps(record.get("full_payload") or {}, indent=2, default=str)
+                    print(payload_str[:3000])
+                    if len(payload_str) > 3000:
+                        print(f"\n[... {len(payload_str) - 3000} more chars]")
         except Exception as e:
             print(f"latest({args.latest}) failed: {e}")
         return
