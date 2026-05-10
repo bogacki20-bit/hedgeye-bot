@@ -292,6 +292,116 @@ def process_audio_file(
     }
 
 
+def transcript_exists_in_corpus(chapter: int, slug: str) -> bool:
+    """Check if a lesson's transcript is already in corpus_documents.
+
+    Used by --batch to skip lessons that have already been processed.
+    """
+    try:
+        import db_pg
+        ref = f"chapter{chapter}/{slug}"
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM corpus_documents "
+                    " WHERE source = 'hedgeye_u_lesson_transcript' AND source_ref = %s",
+                    (ref,),
+                )
+                return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def run_batch(map_path: Path | str) -> dict:
+    """Process every lesson in a wistia_id_map JSON file.
+
+    JSON shape: list of dicts with keys:
+      chapter   (int)
+      slug      (str, kebab-case)
+      title     (str)
+      lesson_id (str)
+      wistia_id (str)
+
+    For each: download via hu_download → transcribe via Whisper → ingest into
+    corpus_documents. Lessons whose transcript is already in corpus are
+    skipped (idempotent — safe to re-run if a previous batch crashed midway).
+
+    Returns {considered, skipped, downloaded, transcribed, ingested, failed,
+    errors[]}.
+    """
+    p = Path(map_path)
+    if not p.exists():
+        return {"error": f"map file not found: {p}"}
+
+    try:
+        lessons = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"error": f"could not parse {p}: {e}"}
+
+    if not isinstance(lessons, list):
+        return {"error": "map file must contain a list of lesson dicts"}
+
+    summary = {
+        "considered": 0, "skipped": 0,
+        "downloaded": 0, "transcribed": 0, "ingested": 0,
+        "failed": 0, "errors": [],
+    }
+
+    try:
+        import hu_download
+    except ImportError as e:
+        return {"error": f"hu_download import failed: {e}"}
+
+    audio_dir = REPO_ROOT / "data" / "snapshots" / "hedgeye" / "test_audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    for L in lessons:
+        summary["considered"] += 1
+        chapter = L.get("chapter")
+        slug    = L.get("slug")
+        title   = L.get("title")
+        lesson_id = L.get("lesson_id")
+        wistia_id = L.get("wistia_id")
+
+        if not (chapter and slug and title and wistia_id):
+            summary["failed"] += 1
+            summary["errors"].append(f"missing fields in: {L}")
+            continue
+
+        if transcript_exists_in_corpus(int(chapter), slug):
+            summary["skipped"] += 1
+            log.info("[skip] ch%s/%s already in corpus", chapter, slug)
+            continue
+
+        out_path = audio_dir / f"ch{chapter}_{slug}.mp4"
+        log.info("[download] ch%s/%s wistia=%s", chapter, slug, wistia_id)
+        downloaded = hu_download.download_by_media_id(
+            wistia_id, out_path, format_spec="mp4-224p/worst",
+        )
+        if not downloaded:
+            summary["failed"] += 1
+            summary["errors"].append(f"download failed: ch{chapter}/{slug} wistia={wistia_id}")
+            continue
+        summary["downloaded"] += 1
+
+        log.info("[transcribe] ch%s/%s", chapter, slug)
+        info = process_audio_file(
+            downloaded, chapter=int(chapter), slug=slug,
+            title=title, lesson_id=lesson_id,
+        )
+        if info:
+            summary["transcribed"] += 1
+            if info.get("corpus_ingested"):
+                summary["ingested"] += 1
+            else:
+                summary["errors"].append(f"corpus ingest failed: ch{chapter}/{slug}")
+        else:
+            summary["failed"] += 1
+            summary["errors"].append(f"transcribe failed: ch{chapter}/{slug}")
+
+    return summary
+
+
 def reingest_existing_transcripts() -> dict:
     """Walk data/snapshots/hedgeye/*/university/transcripts/**/*.md and re-ingest each.
 
@@ -345,6 +455,8 @@ def _cli() -> None:
     )
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--audio", help="Path to audio (or video) file to transcribe")
+    g.add_argument("--batch", metavar="MAP_JSON",
+                   help="Process every lesson in the wistia_id_map JSON file (idempotent)")
     g.add_argument("--reingest", action="store_true",
                    help="Walk existing transcripts and re-insert into corpus_documents")
     g.add_argument("--check-key", action="store_true",
@@ -367,6 +479,11 @@ def _cli() -> None:
     if args.reingest:
         summary = reingest_existing_transcripts()
         print(json.dumps(summary, indent=2))
+        return
+
+    if args.batch:
+        summary = run_batch(args.batch)
+        print(json.dumps(summary, indent=2, default=str))
         return
 
     if args.audio:
