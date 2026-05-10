@@ -32,7 +32,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-CLAUDE_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-sonnet-4-5")
 CORPUS_SNIPPET_LIMIT = 4   # how many corpus snippets to fold into the prompt
 CORPUS_MAX_CHARS = 2400    # cap total corpus text in prompt
 
@@ -336,6 +336,12 @@ def decide(
         account_value_usd: target account's total value, for bps sizing math.
             If None, defaults to the Individual account via portfolio.account_value.
     """
+    # Diagnostic: log env state at function entry, before any other imports.
+    _early_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    log.info(
+        "decide() entry: ANTHROPIC_API_KEY present=%s length=%d",
+        bool(_early_key), len(_early_key),
+    )
     if account_value_usd is None:
         try:
             from portfolio import account_value, hedgeye_target_account
@@ -422,7 +428,10 @@ def _cli() -> None:
     ap = argparse.ArgumentParser(
         description="decision_engine smoke test — gather context for a ticker and call Claude"
     )
-    ap.add_argument("--ticker", required=True, help="Ticker to evaluate")
+    ap.add_argument("--check-key", action="store_true",
+                    help="Verify ANTHROPIC_API_KEY is loaded in the subprocess env. "
+                         "Prints presence, length, and a masked fingerprint — never the value.")
+    ap.add_argument("--ticker", help="Ticker to evaluate")
     ap.add_argument("--signal-origin", default="manual",
                     choices=["rta", "risk_range", "proactive_scan", "manual"])
     ap.add_argument("--signal-conviction", default=None,
@@ -432,6 +441,40 @@ def _cli() -> None:
     ap.add_argument("--context-only", action="store_true",
                     help="Just gather context and print it, no Claude call (cheap)")
     args = ap.parse_args()
+
+    if args.check_key:
+        k = os.environ.get("ANTHROPIC_API_KEY", "")
+        # Also report the bridge's parent process PID + a probe of how many
+        # python/pyw processes are running (to diagnose double-spawned bridges).
+        parent_pid = os.getppid()
+        bridge_count = -1
+        try:
+            import subprocess as _sp
+            cp = _sp.run(
+                ["tasklist", "/FI", "IMAGENAME eq pyw.exe", "/NH", "/FO", "CSV"],
+                capture_output=True, text=True, timeout=10, shell=False,
+                creationflags=0x08000000,
+            )
+            bridge_count = len([L for L in cp.stdout.splitlines() if L.strip()])
+        except Exception:
+            pass
+        result = {
+            "present": bool(k),
+            "length": len(k),
+            "starts_with": k[:7] + "..." if len(k) >= 7 else None,
+            "ends_with": "..." + k[-4:] if len(k) >= 4 else None,
+            "has_trailing_whitespace": bool(k) and k != k.rstrip(),
+            "has_internal_whitespace": any(c.isspace() for c in k),
+            "model": CLAUDE_MODEL,
+            "parent_pid": parent_pid,
+            "pyw_count": bridge_count,
+        }
+        print(json.dumps(result, indent=2))
+        return
+
+    if not args.ticker:
+        print("--ticker is required (unless --check-key)")
+        return
 
     if args.context_only:
         ctx = gather_context(args.ticker, signal_conviction=args.signal_conviction)
