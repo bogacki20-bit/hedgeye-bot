@@ -394,21 +394,63 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
         try:
             import ticker_inventory
             from db_pg import get_conn
-            tickers_in_email = set()
+
+            # Collect tickers + map trend -> position where derivable. Range
+            # rows carry a `trend` field (bullish/bearish/neutral) which maps
+            # cleanly to inventory's position taxonomy. Signal-change rows
+            # don't (trend_change has from/to states, out_bucket is a removal),
+            # so they're added without a position arg.
+            tickers_in_email: set[str] = set()
+            ticker_to_position: dict[str, str] = {}
             for r in range_rows or []:
-                if r.get("ticker"):
-                    tickers_in_email.add(r["ticker"])
+                t = r.get("ticker")
+                if not t:
+                    continue
+                tickers_in_email.add(t)
+                trend = (r.get("trend") or "").strip().lower()
+                if trend in ("bullish", "up", "long"):
+                    ticker_to_position[t] = "long"
+                elif trend in ("bearish", "down", "short"):
+                    ticker_to_position[t] = "short"
             for r in change_rows or []:
                 if r.get("ticker"):
                     tickers_in_email.add(r["ticker"])
+
+            # Pull current Quad regime from the corpus rather than hardcoding.
+            # monitor_context.get_hedgeye_ctx returns {} on any error so we
+            # gracefully fall back to None (which note_tickers tolerates).
+            try:
+                import monitor_context
+                quad = monitor_context.get_hedgeye_ctx().get("current_quad")
+            except Exception:
+                quad = None
+
             if tickers_in_email:
+                # First pass: bulk note_tickers without position so every
+                # ticker gets at least an inventory + history row.
                 ticker_inventory.note_tickers(
                     tickers_in_email,
                     source=ticker_inventory.SOURCE_RISK_RANGE,
-                    quad_regime="Quad 2",
+                    quad_regime=quad,
                     message_id=message_id,
                 )
-                # Trigger MFR refresh for any ticker mentioned (best effort).
+                # Second pass: per-ticker re-note with the trend-derived
+                # position so the history row has it. This mirrors what
+                # email_parser does for classifier-derived positions.
+                for sym, pos in ticker_to_position.items():
+                    ticker_inventory.note_ticker(
+                        sym,
+                        source=ticker_inventory.SOURCE_RISK_RANGE,
+                        position=pos,
+                        quad_regime=quad,
+                        message_id=message_id,
+                    )
+                log.info(
+                    f"  [{message_id}] ticker_inventory: {len(tickers_in_email)} ticker(s) "
+                    f"({len(ticker_to_position)} with position), quad={quad}"
+                )
+
+                # MFR refresh
                 try:
                     import mfr_client
                     mfr_summary = mfr_client.refresh_for_tickers(list(tickers_in_email))
@@ -416,6 +458,19 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
                              f"fail={mfr_summary['fail']} of {mfr_summary['tickers']}")
                 except Exception as e:
                     log.warning(f"  [{message_id}] MFR refresh failed: {e}")
+
+                # SpotGamma queue — north-star lockstep. Best-effort, non-fatal.
+                try:
+                    import spotgamma_client
+                    stale = spotgamma_client.tickers_needing_refresh(list(tickers_in_email))
+                    if stale:
+                        sg_result = spotgamma_client.queue_refresh(stale, reason="risk_range")
+                        log.info(
+                            f"  [{message_id}] SpotGamma queue: {sg_result['queued']} ticker(s) "
+                            f"added (stale {len(stale)}/{len(tickers_in_email)})"
+                        )
+                except Exception as e:
+                    log.warning(f"  [{message_id}] SpotGamma queue hook failed: {e}")
         except Exception as e:
             log.warning(f"  [{message_id}] ticker inventory hook failed: {e}")
 

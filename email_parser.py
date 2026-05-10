@@ -544,8 +544,32 @@ def _process_new_email(parsed: dict) -> None:
                 )
             except Exception as e:
                 log.warning(f"  MFR refresh hook failed: {e}")
+
+            # SpotGamma top-up: per the north-star architecture (Hedgeye is the
+            # signal source; MFR/SpotGamma/Yahoo update in lockstep), queue a
+            # SpotGamma refresh for any mentioned ticker whose typed snapshot
+            # is stale. Cowork-side `spotgamma-refresh-queue` SKILL drains the
+            # queue via Chrome MCP. Best-effort, non-fatal.
+            try:
+                import spotgamma_client
+                stale = spotgamma_client.tickers_needing_refresh(tickers_in_msg)
+                if stale:
+                    sg_result = spotgamma_client.queue_refresh(
+                        stale, reason=f"hedgeye_email:{source}",
+                    )
+                    log.info(
+                        f"  SpotGamma queue: {sg_result['queued']} ticker(s) added "
+                        f"(stale {len(stale)}/{len(tickers_in_msg)} mentioned, "
+                        f"queue_size={sg_result['queue_size']})"
+                    )
+                else:
+                    log.debug(
+                        f"  SpotGamma queue: 0 stale of {len(tickers_in_msg)} mentioned — skipped"
+                    )
+            except Exception as e:
+                log.warning(f"  SpotGamma queue hook failed: {e}")
     except Exception as e:
-        log.warning(f"  ticker/MFR hook outer error: {e}")
+        log.warning(f"  ticker/MFR/SpotGamma hook outer error: {e}")
 
 
 # ───────────────── Main loop ─────────────────
