@@ -651,6 +651,35 @@ def _process_new_email(parsed: dict) -> None:
                         f"rows={etf_result.get('rows_parsed')} "
                         f"week_of={etf_result.get('week_of')}"
                     )
+                elif "portfolio solutions" in subject_lower and "daily etf re-rank" in subject_lower:
+                    import parser_portfolio_solutions
+                    ps_result = parser_portfolio_solutions.process_email(
+                        item["id"], fan_out=False,
+                    )
+                    log.info(
+                        f"  parser_portfolio_solutions: "
+                        f"ranks={ps_result.get('ranks_parsed')} "
+                        f"actions={ps_result.get('actions_parsed')}"
+                    )
+                elif source == "signal_strength":
+                    import parser_signal_strength
+                    ss_result = parser_signal_strength.process_email(
+                        item["id"], fan_out=False,
+                    )
+                    log.info(
+                        f"  parser_signal_strength: "
+                        f"added={len(ss_result.get('added',[]))} "
+                        f"removed={len(ss_result.get('removed',[]))}"
+                    )
+                elif source == "investing_ideas":
+                    import parser_investing_ideas
+                    ii_result = parser_investing_ideas.process_email(
+                        item["id"], fan_out=False,
+                    )
+                    log.info(
+                        f"  parser_investing_ideas: "
+                        f"rows={ii_result.get('rows_parsed')}"
+                    )
             except Exception as e:
                 log.warning(f"  product-specific parser failed: {e}")
     except Exception as e:
