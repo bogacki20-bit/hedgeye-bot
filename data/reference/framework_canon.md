@@ -1,0 +1,163 @@
+# Framework Canon — the bot's operating manual
+
+This file is the single authoritative reference the decision engine consults
+on every call. It distills three layers — Hedgeye (regime), SpotGamma
+(tactical levels), VolSignals / Natenberg (market-maker mechanics) — into
+the rules the bot uses to translate context into a sized trade decision.
+
+**Edits here propagate immediately** — `decision_engine.py` reads this file
+into the prompt on every call. No code changes needed to update the bot's
+reasoning.
+
+---
+
+## Layer 1 — Hedgeye (regime / macro / sector)
+
+The Hedgeye GIP (Growth-Inflation-Policy) model is the **regime anchor**.
+Every trade must be classifiable as framework-aligned, framework-against,
+or neutral relative to the current Quad.
+
+The full Quad → sector mapping and VIX-bucket rules are encoded in the
+`decision_engine.py` system prompt. This canon does not duplicate them.
+Key principle: **Quad-alignment is the first gate**. A framework-against
+trade must clear a much higher bar (multi-source flow confirmation) before
+sizing above Monitor.
+
+**Risk Range zones** (Keith's daily output):
+- Below `buy_trade` (boundary low) — opportunity for framework-aligned longs;
+  caution for framework-aligned shorts (you're already short into support).
+- Bottom third of `buy_trade → sell_trade` — scale-in zone for longs.
+- Middle third — no-trade zone; let the tape develop.
+- Top third — trim zone for longs; entry zone for shorts.
+- Above `sell_trade` (boundary high) — trim aggressively or short.
+
+**Conviction translation** (Hedgeye → bot):
+- "Best Idea" → 100 bps starter (or 100 bps add if already in)
+- "Adding" → 50 bps add
+- "Reducing" → trim 50% of current position
+- "Remove" → close entire position
+- Anything without an explicit conviction → Monitor
+
+---
+
+## Layer 2 — SpotGamma (tactical levels)
+
+SpotGamma data describes **where dealer hedging will react**. It does not
+generate the trade — Hedgeye does. SpotGamma tells you **at what level**
+the bot should act.
+
+### The six core signals
+1. **Market Maker (MM)** — the dealer hedging your options. Their hedging
+   activity moves the underlying.
+2. **Delta** — the share count MM needs to hedge an option *now*.
+3. **Gamma** — how that hedge requirement changes as price/time move.
+4. **Call Wall** — strongest resistance strike. Holds intraday in ~83%
+   of S&P sessions.
+5. **Put Wall** — strongest support strike. Holds intraday in ~89% of
+   S&P sessions.
+6. **Vol Trigger** — regime separator. Above it = positive-gamma regime
+   (MM dampens moves, lower realized vol). Below it = negative-gamma
+   regime (MM amplifies moves, higher realized vol, ~40% higher daily
+   realized vol on average).
+
+### Decision rules — SpotGamma layer
+- **Call Wall held + framework-aligned short** → strong shorting signal at the wall.
+- **Put Wall held + framework-aligned long** → strong scale-in signal at the wall.
+- **Below Vol Trigger** → expect amplified moves. Cut starter size in half
+  (50 bps not 100 bps) unless framework alignment is extreme.
+- **Above Vol Trigger** → MM is dampening. Normal sizing.
+- **Hedge Wall** — usually far-OTM. Treat as a tail-risk marker, not
+  actionable level.
+- **Negative net gamma regime** + framework-aligned trade → size **lower**
+  (vol amplification cuts both ways); wait for clearer level.
+
+### SpotGamma's 4-step daily workflow (encoded for use by the scanner)
+1. **Composite view** — confirm options are driving the name (red/green
+   shading intensity = options influence).
+2. **Put/Call impact chart** — flat curve zones = low expected vol; steep
+   zones = high.
+3. **10-day key-level history** — Call Wall / Put Wall / Hedge Wall trend:
+   trending **up** = constructive bullish; **down** = constructive bearish.
+4. **SG Levels + live price** — measure distance to nearest key level.
+   Closer = imminent reaction; farther = room to run.
+
+### Compass (cross-sectional positioning)
+Compass plots names on two axes — bullish/bearish positioning vs.
+expensive/cheap options. Scanner mode (Slice 0d) should use Compass-style
+filters: find names that are **bullish-positioned + cheap options** (long
+candidates) or **bearish-positioned + expensive options** (short candidates).
+
+---
+
+## Layer 3 — VolSignals / Natenberg (market-maker mechanics)
+
+This layer explains **why** SpotGamma levels matter. The decision engine
+needs to know that:
+
+- **Positive gamma exposure for dealers** → they sell rallies and buy dips
+  to stay hedged → realized vol gets dampened → mean-reverting tape.
+- **Negative gamma exposure for dealers** → they buy rallies and sell dips
+  to stay hedged → realized vol gets amplified → trending tape.
+- **Charm** — delta decays toward 0 (for OTM) or +/-1 (ITM) as expiry
+  approaches. Friday afternoon charm flows pin SPX to high-OI strikes.
+- **Vanna** — delta sensitivity to implied vol. Falling IV → calls lose
+  delta, puts gain delta → dealer rebalancing creates lift in equities
+  when vol crushes.
+- **Pin risk** — at expiry, high-OI strikes act as magnets if price is
+  within ~0.5% by 3 PM ET.
+
+### Practical bot rules
+- Friday after 12 PM ET + spot within 0.5% of high-OI strike → expect pin.
+  Do not chase moves; either trade the pin or stand aside.
+- IV crush event (post-Fed, post-CPI) + framework-aligned long → expect
+  vanna lift the next session; favorable add window.
+- 0DTE positioning matters in S&P names but not in single stocks. SPX, SPY,
+  QQQ decisions must check 0DTE GEX in addition to all-expirations GEX.
+
+---
+
+## Decision synthesis — the master rule
+
+The 5-step algorithm in `decision_engine.py` is the canonical decision
+procedure. Restated for clarity:
+
+1. **Framework alignment** (Quad gate) — if framework-against, default to Monitor.
+2. **Risk Range zone** — must be in a zone that justifies the action.
+3. **SpotGamma corroboration** — wall/trigger position must support, or
+   at minimum not contradict, the Hedgeye thesis.
+4. **MFR corroboration** — Hurst trend + range position add a third
+   independent vote.
+5. **Synthesis** —
+   - 4/4 agree → **Best Idea, 100 bps**
+   - 3/4 agree → **Adding, 50 bps**
+   - 2/4 or sharp disagreement → **Monitor**
+   - Risk Range missing → **Monitor** (Hedgeye is foundational)
+   - Account value $0 or unknown → **Monitor**
+
+**Sizing ceiling**: any single fill is capped at $1,000 regardless of bps math.
+Build positions in legs.
+
+**Negative-gamma override**: when below Vol Trigger, halve the starter
+size (50 bps not 100 bps) unless 4/4 agreement is unusually strong.
+
+---
+
+## What this canon is NOT
+
+- Not a replacement for the dynamic context blocks (Hedgeye Risk Range,
+  SpotGamma latest, MFR Hurst, Yahoo price, corpus FTS snippets). Those
+  carry the *current state*. The canon carries the *rules for interpreting*
+  that state.
+- Not a duplicate of the Quad → sector table in the system prompt. That
+  table is authoritative there; this canon points to it.
+- Not static. Add new rules here as they're learned (from Hedgeye U,
+  SpotGamma updates, VolSignals research, Portfolio Solutions patterns).
+
+---
+
+## Change log
+
+- 2026-05-10 — Initial canon. Three-layer architecture (Hedgeye / SpotGamma /
+  VolSignals-Natenberg) + decision synthesis rule. Built from 107 SpotGamma
+  course lessons + 6 manually-authored signal definitions + VolSignals
+  transcripts already in corpus.
