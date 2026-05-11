@@ -634,6 +634,25 @@ def _process_new_email(parsed: dict) -> None:
                 log.info("  " + unified_refresh._format_summary_log(refresh_summary))
             except Exception as e:
                 log.warning(f"  unified_refresh failed: {e}")
+
+            # Product-specific typed-table parsers. Each parser writes its
+            # product's structured data (ranges, walls, picks, allocations)
+            # to the appropriate typed table and stamps the email's
+            # classified_as field. Run AFTER unified_refresh so the
+            # tickers are already known and refreshed.
+            try:
+                if source == "etf_pro":
+                    import parser_etf_pro
+                    etf_result = parser_etf_pro.process_email(
+                        item["id"], fan_out=False,  # already done above
+                    )
+                    log.info(
+                        f"  parser_etf_pro: kind={etf_result.get('kind')} "
+                        f"rows={etf_result.get('rows_parsed')} "
+                        f"week_of={etf_result.get('week_of')}"
+                    )
+            except Exception as e:
+                log.warning(f"  product-specific parser failed: {e}")
     except Exception as e:
         log.warning(f"  ticker/refresh hook outer error: {e}")
 
