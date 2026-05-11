@@ -82,6 +82,32 @@ def _get_risk_range(ticker: str) -> Optional[dict]:
         return None
 
 
+def _get_etf_pro_range(ticker: str) -> Optional[dict]:
+    """Most recent Hedgeye ETF Pro Range for the ticker (Monday emails, weekly
+    cadence, 18 tickers). Goes stale by Wednesday — caller should treat
+    week_of >= current_monday-7d as fresh."""
+    try:
+        import db_pg
+        import psycopg2.extras
+        with db_pg.get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT ticker, week_of, range_low, range_high, description
+                      FROM hedgeye_etf_pro_ranges
+                     WHERE ticker = %s
+                     ORDER BY week_of DESC
+                     LIMIT 1
+                    """,
+                    (ticker.upper(),),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+    except Exception as e:
+        log.warning("decision_engine: etf-pro range fetch failed for %s: %s", ticker, e)
+        return None
+
+
 def _get_mfr_latest(ticker: str) -> Optional[dict]:
     """Most recent mfr_snapshots row for the ticker, typed columns only."""
     try:
@@ -172,6 +198,7 @@ def gather_context(ticker: str, *, signal_conviction: Optional[str] = None) -> d
         "as_of":          datetime.utcnow().isoformat() + "Z",
         "hedgeye_macro":  _get_hedgeye_ctx(),
         "risk_range":     _get_risk_range(ticker),
+        "etf_pro_range":  _get_etf_pro_range(ticker),
         "spotgamma":      _get_spotgamma_latest(ticker),
         "mfr":            _get_mfr_latest(ticker),
         "yahoo":          _get_yahoo_latest(ticker),
@@ -266,12 +293,22 @@ STEP 1 — Is the ticker FRAMEWORK-ALIGNED for the current Quad?
   Check ticker against the sector favorability matrix above. Long-favorable,
   short-favorable, or neutral?
 
-STEP 2 — What does Hedgeye's Risk Range say?
-  Bottom-third of range = scale-in zone (favorable for adds on framework-aligned longs).
-  Top-third of range = trim zone.
-  Middle third = hold, no action.
-  Below buy_trade  = boundary breach low (deeper opportunity for framework-aligned long; risk-off for framework-aligned short).
-  Above sell_trade = boundary breach high (trim aggressively; or short on framework-aligned shorts).
+STEP 2 — What does Hedgeye's range say? (Hedgeye is the master range source)
+  Range source priority — use the FIRST that's available:
+    (a) Hedgeye Risk Range (daily RTA, fields buy_trade/sell_trade) — PRIMARY.
+    (b) Hedgeye ETF Pro Range (weekly Monday email, fields range_low/range_high) — SECONDARY,
+        only for the 18 ETF Pro tickers. Goes stale by Wednesday, so check
+        week_of >= today-7d.
+    (c) MFR fractal range — TERTIARY, only when neither Hedgeye source exists.
+        MFR is a useful confirmation tool but its ranges are weaker than
+        Hedgeye's — never override a Hedgeye source with MFR.
+  Once you've picked the range source, interpret price position relative to it:
+    Bottom-third of range = scale-in zone (favorable for adds on framework-aligned longs).
+    Top-third of range = trim zone.
+    Middle third = hold, no action.
+    Below low boundary  = breach low (deeper opportunity for framework-aligned long; risk-off for framework-aligned short).
+    Above high boundary = breach high (trim aggressively; or short on framework-aligned shorts).
+  If ALL three range sources are missing → Monitor.
 
 STEP 3 — Does SpotGamma corroborate?
   Bottom-third + below Put Wall = strong dealer support (negative gamma below → magnet up).
@@ -279,17 +316,40 @@ STEP 3 — Does SpotGamma corroborate?
   Hedge Wall is far-OTM, usually not actionable.
   Negative net gamma regime = expect amplified moves, size smaller.
 
-STEP 4 — Does MFR corroborate?
+STEP 4 — Does MFR corroborate? (MFR is a CONFIRMATION tool, not a primary signal)
   Hurst > 0.5 = trending; favor trend continuation.
   Hurst < 0.5 = mean-reverting; favor fading extremes.
-  Inside MFR range and aligned with MFR trend signal = double confirmation.
+  MFR trend_signal aligned with framework direction = added confirmation vote.
+  If Hedgeye Risk Range or ETF Pro Range is the active range source, MFR's
+  range numbers are IGNORED — only its Hurst + trend_signal count as a vote.
 
 STEP 5 — Synthesize:
-  All four agree (Quad-favorable + Risk Range bottom + SpotGamma support + MFR trend confirm) → Best Idea, 100 bps starter or 100 bps add.
+  Four votes are: (1) Quad/sector alignment, (2) Hedgeye range zone (Risk Range
+  or ETF Pro Range; MFR substitutes ONLY when both are missing), (3) SpotGamma
+  walls/regime, (4) MFR Hurst + trend_signal.
+  All four agree → Best Idea, 100 bps starter or 100 bps add.
   Three of four agree → Adding, 50 bps.
   Two or fewer agree, or sharp disagreement → Monitor, no trade.
-  Risk Range missing → Monitor (the framework requires it).
-  Account value $0 → Monitor (can't size; tell user portfolio data is missing).
+
+  HARD CEILING RULES (NOT OVERRIDABLE under any circumstance, no matter how
+  strong the framework alignment, no matter what other layers say, no matter
+  what HU doctrine you cite):
+
+    R1. ALL Hedgeye range sources missing AND MFR also unavailable → Monitor.
+        Force conviction='Monitor', action='WATCH', bps=null. NO EXCEPTIONS.
+
+    R2. Hedgeye range sources missing but MFR present → max conviction='Adding',
+        max bps=50, action='ADD' or 'BUY'. NO EXCEPTIONS. Hedgeye is the master
+        signal source; without it we never go full-size. If you find yourself
+        about to write 'Best Idea' or '100 bps' here, STOP and downshift to
+        'Adding' / 50 bps regardless of how strong the other votes are.
+
+    R3. Account value $0 or unknown → Monitor. Can't size without a denominator.
+
+  These ceilings exist because the bot's edge IS Keith's signal. Acting full-
+  size without a Hedgeye range means trading on subordinate data — that's
+  exactly the kind of off-process behavior the canon's "rules-based + incremental"
+  doctrine prohibits.
 
 ═══════════════════════════════════════════════════════════════════════════
 OUTPUT FORMAT — return ONLY a single JSON object, no prose around it
@@ -351,13 +411,16 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     sections.append("## Hedgeye macro context")
     sections.append(json.dumps(_trim(ctx.get("hedgeye_macro") or {}), indent=2, default=str))
     sections.append("")
-    sections.append("## Hedgeye Risk Range (latest signal)")
+    sections.append("## Hedgeye Risk Range (latest daily signal — PRIMARY range source)")
     sections.append(json.dumps(_trim(ctx.get("risk_range") or {}), indent=2, default=str))
+    sections.append("")
+    sections.append("## Hedgeye ETF Pro Range (Monday weekly — SECONDARY range source for ETFs)")
+    sections.append(json.dumps(_trim(ctx.get("etf_pro_range") or {}), indent=2, default=str))
     sections.append("")
     sections.append("## SpotGamma (latest equity hub)")
     sections.append(json.dumps(_trim(ctx.get("spotgamma") or {}), indent=2, default=str))
     sections.append("")
-    sections.append("## MFR (latest fractal range)")
+    sections.append("## MFR (latest fractal range — TERTIARY range source; secondary to Hedgeye)")
     sections.append(json.dumps(_trim(ctx.get("mfr") or {}), indent=2, default=str))
     sections.append("")
     sections.append("## Yahoo (latest snapshot)")
@@ -522,6 +585,9 @@ def decide(
         "vix_bucket":      (ctx.get("hedgeye_macro") or {}).get("vix_bucket"),
         "risk_range_low":  (ctx.get("risk_range") or {}).get("buy_trade"),
         "risk_range_high": (ctx.get("risk_range") or {}).get("sell_trade"),
+        "etf_pro_low":     (ctx.get("etf_pro_range") or {}).get("range_low"),
+        "etf_pro_high":    (ctx.get("etf_pro_range") or {}).get("range_high"),
+        "etf_pro_week":    (ctx.get("etf_pro_range") or {}).get("week_of"),
         "spotgamma_call_wall": ((ctx.get("spotgamma") or {}).get("call_wall")),
         "spotgamma_put_wall":  ((ctx.get("spotgamma") or {}).get("put_wall")),
         "mfr_range_low":   (ctx.get("mfr") or {}).get("range_low"),
