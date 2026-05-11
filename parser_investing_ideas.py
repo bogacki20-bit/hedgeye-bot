@@ -55,17 +55,78 @@ def _strip_html(html: str) -> str:
 #   102.4%
 #   9/10/24 - 1/6/25
 #   Get Report
+# Row layout: #N TICKER ANALYST_NAME PCT% DATE_ADDED [- DATE_REMOVED]
+# Closed positions show a date range like "9/10/24 - 1/6/25".
+# Still-active positions show only one date like "3/25/26" then "Get Report".
+# Make the "- DATE_REMOVED" portion optional.
 ROW_RE = re.compile(
-    r"#(\d+)\s+([A-Z]{1,5})\s+([A-Za-z][A-Za-z\s]+?)\s+"
+    r"#(\d+)\s+([A-Z]{1,5})\s+([A-Za-z][A-Za-z\s\.]+?)\s+"
     r"(-?\d+\.\d+)%\s+"
-    r"(\d{1,2}/\d{1,2}/\d{2,4})\s*-\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+    r"(\d{1,2}/\d{1,2}/\d{2,4})"
+    r"(?:\s*-\s*(\d{1,2}/\d{1,2}/\d{2,4}))?"
+    r"\s+Get\s+Report",
     re.S,
 )
 
+# The Top-21 active longs live in a separate "DATES ADDED" prose section
+# BEFORE the ranked closed-positions table. Format:
+#   "DATES ADDED: VMC: 1/7/2025, SITM: 4/11/2025, ..., CAVA 2/23/2026, ..."
+# Tickers may or may not have a colon. Dates use 4-digit years (vs. 2-digit
+# in the ranked table below) so a strict 4-digit year disambiguates.
+DATES_ADDED_SECTION_RE = re.compile(
+    r"\bDATES\s+ADDED\b\s*[:\s]*(.+?)(?=\bRANK\b|\bSTOCK\s+REPORT\b|\Z)",
+    re.I | re.S,
+)
+ACTIVE_LONG_RE = re.compile(
+    r"\b([A-Z]{1,5})\s*[:\s]+(\d{1,2}/\d{1,2}/\d{4})",
+)
+
+
+def _parse_date(s: str):
+    if not s:
+        return None
+    try:
+        fmt = "%m/%d/%y" if len(s.split("/")[-1]) == 2 else "%m/%d/%Y"
+        return datetime.strptime(s, fmt).date()
+    except ValueError:
+        return None
+
 
 def parse_body(html_body: str) -> list[dict]:
+    """Returns a single flat list of rows. Two row shapes coexist:
+      - Active long (from DATES ADDED prose): rank=None, analyst=None,
+        pct_change=None, date_removed=None.
+      - Ranked closed position (from the #N ranked table): all fields populated.
+    Both share the (snapshot_date, ticker) PK so a ticker that's also in the
+    Top-N closed table will get its closed-row written (more informative).
+    """
     text = _strip_html(html_body)
     rows: list[dict] = []
+    captured_tickers: set[str] = set()
+
+    # First: active longs from the DATES ADDED section
+    section = DATES_ADDED_SECTION_RE.search(text)
+    if section:
+        active_block = section.group(1)
+        for m in ACTIVE_LONG_RE.finditer(active_block):
+            ticker = m.group(1)
+            # Skip section headers like "DATES" or stray words
+            if ticker in {"DATES", "ADDED", "RANK", "TICKER",
+                         "ANALYST", "CHANGE", "REMOVED", "STOCK", "REPORT", "GET"}:
+                continue
+            d_added = _parse_date(m.group(2))
+            rows.append({
+                "rank":         None,
+                "ticker":       ticker,
+                "analyst":      None,
+                "pct_change":   None,
+                "date_added":   d_added,
+                "date_removed": None,
+            })
+            captured_tickers.add(ticker)
+
+    # Second: ranked closed positions from the #N table. If a ticker is also
+    # in the active longs we overwrite — the ranked row carries more info.
     for m in ROW_RE.finditer(text):
         rank = int(m.group(1))
         ticker = m.group(2)
@@ -74,19 +135,17 @@ def parse_body(html_body: str) -> list[dict]:
             pct = float(m.group(4))
         except ValueError:
             pct = None
-        try:
-            d_added = datetime.strptime(
-                m.group(5),
-                "%m/%d/%y" if len(m.group(5).split("/")[-1]) == 2 else "%m/%d/%Y"
-            ).date()
-        except ValueError:
-            d_added = None
+        d_added   = _parse_date(m.group(5))
+        d_removed = _parse_date(m.group(6))
+        # If ticker already captured as active long, replace that row
+        rows = [r for r in rows if r["ticker"] != ticker]
         rows.append({
-            "rank":       rank,
-            "ticker":     ticker,
-            "analyst":    analyst,
-            "pct_change": pct,
-            "date_added": d_added,
+            "rank":         rank,
+            "ticker":       ticker,
+            "analyst":      analyst,
+            "pct_change":   pct,
+            "date_added":   d_added,
+            "date_removed": d_removed,
         })
     return rows
 
@@ -104,19 +163,21 @@ def upsert_rows(rows: list[dict], snapshot_date: date, message_id: str | None) -
                         """
                         INSERT INTO hedgeye_investing_ideas
                             (snapshot_date, rank, ticker, analyst,
-                             pct_change, date_added,
+                             pct_change, date_added, date_removed,
                              source_email_id, parsed_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (snapshot_date, ticker) DO UPDATE
                             SET rank            = EXCLUDED.rank,
                                 analyst         = EXCLUDED.analyst,
                                 pct_change      = EXCLUDED.pct_change,
                                 date_added      = EXCLUDED.date_added,
+                                date_removed    = EXCLUDED.date_removed,
                                 source_email_id = EXCLUDED.source_email_id,
                                 parsed_at       = NOW()
                         """,
                         (snapshot_date, r["rank"], r["ticker"], r["analyst"],
-                         r["pct_change"], r["date_added"], message_id),
+                         r["pct_change"], r["date_added"], r.get("date_removed"),
+                         message_id),
                     )
                     written += 1
                 except Exception as e:

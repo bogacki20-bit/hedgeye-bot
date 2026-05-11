@@ -48,10 +48,17 @@ def _strip_html(html: str) -> str:
         return re.sub(r"\s+", " ", text).strip()
 
 
-ADDED_RE   = re.compile(r"\bAdded\s*:\s*([A-Z0-9,\s]+?)(?=\bRemoved|\bRANK|\bPlease|\Z)",
-                       re.I | re.S)
-REMOVED_RE = re.compile(r"\bRemoved\s*:\s*([A-Z0-9,\s]+?)(?=\bAdded|\bRANK|\bPlease|\Z)",
-                       re.I | re.S)
+# Section headers end with the next blank line or any non-ticker character (paren,
+# bracket, asterisk). Use a permissive lookahead so we capture multi-line ticker
+# lists regardless of what follows.
+ADDED_RE   = re.compile(
+    r"\bAdded\s*:\s*([A-Z0-9,\s]+?)(?=\bRemoved|\bRANK|\bPlease|[\(\[\*]|\Z)",
+    re.I | re.S,
+)
+REMOVED_RE = re.compile(
+    r"\bRemoved\s*:\s*([A-Z0-9,\s]+?)(?=\bAdded|\bRANK|\bPlease|[\(\[\*]|\Z)",
+    re.I | re.S,
+)
 TICKER_RE  = re.compile(r"\b([A-Z]{1,5})\b")
 
 

@@ -30,7 +30,13 @@ def build_xml() -> str:
     script = str(REPO_ROOT / "proactive_scanner.py")
     args = "--max-tickers 20 --throttle 2"
 
-    # Trigger: every weekday at 9:30am ET, then repeat every 30 min for 6.5 hours
+    # StartBoundary must be in the past (or today) for the weekly trigger to
+    # consider TODAY a valid fire day. Use yesterday's date so the schedule
+    # is already "active" when Windows evaluates it. Time of day is 09:30 local.
+    from datetime import date, timedelta
+    start_date = (date.today() - timedelta(days=1)).isoformat()
+
+    # Trigger: every weekday at 9:30am local, then repeat every 30 min for 6.5 hours
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -39,7 +45,7 @@ def build_xml() -> str:
   </RegistrationInfo>
   <Triggers>
     <CalendarTrigger>
-      <StartBoundary>2026-05-12T09:30:00</StartBoundary>
+      <StartBoundary>{start_date}T09:30:00</StartBoundary>
       <Enabled>true</Enabled>
       <ScheduleByWeek>
         <DaysOfWeek>
