@@ -295,19 +295,27 @@ def compose_recommendation(
         hedgeye_ctx = {}
         spotgamma_ctx = {}
 
-    # Suggested $ size: bps × account value, clamped at $1K per-fill ceiling.
-    # Single source of truth for sizing math is recommender.size_from_bps.
+    # Suggested $ size: Style B (bps × account value, clamped at $1K per-fill
+    # ceiling). Single source of truth is recommender.size_for(conviction, account).
     # The decision_engine (slice 0b) will eventually replace these inline
     # calculations with a Claude API call synthesizing multi-source context.
     try:
-        from recommender import size_from_bps, STARTER_BPS, ADD_BPS_LOW
-        from portfolio import account_value, hedgeye_target_account
-        _acct = hedgeye_target_account(direction="Long")
-        _acct_val = account_value(_acct) or 0
-        _starter_usd = size_from_bps(STARTER_BPS, _acct_val) if _acct_val else 500.0
-        _add_usd     = size_from_bps(ADD_BPS_LOW, _acct_val) if _acct_val else 500.0
+        from recommender import size_for, STYLE_B
+        from portfolio import hedgeye_target_account
+        _acct          = hedgeye_target_account(direction="Long")
+        _starter_usd, _starter_dbg = size_for("Best Idea", _acct)
+        _add_usd,     _add_dbg     = size_for("Adding",    _acct)
+        # size_for returns None when account_value is zero/missing — keep the
+        # placeholder so alert text still has a number. Same fallback path the
+        # legacy size_from_bps branch used.
+        if not _starter_usd:
+            _starter_usd = 500.0
+        if not _add_usd:
+            _add_usd = 500.0
+        STARTER_BPS = STYLE_B["starter_bps"]
+        ADD_BPS_LOW = STYLE_B["add_bps"]
     except Exception as e:
-        log.warning(f"size_from_bps lookup failed; using $500 placeholder: {e}")
+        log.warning(f"size_for lookup failed; using $500 placeholder: {e}")
         _starter_usd, _add_usd = 500.0, 500.0
         STARTER_BPS, ADD_BPS_LOW = 100, 50
 
@@ -614,10 +622,4 @@ if __name__ == "__main__":
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
-                        help="Run one cycle, log alerts but don't send Telegram or write DB")
-    args = parser.parse_args()
-
-    print(f"Running one monitor cycle (dry_run={args.dry_run})...")
-    print(f"is_market_hours = {is_market_hours()}")
-    summary = run_monitor_cycle(dry_run=args.dry_run)
-    print(f"Summary: {summary}")
+                        help="Run o
