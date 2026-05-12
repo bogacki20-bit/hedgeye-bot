@@ -339,13 +339,15 @@ def parse_risk_range_email(raw_row: dict) -> tuple[list[dict], list[dict]]:
 
 def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
     """
-    Process up to `batch_size` unparsed emails. Returns a summary dict.
+    Process up to `batch_size` unparsed Risk Range emails. Returns a summary dict.
 
-    Skipped emails are left with parsed_at = NULL so other typed parsers
-    (ETF Pro, Quad Nowcast, etc.) can pick them up. Failed parses are
-    classified as 'risk_range_parse_failed' so they don't get retried.
+    Filters at the DB level on subject pattern so the cycle is not blocked by
+    a backlog of unparsed non-Risk-Range emails (other typed parsers handle
+    those). Failed parses are classified as 'risk_range_parse_failed' so they
+    don't get retried.
     """
     import db_pg  # lazy — only needed when running against the live lake
+    import psycopg2.extras
 
     summary = {
         "emails_examined":           0,
@@ -356,7 +358,22 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
         "signal_change_rows_written": 0,
     }
 
-    candidates = db_pg.get_unparsed_emails(limit=batch_size)
+    # Pull only emails whose subject already looks like Risk Range. Anything
+    # else stays in the raw lake for other typed parsers to claim.
+    with db_pg.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                """
+                SELECT * FROM hedgeye_emails_raw
+                WHERE parsed_at IS NULL
+                  AND (subject ILIKE %s OR subject ILIKE %s OR subject ~* %s)
+                ORDER BY received_at ASC
+                LIMIT %s
+                """,
+                ('%RISK  RANGE%', '%RISK RANGE%', r'\yRRS\y', batch_size),
+            )
+            candidates = [dict(r) for r in cur.fetchall()]
+
     summary["emails_examined"] = len(candidates)
 
     for raw_row in candidates:
@@ -364,6 +381,9 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
         subject    = raw_row.get("subject") or ""
 
         if not is_risk_range_email(subject):
+            # Defensive: SQL prefilter should make this rare. Mark so it
+            # doesn't reappear next cycle.
+            db_pg.mark_email_classified(message_id, "risk_range_subject_mismatch")
             summary["emails_skipped"] += 1
             continue
 

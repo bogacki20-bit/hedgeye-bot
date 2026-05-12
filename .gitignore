@@ -13,3 +13,6 @@ bridge.watchdog.log
 
 # Local capture corpus (staged for ingestion to Postgres, not for git)
 data/snapshots/
+
+# Scheduled-task wrapper log files (one per day)
+logs/

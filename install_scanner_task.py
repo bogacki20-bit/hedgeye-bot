@@ -26,9 +26,16 @@ ADMIN_PS1_PATH = REPO_ROOT / ".commands" / "task_xml" / "install_scanner_admin.p
 
 
 def build_xml() -> str:
-    pyw = r"C:\Users\bogac\AppData\Local\Programs\Python\Python312\pythonw.exe"
-    script = str(REPO_ROOT / "proactive_scanner.py")
-    args = "--max-tickers 20 --throttle 2"
+    # Run scanner through scanner_launcher.ps1 so:
+    #   - stdout/stderr land in C:\Projects\hedgeye-bot\logs\scanner_YYYY-MM-DD.log
+    #   - .env is loaded (DATABASE_PUBLIC_URL, ANTHROPIC_API_KEY) before python
+    # Without the launcher the task ran pythonw.exe with no env and no log.
+    powershell = r"powershell.exe"
+    launcher = str(REPO_ROOT / "scanner_launcher.ps1")
+    args = f'-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{launcher}"'
+    # Variables kept for legacy templating below.
+    pyw = powershell
+    script = launcher
 
     # StartBoundary must be in the past (or today) for the weekly trigger to
     # consider TODAY a valid fire day. Use yesterday's date so the schedule
@@ -84,8 +91,8 @@ def build_xml() -> str:
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>{pyw}</Command>
-      <Arguments>{script} {args}</Arguments>
+      <Command>{powershell}</Command>
+      <Arguments>{args}</Arguments>
       <WorkingDirectory>{REPO_ROOT}</WorkingDirectory>
     </Exec>
   </Actions>
