@@ -26,8 +26,9 @@ CORPUS = REPO / "data" / "snapshots" / "hedgeye"
 
 # Filename patterns: each entry is (regex, sub_folder_under_date)
 PATTERNS = [
-    # The Macro Show daily deck: HE_TMS_DS_FV_5.8.2026.pdf
-    (re.compile(r"^HE_TMS_DS_FV_(\d{1,2})\.(\d{1,2})\.(\d{4})\.pdf$", re.IGNORECASE), "macro_show"),
+    # The Macro Show daily deck: HE_TMS_{HOST}_{COHOST}_M.D.YYYY.pdf
+    # Hosts vary day-to-day: HE_TMS_DS_FV_5.8.2026.pdf, HE_TMS_KM_DJ_5.11.2026.pdf, etc.
+    (re.compile(r"^HE_TMS_[A-Z]+_[A-Z]+_(\d{1,2})\.(\d{1,2})\.(\d{4})\.pdf$", re.IGNORECASE), "macro_show"),
     # Quarterly Macro Themes Update deck: pattern TBD - guess for now
     (re.compile(r"^HE_QMT_.*\.pdf$", re.IGNORECASE), "quarterly_themes"),
     # Mid-quarter Update: HE_MQ_*
@@ -93,7 +94,18 @@ def main() -> int:
             print(f"FAILED to move {src.name}: {e}")
             failed += 1
 
-    print(f"summary: moved={moved} skipped={skipped} failed={failed}")
+    # Sweep stray slide_*.tmp scratch files out of any macro_show date folder.
+    # These are produced by Linux-side pdftotext split scratch work that can't
+    # delete its own files across the Windows mount; we tidy here.
+    tmp_swept = 0
+    for tmp in CORPUS.glob("*/macro_show/slide_*.tmp"):
+        try:
+            tmp.unlink()
+            tmp_swept += 1
+        except Exception as e:
+            print(f"FAILED to sweep tmp {tmp}: {e}")
+
+    print(f"summary: moved={moved} skipped={skipped} failed={failed} tmp_swept={tmp_swept}")
     return 0 if failed == 0 else 1
 
 

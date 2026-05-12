@@ -622,4 +622,10 @@ if __name__ == "__main__":
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
-                        help="Run o
+                        help="Run one cycle, log alerts but don't send Telegram or write DB")
+    args = parser.parse_args()
+
+    print(f"Running one monitor cycle (dry_run={args.dry_run})...")
+    print(f"is_market_hours = {is_market_hours()}")
+    summary = run_monitor_cycle(dry_run=args.dry_run)
+    print(f"Summary: {summary}")
