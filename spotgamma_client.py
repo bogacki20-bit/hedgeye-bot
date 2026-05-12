@@ -229,6 +229,8 @@ def _classify_path(path: Path) -> Optional[tuple[str, date_cls, str]]:
         subdirs = parts[idx + 2:-1]  # everything between date and filename
         if "equityhub_eod" in subdirs:
             ctype = "eod"
+        elif "equityhub_ondemand" in subdirs:
+            ctype = "on_demand"
         elif "equityhub" in subdirs:
             ctype = "premarket"
         elif not subdirs:
