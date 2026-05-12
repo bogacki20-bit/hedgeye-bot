@@ -19,6 +19,16 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+# --- Postgres command queue (Dispatch / Cowork inbound) ---
+try:
+    from bridge_pg_queue import start_poller as _pg_start_poller
+except Exception as _pg_import_err:   # noqa: BLE001
+    _pg_start_poller = None
+    import logging as _pg_log
+    _pg_log.getLogger(__name__).warning(
+        "bridge_pg_queue unavailable: %s", _pg_import_err
+    )
+
 REPO_ROOT      = Path(r"C:\Projects\hedgeye-bot")
 COMMANDS_ROOT  = REPO_ROOT / ".commands"
 PENDING_DIR    = COMMANDS_ROOT / "pending"
@@ -663,4 +673,6 @@ if __name__ == "__main__":
             sys.exit(2)
         write_command(name, args)
     else:
+        if _pg_start_poller is not None:
+            _pg_start_poller()
         run_loop()
