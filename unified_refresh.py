@@ -141,24 +141,72 @@ def _format_summary_log(summary: dict) -> str:
 
 def _cli() -> None:
     ap = argparse.ArgumentParser(
-        description="unified_refresh smoke test — fan out MFR + SpotGamma + Yahoo for tickers"
+        description="unified_refresh — fan out MFR + SpotGamma + Yahoo for tickers, "
+                    "optionally also noting them in hedgeye_ticker_inventory"
     )
-    ap.add_argument("--tickers", nargs="+", required=True,
-                    help="Ticker symbols to refresh")
+    ap.add_argument("--tickers", nargs="+",
+                    help="Ticker symbols to refresh (required unless --bullish/--bearish given)")
+    ap.add_argument("--bullish", nargs="+", default=[],
+                    help="Bullish tickers — refreshed AND noted as position=long if --note-source set")
+    ap.add_argument("--bearish", nargs="+", default=[],
+                    help="Bearish tickers — refreshed AND noted as position=short if --note-source set")
     ap.add_argument("--capture-type", default="on_demand",
                     choices=["email_arrival", "monitor_cycle", "on_demand"])
     ap.add_argument("--reason", default="cli_smoke_test",
                     help="SpotGamma queue reason annotation")
     ap.add_argument("--force-spotgamma", action="store_true",
                     help="Skip the staleness check; queue every ticker for SpotGamma refresh")
+    ap.add_argument("--note-source", default=None,
+                    help="If set, also call ticker_inventory.note_tickers with this source "
+                         "(e.g. macro_show, risk_range, manual_backfill). Required if you want "
+                         "the tickers recorded in hedgeye_ticker_inventory.")
+    ap.add_argument("--quad", default=None,
+                    help="Quad regime annotation passed to ticker_inventory (e.g. 'Quad 2')")
+    ap.add_argument("--message-id", default=None,
+                    help="Source message_id annotation passed to ticker_inventory")
     args = ap.parse_args()
 
+    # Combine ticker sources. Bullish/bearish lists get position-aware ticker_inventory
+    # calls; plain --tickers gets noted with no position.
+    plain = list(args.tickers or [])
+    bull = list(args.bullish or [])
+    bear = list(args.bearish or [])
+    all_tickers = plain + bull + bear
+    if not all_tickers:
+        ap.error("must supply at least one of --tickers / --bullish / --bearish")
+
     summary = refresh_all_for_tickers(
-        args.tickers,
+        all_tickers,
         capture_type=args.capture_type,
         spotgamma_reason=args.reason,
         skip_spotgamma_if_fresh=not args.force_spotgamma,
     )
+
+    # Optional second leg — note in hedgeye_ticker_inventory.
+    if args.note_source:
+        try:
+            import ticker_inventory
+            inv_summary = {"plain": {}, "bullish": {}, "bearish": {}}
+            if plain:
+                inv_summary["plain"] = ticker_inventory.note_tickers(
+                    plain, source=args.note_source, quad_regime=args.quad,
+                    message_id=args.message_id,
+                )
+            if bull:
+                inv_summary["bullish"] = ticker_inventory.note_tickers(
+                    bull, source=args.note_source, position=ticker_inventory.POS_LONG,
+                    quad_regime=args.quad, message_id=args.message_id,
+                )
+            if bear:
+                inv_summary["bearish"] = ticker_inventory.note_tickers(
+                    bear, source=args.note_source, position=ticker_inventory.POS_SHORT,
+                    quad_regime=args.quad, message_id=args.message_id,
+                )
+            summary["ticker_inventory"] = inv_summary
+        except Exception as e:
+            log.warning("unified_refresh CLI: ticker_inventory leg failed: %s", e)
+            summary["ticker_inventory"] = {"error": str(e)}
+
     print(json.dumps(summary, indent=2, default=str))
     print()
     print(_format_summary_log(summary))

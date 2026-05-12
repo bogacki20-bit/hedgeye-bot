@@ -348,6 +348,128 @@ def handle_bridge_restart(args):
     return {"ok": True, "stdout": "shutdown flag set; bridge will exit after this result is written", "stderr": ""}
 
 
+def handle_ps_exec(args):
+    """Run an arbitrary PowerShell command. The escape hatch for OneDrive
+    lock cascades and other host operations not covered by typed handlers.
+
+    args:
+        command  (str, required, <=4000 chars) — the PowerShell script body
+        timeout  (int, 1..600 seconds, default 60)
+        cwd      (str, default REPO_ROOT) — working directory
+
+    Invokes `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass
+    -Command <body>`. The bridge logs the first 200 chars of every invocation
+    so audits are easy.
+    """
+    cmd = args.get("command")
+    if not cmd or not isinstance(cmd, str) or len(cmd) > 4000:
+        return {"ok": False, "stderr": "args.command required (str, max 4000 chars)"}
+    timeout = args.get("timeout", 60)
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        return {"ok": False, "stderr": "args.timeout must be int 1..600"}
+    if not (1 <= timeout <= 600):
+        return {"ok": False, "stderr": "args.timeout must be 1..600"}
+    cwd = args.get("cwd") or str(REPO_ROOT)
+    log.info(f"  ps_exec: {cmd[:200]}{'…' if len(cmd) > 200 else ''}")
+    return _run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy", "Bypass",
+            "-Command", cmd,
+        ],
+        cwd=cwd,
+        timeout=timeout,
+    )
+
+
+def handle_git_clear_locks(args):
+    """Sweep stale .git/*.lock files plus known phantom stray files.
+
+    Equivalent to the keyboard PowerShell used during the OneDrive lock
+    cascades. Issued through the queue so no keyboard intervention needed
+    when the next cascade hits.
+
+    args:
+        phantoms (list[str], optional) — extra filenames in the repo root
+            to attempt to remove (e.g. recommender.py.new, test_write.txt).
+    """
+    phantoms = args.get("phantoms") or ["recommender.py.new", "test_write.txt"]
+    if not isinstance(phantoms, list) or not all(isinstance(p, str) for p in phantoms):
+        return {"ok": False, "stderr": "args.phantoms must be a list of strings"}
+    phantom_list = ",".join(f"'{p}'" for p in phantoms)
+    ps = (
+        "Get-ChildItem .git -Recurse -Filter *.lock -Force "
+        "| ForEach-Object { Write-Host (\"deleting \" + $_.FullName); "
+        "Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Continue }; "
+        f"Get-ChildItem -Force | Where-Object {{ $_.Name -in @({phantom_list}) }} "
+        "| Remove-Item -Force -ErrorAction Continue"
+    )
+    return handle_ps_exec({"command": ps, "cwd": str(REPO_ROOT), "timeout": 30})
+
+
+def handle_git_commit_push(args):
+    """Stage + commit + push in one step, with auto-retry on the OneDrive
+    lock cascade. If git fails with a "lock" / "Unable to create *.lock"
+    error, we sweep .git/*.lock and try again exactly once.
+
+    args:
+        paths    (list[str], default ["."]) — paths to git add
+        message  (str, required, <=500 chars) — commit subject
+        body     (str, optional, <=4000 chars) — commit body
+        push     (bool, default True) — set False to commit-without-push
+    """
+    paths = args.get("paths") or ["."]
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        return {"ok": False, "stderr": "args.paths must be a list of strings"}
+    message = args.get("message")
+    if not message or not isinstance(message, str) or len(message) > 500:
+        return {"ok": False, "stderr": "args.message required (str, max 500 chars)"}
+    body = args.get("body")
+    if body is not None and (not isinstance(body, str) or len(body) > 4000):
+        return {"ok": False, "stderr": "args.body must be str, max 4000 chars"}
+    do_push = args.get("push", True)
+
+    def _attempt():
+        add = _run(["git", "add"] + paths, cwd=REPO_ROOT)
+        if not add["ok"]:
+            return ("add", add)
+        commit_argv = ["git", "commit", "-m", message]
+        if body:
+            commit_argv += ["-m", body]
+        commit = _run(commit_argv, cwd=REPO_ROOT)
+        if not commit["ok"]:
+            combined = (commit.get("stdout", "") + commit.get("stderr", "")).lower()
+            if "nothing to commit" not in combined:
+                return ("commit", commit)
+        if not do_push:
+            return ("ok", {"ok": True, "returncode": 0,
+                           "stdout": (add.get("stdout","")+"\n"+commit.get("stdout","")).strip(),
+                           "stderr": (add.get("stderr","")+"\n"+commit.get("stderr","")).strip()})
+        push = _run(["git", "push", "origin", "master"], cwd=REPO_ROOT, timeout=120)
+        return ("push", {
+            "ok": push["ok"], "returncode": push["returncode"],
+            "stdout": (add.get("stdout","")+"\n"+commit.get("stdout","")+"\n"+push.get("stdout","")).strip(),
+            "stderr": (add.get("stderr","")+"\n"+commit.get("stderr","")+"\n"+push.get("stderr","")).strip(),
+        })
+
+    stage, result = _attempt()
+    if result.get("ok"):
+        return result
+    err_blob = (result.get("stderr", "") + result.get("stdout", "")).lower()
+    if "lock" in err_blob and ("unable to create" in err_blob or ".lock'" in err_blob or "index.lock" in err_blob):
+        log.info(f"  git_commit_push: lock cascade detected on {stage}; sweeping .git/*.lock and retrying once")
+        sweep = handle_git_clear_locks({})
+        _, retry = _attempt()
+        retry["auto_lock_retry"] = True
+        retry["sweep_stdout"] = sweep.get("stdout", "")
+        return retry
+    return result
+
+
 def handle_bridge_log_tail(args):
     n = int(args.get("n", 100))
     if not (1 <= n <= 2000):
@@ -368,6 +490,9 @@ WHITELIST = {
     "git_push": handle_git_push,
     "git_log": handle_git_log,
     "git_diff_stat": handle_git_diff_stat,
+    "git_clear_locks": handle_git_clear_locks,
+    "git_commit_push": handle_git_commit_push,
+    "ps_exec": handle_ps_exec,
     "railway_env": handle_railway_env,
     "railway_env_get": handle_railway_env_get,
     "railway_logs": handle_railway_logs,
