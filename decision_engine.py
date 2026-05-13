@@ -373,6 +373,40 @@ Triple-check that your sector view matches the matrix above.
 """
 
 
+def _zone_summary_line(label: str, price, low, high) -> str:
+    """Deterministic one-liner the LLM cannot misread.
+
+    Pre-computes 'where is price within [low, high]' using price_monitor.compute_zone
+    so the LLM doesn't get to invent 'above range high' / 'breach' framing from
+    raw JSON numbers. Mirrors the wording in alert text so contradictions are
+    obvious to the post-validator.
+    """
+    try:
+        p = float(price) if price is not None else None
+        lo = float(low) if low is not None else None
+        hi = float(high) if high is not None else None
+    except (TypeError, ValueError):
+        return f"{label} zone: unavailable (non-numeric inputs price={price!r} low={low!r} high={high!r})"
+    if p is None or lo is None or hi is None:
+        return f"{label} zone: unavailable (missing price/low/high)"
+    if lo >= hi:
+        return f"{label} zone for price {p} in range [{lo}, {hi}]: invalid range (low >= high)"
+    try:
+        from price_monitor import compute_zone
+    except Exception:
+        return f"{label} zone: compute_zone import failed"
+    zone = compute_zone(p, lo, hi)
+    pct = (p - lo) / (hi - lo) * 100.0
+    if zone == "above_range":
+        verdict = "BREACH HIGH"
+    elif zone == "below_range":
+        verdict = "BREACH LOW"
+    else:
+        verdict = "NOT a breach"
+    return (f"{label} zone for price {p} in range [{lo}, {hi}]: "
+            f"{zone} ({pct:.0f}% through range; {verdict})")
+
+
 def _format_user_message(ctx: dict, *, signal_origin: str,
                          signal_conviction: Optional[str],
                          account_value: float) -> str:
@@ -411,20 +445,45 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     sections.append("## Hedgeye macro context")
     sections.append(json.dumps(_trim(ctx.get("hedgeye_macro") or {}), indent=2, default=str))
     sections.append("")
+    # Resolve a "current price" we can use for deterministic zone math. Prefer
+    # MFR's own price (its range was computed against it); fall back to Yahoo.
+    mfr_block = ctx.get("mfr") or {}
+    yahoo_block = ctx.get("yahoo") or {}
+    rr_block = ctx.get("risk_range") or {}
+    etf_block = ctx.get("etf_pro_range") or {}
+    mfr_price = mfr_block.get("price") or yahoo_block.get("price")
+
     sections.append("## Hedgeye Risk Range (latest daily signal — PRIMARY range source)")
-    sections.append(json.dumps(_trim(ctx.get("risk_range") or {}), indent=2, default=str))
+    sections.append(_zone_summary_line(
+        "Hedgeye Risk Range", mfr_price,
+        rr_block.get("buy_trade"), rr_block.get("sell_trade"),
+    ))
+    sections.append(json.dumps(_trim(rr_block), indent=2, default=str))
     sections.append("")
     sections.append("## Hedgeye ETF Pro Range (Monday weekly — SECONDARY range source for ETFs)")
-    sections.append(json.dumps(_trim(ctx.get("etf_pro_range") or {}), indent=2, default=str))
+    sections.append(_zone_summary_line(
+        "ETF Pro Range", mfr_price,
+        etf_block.get("range_low"), etf_block.get("range_high"),
+    ))
+    sections.append(json.dumps(_trim(etf_block), indent=2, default=str))
     sections.append("")
     sections.append("## SpotGamma (latest equity hub)")
     sections.append(json.dumps(_trim(ctx.get("spotgamma") or {}), indent=2, default=str))
     sections.append("")
     sections.append("## MFR (latest fractal range — TERTIARY range source; secondary to Hedgeye)")
-    sections.append(json.dumps(_trim(ctx.get("mfr") or {}), indent=2, default=str))
+    # Deterministic zone + trend so the LLM can't hallucinate "above range high"
+    # or "pullback" out of the raw JSON. Anchor wording must match price_monitor.
+    sections.append(_zone_summary_line(
+        "MFR", mfr_block.get("price"),
+        mfr_block.get("range_low"), mfr_block.get("range_high"),
+    ))
+    mfr_trend = mfr_block.get("trend_signal")
+    if mfr_trend:
+        sections.append(f"Recent trend: {mfr_trend} (from MFR trend_signal)")
+    sections.append(json.dumps(_trim(mfr_block), indent=2, default=str))
     sections.append("")
     sections.append("## Yahoo (latest snapshot)")
-    sections.append(json.dumps(_trim(ctx.get("yahoo") or {}), indent=2, default=str))
+    sections.append(json.dumps(_trim(yahoo_block), indent=2, default=str))
     sections.append("")
 
     if ctx.get("_corpus_block"):
@@ -439,9 +498,89 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
 
 # ─────────────────────────── Output validation ───────────────────────────
 
-def _parse_and_validate(text: str) -> dict:
+_UNVERIFIED_TAG = "[REASONING UNVERIFIED] "
+
+# Substrings worth flagging when they appear in LLM evidence/reasoning but
+# don't match the deterministic zone we computed pre-prompt. Lowercased.
+_HIGH_BREACH_HINTS = (
+    "above mfr range high",
+    "above range high",
+    "above the range high",
+    "above the range's high",
+    "above the high",
+    "breach high",
+    "breached high",
+    "breaching high",
+    "above the upper band",
+    "above the top of the range",
+)
+_LOW_BREACH_HINTS = (
+    "below mfr range low",
+    "below range low",
+    "below the range low",
+    "below the range's low",
+    "below the low",
+    "breach low",
+    "breached low",
+    "breaching low",
+    "below the lower band",
+    "below the bottom of the range",
+)
+
+
+def _zone_from_ctx(ctx: Optional[dict]) -> Optional[str]:
+    """Return the deterministic MFR zone for ctx, or None if unknown."""
+    if not ctx:
+        return None
+    mfr = ctx.get("mfr") or {}
+    yahoo = ctx.get("yahoo") or {}
+    price = mfr.get("price") or yahoo.get("price")
+    low = mfr.get("range_low")
+    high = mfr.get("range_high")
+    try:
+        if price is None or low is None or high is None:
+            return None
+        from price_monitor import compute_zone
+        return compute_zone(float(price), float(low), float(high))
+    except Exception:
+        return None
+
+
+def _flag_contradictions(decision: dict, ctx: Optional[dict]) -> None:
+    """Mutate decision in place: prepend [REASONING UNVERIFIED] to any evidence
+    or reasoning text whose breach framing contradicts compute_zone()."""
+    zone = _zone_from_ctx(ctx)
+    if zone is None:
+        return
+
+    def _flag_text(s: str) -> str:
+        if not isinstance(s, str):
+            return s
+        low_s = s.lower()
+        if zone != "above_range" and any(h in low_s for h in _HIGH_BREACH_HINTS):
+            return _UNVERIFIED_TAG + s
+        if zone != "below_range" and any(h in low_s for h in _LOW_BREACH_HINTS):
+            return _UNVERIFIED_TAG + s
+        return s
+
+    ev = decision.get("evidence")
+    if isinstance(ev, list):
+        decision["evidence"] = [_flag_text(item) if isinstance(item, str) else item for item in ev]
+    elif isinstance(ev, str):
+        decision["evidence"] = _flag_text(ev)
+
+    if isinstance(decision.get("reasoning"), str):
+        decision["reasoning"] = _flag_text(decision["reasoning"])
+
+
+def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
     """Extract the JSON object from Claude's response and validate against
-    the schema constraints. Raises ValueError on hard violations."""
+    the schema constraints. Raises ValueError on hard violations.
+
+    When ctx is provided, also post-validate the LLM's breach framing against
+    the deterministic MFR zone — contradictions get a [REASONING UNVERIFIED]
+    prefix on the offending evidence/reasoning string (alert is not rejected).
+    """
     # Tolerate prose around the JSON — find first { ... } block.
     start = text.find("{")
     end = text.rfind("}")
@@ -484,6 +623,9 @@ def _parse_and_validate(text: str) -> dict:
     # Always present these fields even if model omitted
     data.setdefault("reasoning", "")
     data.setdefault("evidence", [])
+
+    # If we have ctx, flag breach-framing that contradicts compute_zone.
+    _flag_contradictions(data, ctx)
     return data
 
 
@@ -559,7 +701,7 @@ def decide(
         return None
 
     try:
-        decision = _parse_and_validate(raw_text)
+        decision = _parse_and_validate(raw_text, ctx=ctx)
     except ValueError as e:
         log.error("decision_engine: response validation failed for %s: %s", ticker, e)
         log.error("  raw response: %s", raw_text[:500])
@@ -616,7 +758,88 @@ def _cli() -> None:
                     help="Override account value (default: pull from portfolio)")
     ap.add_argument("--context-only", action="store_true",
                     help="Just gather context and print it, no Claude call (cheap)")
+    ap.add_argument("--smoke-zone", action="store_true",
+                    help="Run an offline assert: build the prompt with AMLP-like "
+                         "MFR inputs (price=54.04, low=52.4960, high=55.1590, "
+                         "trend_signal=bullish) and confirm the deterministic "
+                         "zone line says middle_third + NOT a breach. No DB, no API.")
     args = ap.parse_args()
+
+    if args.smoke_zone:
+        # Hermetic: build _format_user_message against a synthetic ctx that
+        # mirrors today's AMLP alert. Skip the corpus block + canon by mocking
+        # _load_framework_canon to return "".
+        global _load_framework_canon
+        _orig_canon = _load_framework_canon
+        _load_framework_canon = lambda: ""  # type: ignore[assignment]
+        try:
+            ctx = {
+                "ticker": "AMLP",
+                "as_of": "2026-05-12T16:00:00Z",
+                "hedgeye_macro": {"current_quad": "Quad 2", "vix_bucket": "Investable"},
+                "risk_range": {},
+                "etf_pro_range": {},
+                "spotgamma": {},
+                "mfr": {
+                    "ticker": "AMLP",
+                    "price": 54.04,
+                    "range_low": 52.4960,
+                    "range_high": 55.1590,
+                    "trend_signal": "bullish",
+                    "hurst": 0.55,
+                },
+                "yahoo": {"price": 54.04},
+                "_corpus_block": "",
+            }
+            msg = _format_user_message(
+                ctx, signal_origin="manual",
+                signal_conviction=None, account_value=50_000.0,
+            )
+        finally:
+            _load_framework_canon = _orig_canon  # type: ignore[assignment]
+
+        # The two anchors the bug fix must guarantee.
+        zone_line = next(
+            (L for L in msg.splitlines() if L.startswith("MFR zone for price")),
+            "",
+        )
+        trend_line = next(
+            (L for L in msg.splitlines() if L.startswith("Recent trend:")),
+            "",
+        )
+        ok_zone   = "middle_third" in zone_line
+        ok_breach = "NOT a breach" in zone_line
+        ok_trend  = "bullish" in trend_line
+        assert ok_zone,   f"smoke: expected 'middle_third' in zone line, got: {zone_line!r}"
+        assert ok_breach, f"smoke: expected 'NOT a breach' in zone line, got: {zone_line!r}"
+        assert ok_trend,  f"smoke: expected 'bullish' in trend line, got: {trend_line!r}"
+
+        # Post-validator contradiction flag check.
+        fake_decision = {
+            "conviction": "Adding", "direction": "long", "action": "ADD",
+            "bps": 50, "confidence": 0.6,
+            "evidence": [
+                "MFR: price $54.04 is above MFR range high $55.16 (breach high ~1.8%)",
+                "Quad 2 supports energy infrastructure exposure",
+            ],
+            "reasoning": "Pullback in an uptrend; price above range high suggests trim window.",
+        }
+        _flag_contradictions(fake_decision, ctx)
+        flagged_ev = fake_decision["evidence"][0]
+        flagged_rs = fake_decision["reasoning"]
+        ok_ev_tag  = flagged_ev.startswith(_UNVERIFIED_TAG)
+        ok_rs_tag  = flagged_rs.startswith(_UNVERIFIED_TAG)
+        assert ok_ev_tag, f"smoke: expected evidence flagged, got: {flagged_ev!r}"
+        assert ok_rs_tag, f"smoke: expected reasoning flagged, got: {flagged_rs!r}"
+
+        print(json.dumps({
+            "ok": True,
+            "zone_line": zone_line,
+            "trend_line": trend_line,
+            "flagged_evidence": flagged_ev,
+            "flagged_reasoning": flagged_rs,
+        }, indent=2))
+        return
 
     if args.check_key:
         k = os.environ.get("ANTHROPIC_API_KEY", "")
