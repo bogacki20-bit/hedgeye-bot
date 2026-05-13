@@ -537,65 +537,72 @@ def _process_new_email(parsed: dict) -> None:
             elif legacy_dir in ("short", "sell"):
                 positions_by_ticker.setdefault(legacy, "short")
 
+        # Source detection runs unconditionally — typed parsers downstream key
+        # off `source` and must fire even when the classifier returned no
+        # tickers (Signal Strength bodies are mostly image-only; the delta
+        # text "Added: X / Removed: Y" often doesn't make it into item.tickers).
+        # Before, this block was gated behind `if tickers_in_msg:` and the
+        # typed-parser dispatch sat inside it, which silently swallowed
+        # Signal Strength / Portfolio Solutions / Investing Ideas / ETF Pro
+        # emails whenever the classifier produced empty tickers.
+        subject_lower = (item.get("subject") or "").lower()
+        ctype = (item.get("classified_type") or "").lower()
+
+        # Tier-1 daily-signal products. The RTA matcher uses a word-
+        # boundary regex so "RTA:" / "RTA -" / "Daily RTA" all match
+        # without false-positive on things like "EXTRACT" or "PORTAL".
+        if "real-time alert" in subject_lower or re.search(r"\brta\b", subject_lower):
+            source = "rta"
+        elif "risk range" in subject_lower:
+            source = "risk_range"
+
+        # Sector / specialty Pro products (active subscriptions per
+        # data/snapshots/hedgeye/2026-05-07/subscriptions_inventory.md)
+        elif "capital allocation" in subject_lower:
+            source = "capital_allocation_pro"
+        elif "financial" in subject_lower and "sector" in subject_lower:
+            source = "financials_sector_pro"
+        elif "retail" in subject_lower and ("sector" in subject_lower or "pro" in subject_lower):
+            source = "retail_pro"
+        elif "reits" in subject_lower:
+            source = "reits_pro"
+        elif "hedgai" in subject_lower:
+            source = "hedgai_signals"
+        elif "bitcoin trend tracker" in subject_lower:
+            source = "bitcoin_trend_tracker"
+        elif "market situation report" in subject_lower:
+            source = "market_situation_report"
+        elif "pro risk manager" in subject_lower or "prm:" in subject_lower:
+            # Branded Pro Risk Manager content not already caught by the
+            # bundled-product matchers above.
+            source = "pro_risk_manager"
+
+        # Other Hedgeye content streams
+        elif "signal strength" in subject_lower:
+            source = "signal_strength"
+        elif "etf pro" in subject_lower:
+            source = "etf_pro"
+        elif "investing idea" in subject_lower:
+            source = "investing_ideas"
+        elif "macro show" in subject_lower:
+            source = "macro_show"
+        elif "early look" in subject_lower:
+            source = "early_look"
+
+        # Fallbacks driven by the classifier's structural categorization
+        elif ctype == "sector_research":
+            source = "sector_pro"
+        elif ctype == "trade_signal":
+            source = "trade_signal"
+        else:
+            source = "other"
+
+        quad = item.get("macro_regime")  # classifier emits "Quad 1/2/3/4" or null
+
+        # ticker_inventory + lockstep MFR/SpotGamma/Yahoo refresh only run
+        # when the classifier actually produced ticker mentions — they need
+        # symbols to operate on.
         if tickers_in_msg:
-            # Map subject + classified_type -> ticker_inventory source string.
-            # Order matters: more-specific matchers first. Subject substrings
-            # are checked against the lowercased subject. Source values must
-            # match the SOURCE_* constants in ticker_inventory.py.
-            subject_lower = (item.get("subject") or "").lower()
-            ctype = (item.get("classified_type") or "").lower()
-
-            # Tier-1 daily-signal products. The RTA matcher uses a word-
-            # boundary regex so "RTA:" / "RTA -" / "Daily RTA" all match
-            # without false-positive on things like "EXTRACT" or "PORTAL".
-            if "real-time alert" in subject_lower or re.search(r"\brta\b", subject_lower):
-                source = "rta"
-            elif "risk range" in subject_lower:
-                source = "risk_range"
-
-            # Sector / specialty Pro products (active subscriptions per
-            # data/snapshots/hedgeye/2026-05-07/subscriptions_inventory.md)
-            elif "capital allocation" in subject_lower:
-                source = "capital_allocation_pro"
-            elif "financial" in subject_lower and "sector" in subject_lower:
-                source = "financials_sector_pro"
-            elif "retail" in subject_lower and ("sector" in subject_lower or "pro" in subject_lower):
-                source = "retail_pro"
-            elif "reits" in subject_lower:
-                source = "reits_pro"
-            elif "hedgai" in subject_lower:
-                source = "hedgai_signals"
-            elif "bitcoin trend tracker" in subject_lower:
-                source = "bitcoin_trend_tracker"
-            elif "market situation report" in subject_lower:
-                source = "market_situation_report"
-            elif "pro risk manager" in subject_lower or "prm:" in subject_lower:
-                # Branded Pro Risk Manager content not already caught by the
-                # bundled-product matchers above.
-                source = "pro_risk_manager"
-
-            # Other Hedgeye content streams
-            elif "signal strength" in subject_lower:
-                source = "signal_strength"
-            elif "etf pro" in subject_lower:
-                source = "etf_pro"
-            elif "investing idea" in subject_lower:
-                source = "investing_ideas"
-            elif "macro show" in subject_lower:
-                source = "macro_show"
-            elif "early look" in subject_lower:
-                source = "early_look"
-
-            # Fallbacks driven by the classifier's structural categorization
-            elif ctype == "sector_research":
-                source = "sector_pro"
-            elif ctype == "trade_signal":
-                source = "trade_signal"
-            else:
-                source = "other"
-
-            quad = item.get("macro_regime")  # classifier emits "Quad 1/2/3/4" or null
-
             try:
                 import ticker_inventory
                 summary = ticker_inventory.note_tickers(
@@ -635,53 +642,57 @@ def _process_new_email(parsed: dict) -> None:
             except Exception as e:
                 log.warning(f"  unified_refresh failed: {e}")
 
-            # Product-specific typed-table parsers. Each parser writes its
-            # product's structured data (ranges, walls, picks, allocations)
-            # to the appropriate typed table and stamps the email's
-            # classified_as field. Run AFTER unified_refresh so the
-            # tickers are already known and refreshed.
-            try:
-                if source == "etf_pro":
-                    import parser_etf_pro
-                    etf_result = parser_etf_pro.process_email(
-                        item["id"], fan_out=False,  # already done above
-                    )
-                    log.info(
-                        f"  parser_etf_pro: kind={etf_result.get('kind')} "
-                        f"rows={etf_result.get('rows_parsed')} "
-                        f"week_of={etf_result.get('week_of')}"
-                    )
-                elif "portfolio solutions" in subject_lower and "daily etf re-rank" in subject_lower:
-                    import parser_portfolio_solutions
-                    ps_result = parser_portfolio_solutions.process_email(
-                        item["id"], fan_out=False,
-                    )
-                    log.info(
-                        f"  parser_portfolio_solutions: "
-                        f"ranks={ps_result.get('ranks_parsed')} "
-                        f"actions={ps_result.get('actions_parsed')}"
-                    )
-                elif source == "signal_strength":
-                    import parser_signal_strength
-                    ss_result = parser_signal_strength.process_email(
-                        item["id"], fan_out=False,
-                    )
-                    log.info(
-                        f"  parser_signal_strength: "
-                        f"added={len(ss_result.get('added',[]))} "
-                        f"removed={len(ss_result.get('removed',[]))}"
-                    )
-                elif source == "investing_ideas":
-                    import parser_investing_ideas
-                    ii_result = parser_investing_ideas.process_email(
-                        item["id"], fan_out=False,
-                    )
-                    log.info(
-                        f"  parser_investing_ideas: "
-                        f"rows={ii_result.get('rows_parsed')}"
-                    )
-            except Exception as e:
-                log.warning(f"  product-specific parser failed: {e}")
+        # Product-specific typed-table parsers. Each parser reads the email
+        # body itself, writes its product's structured data (ranges, walls,
+        # picks, allocations) to the appropriate typed table, and stamps
+        # classified_as on hedgeye_emails_raw. Runs unconditionally on the
+        # subject match so emails that the classifier couldn't extract
+        # tickers from still get routed.
+        try:
+            if source == "etf_pro":
+                import parser_etf_pro
+                etf_result = parser_etf_pro.process_email(
+                    item["id"], fan_out=bool(tickers_in_msg) is False,
+                )
+                # fan_out=True when ticker_inventory/unified_refresh did NOT run
+                # above (no tickers from classifier), so the typed parser's own
+                # ticker extraction triggers the MFR refresh leg.
+                log.info(
+                    f"  parser_etf_pro: kind={etf_result.get('kind')} "
+                    f"rows={etf_result.get('rows_parsed')} "
+                    f"week_of={etf_result.get('week_of')}"
+                )
+            elif "portfolio solutions" in subject_lower and "daily etf re-rank" in subject_lower:
+                import parser_portfolio_solutions
+                ps_result = parser_portfolio_solutions.process_email(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_portfolio_solutions: "
+                    f"ranks={ps_result.get('ranks_parsed')} "
+                    f"actions={ps_result.get('actions_parsed')}"
+                )
+            elif source == "signal_strength":
+                import parser_signal_strength
+                ss_result = parser_signal_strength.process_email(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_signal_strength: "
+                    f"added={len(ss_result.get('added',[]))} "
+                    f"removed={len(ss_result.get('removed',[]))}"
+                )
+            elif source == "investing_ideas":
+                import parser_investing_ideas
+                ii_result = parser_investing_ideas.process_email(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_investing_ideas: "
+                    f"rows={ii_result.get('rows_parsed')}"
+                )
+        except Exception as e:
+            log.warning(f"  product-specific parser failed: {e}")
     except Exception as e:
         log.warning(f"  ticker/refresh hook outer error: {e}")
 

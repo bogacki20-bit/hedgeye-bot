@@ -11,10 +11,12 @@ the SKILLs never see DATABASE_PUBLIC_URL.
 
 Priority axis
 -------------
-  --priority high   tickers touched by today's Hedgeye signals
+  --priority high   tickers touched by recent Hedgeye signals
                     (last_source IN macro_show / risk_range / etf_pro /
-                    investing_ideas AND last_seen_at::date = CURRENT_DATE).
-                    Empty list if it's pre-market / no signals yet today.
+                    investing_ideas AND last_seen_at >= CURRENT_DATE -
+                    interval '3 days'). 3-day window so a one-day classify
+                    outage doesn't zero out the high bucket and cascade to
+                    the SG sweep.
   --priority tail   monitored_tickers MINUS today's high set. The long tail
                     that gets covered after the high-priority sweep lands.
   --priority all    everything in monitored_tickers. Default.
@@ -63,7 +65,7 @@ def fetch_high() -> list[str]:
                 SELECT ticker
                   FROM hedgeye_ticker_inventory
                  WHERE last_source = ANY(%s)
-                   AND last_seen_at::date = CURRENT_DATE
+                   AND last_seen_at >= CURRENT_DATE - interval '3 days'
                    AND COALESCE(is_active, TRUE) = TRUE
                  ORDER BY ticker
                 """,
