@@ -323,8 +323,95 @@ def position_summary(symbol, account=None):
     }
 
 
-def account_value(account):
-    """Sum of current_value across all positions in an account (latest snapshot)."""
+def _name_to_account_number(name_or_number: str) -> str:
+    """Accept either an account_number ('X96383748') or an account_name
+    ('Individual', 'Rollover IRA', 'Roth IRA') and return the account_number."""
+    if not name_or_number:
+        return INDIVIDUAL_ACCOUNT
+    if name_or_number in ACCOUNTS:
+        return name_or_number
+    for num, cfg in ACCOUNTS.items():
+        if (cfg.get("name") or "").lower() == name_or_number.lower():
+            return num
+    return name_or_number  # caller passed something we don't recognize — let it through
+
+
+def _account_value_pg(account_number: str) -> float | None:
+    """Latest-snapshot sum of current_value for an account, from Postgres.
+
+    Returns None if Postgres isn't reachable or has no data yet.
+    """
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT MAX(snapshot_date) FROM portfolio_positions "
+                    "WHERE account_number = %s",
+                    (account_number,),
+                )
+                snap = cur.fetchone()[0]
+                if not snap:
+                    return None
+                cur.execute(
+                    "SELECT COALESCE(SUM(current_value), 0) FROM portfolio_positions "
+                    "WHERE account_number = %s AND snapshot_date = %s",
+                    (account_number, snap),
+                )
+                return float(cur.fetchone()[0] or 0.0)
+    except Exception:
+        return None
+
+
+def _account_that_held(ticker: str) -> str | None:
+    """Which account most recently held `ticker`? Returns account_number or None."""
+    if not ticker:
+        return None
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT account_number
+                      FROM portfolio_positions
+                     WHERE UPPER(symbol) = UPPER(%s)
+                        OR UPPER(normalized_symbol) = UPPER(%s)
+                     ORDER BY snapshot_date DESC, ingested_at DESC
+                     LIMIT 1
+                    """,
+                    (ticker, ticker),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Exception:
+        return None
+
+
+def account_value(account=None, ticker: str | None = None) -> float:
+    """Sum of current_value across all positions in an account (latest snapshot).
+
+    Resolution order:
+      1. If `account` provided (number or name), use it.
+      2. Else if `ticker` provided, look up the account that most recently held
+         it (so signals route sizing to the account already exposed).
+      3. Else fall back to Individual.
+
+    Prefers Postgres (portfolio_positions populated by tools.import_fidelity_positions).
+    Falls back to the legacy SQLite snapshot if PG returns None.
+    """
+    if account:
+        acct = _name_to_account_number(account)
+    elif ticker:
+        acct = _account_that_held(ticker) or INDIVIDUAL_ACCOUNT
+    else:
+        acct = INDIVIDUAL_ACCOUNT
+
+    pg_val = _account_value_pg(acct)
+    if pg_val is not None:
+        return pg_val
+
+    # Legacy SQLite fallback (older snapshots, pre-PG ingestion).
     snap = latest_snapshot_date()
     if not snap:
         return 0.0
@@ -333,7 +420,7 @@ def account_value(account):
             SELECT COALESCE(SUM(current_value), 0) AS total
             FROM portfolio_positions
             WHERE snapshot_date = ? AND account_number = ?
-        """, (snap, account)).fetchone()
+        """, (snap, acct)).fetchone()
         return float(row["total"] or 0)
 
 

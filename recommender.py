@@ -61,9 +61,15 @@ def size_from_bps(bps, acct_value):
     return round(min(raw, PER_FILL_CEILING_USD), 2)
 
 
-def size_for(conviction, account):
-    """Style B sizing -- conviction + account -> (dollars, debug)."""
-    acct_value = float(account_value(account) or 0.0)
+def size_for(conviction, account=None, *, ticker=None):
+    """Style B sizing -- conviction + account -> (dollars, debug).
+
+    `account` may be an account_number ('X96383748'), an account_name
+    ('Individual' / 'Rollover IRA' / 'Roth IRA'), or None. When None,
+    portfolio.account_value(ticker=ticker) is used to route to the
+    account that most recently held the ticker (falling back to Individual).
+    """
+    acct_value = float(account_value(account=account, ticker=ticker) or 0.0)
     bps = _STYLE_B_BPS_BY_CONVICTION.get(conviction)
     if bps is None:
         return None, {"bps": None, "acct_value": acct_value, "raw": None, "clamped_by": None}
