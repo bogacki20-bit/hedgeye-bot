@@ -498,6 +498,111 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
     return summary
 
 
+def process_one(message_id: str, *, fan_out: bool = True) -> dict:
+    """Parse a single email by message_id. Mirrors parser_etf_pro.process_email
+    so email_parser can dispatch RR inline the moment the email lands, instead
+    of waiting up to PARSER_INTERVAL for the daemon loop.
+
+    Returns {kind, rows_parsed, signal_changes_parsed, ticker_count} or
+    {error} on hard failure. `fan_out=False` skips unified_refresh on the
+    assumption that email_parser already ran it for this email.
+    """
+    import db_pg
+    import psycopg2.extras
+
+    out = {"kind": "risk_range", "rows_parsed": 0,
+           "signal_changes_parsed": 0, "ticker_count": 0}
+
+    with db_pg.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM hedgeye_emails_raw WHERE message_id = %s",
+                (message_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return {"error": f"message_id {message_id!r} not found"}
+    raw_row = dict(row)
+    subject = raw_row.get("subject") or ""
+    if not is_risk_range_email(subject):
+        return {"error": f"subject does not match RR pattern: {subject[:80]!r}"}
+
+    try:
+        range_rows, change_rows = parse_risk_range_email(raw_row)
+    except Exception as e:
+        log.error(f"  [{message_id}] parse error: {e}", exc_info=True)
+        db_pg.mark_email_classified(message_id, "risk_range_parse_failed")
+        return {"error": f"parse_risk_range_email raised: {e!s}"}
+
+    if not range_rows and not change_rows:
+        db_pg.mark_email_classified(message_id, "risk_range_parse_failed")
+        return {"error": "subject matched but no rows extracted"}
+
+    if range_rows:
+        out["rows_parsed"] = db_pg.save_risk_range_rows(range_rows)
+    if change_rows:
+        out["signal_changes_parsed"] = db_pg.save_signal_changes(change_rows)
+
+    # Inventory + (optional) lockstep refresh — mirrors run_parser_cycle's tail.
+    try:
+        import ticker_inventory
+        tickers_in_email: set[str] = set()
+        ticker_to_position: dict[str, str] = {}
+        for r in range_rows or []:
+            t = r.get("ticker")
+            if not t:
+                continue
+            tickers_in_email.add(t)
+            trend = (r.get("trend") or "").strip().lower()
+            if trend in ("bullish", "up", "long"):
+                ticker_to_position[t] = "long"
+            elif trend in ("bearish", "down", "short"):
+                ticker_to_position[t] = "short"
+        for r in change_rows or []:
+            if r.get("ticker"):
+                tickers_in_email.add(r["ticker"])
+        try:
+            import monitor_context
+            quad = monitor_context.get_hedgeye_ctx().get("current_quad")
+        except Exception:
+            quad = None
+        if tickers_in_email:
+            ticker_inventory.note_tickers(
+                tickers_in_email,
+                source=ticker_inventory.SOURCE_RISK_RANGE,
+                quad_regime=quad,
+                message_id=message_id,
+            )
+            for sym, pos in ticker_to_position.items():
+                ticker_inventory.note_ticker(
+                    sym,
+                    source=ticker_inventory.SOURCE_RISK_RANGE,
+                    position=pos,
+                    quad_regime=quad,
+                    message_id=message_id,
+                )
+            out["ticker_count"] = len(tickers_in_email)
+            if fan_out:
+                try:
+                    import unified_refresh
+                    unified_refresh.refresh_all_for_tickers(
+                        list(tickers_in_email),
+                        capture_type="email_arrival",
+                        spotgamma_reason="risk_range",
+                    )
+                except Exception as e:
+                    log.warning(f"  [{message_id}] unified_refresh failed: {e}")
+    except Exception as e:
+        log.warning(f"  [{message_id}] ticker inventory hook failed: {e}")
+
+    db_pg.mark_email_classified(message_id, "risk_range")
+    log.info(
+        f"  [{message_id}] process_one parsed | ranges={out['rows_parsed']} "
+        f"changes={out['signal_changes_parsed']} tickers={out['ticker_count']}"
+    )
+    return out
+
+
 def run_parser_loop(interval: int = PARSER_INTERVAL):
     """Forever loop. Runs a parser cycle every `interval` seconds."""
     log.info(f"Starting Risk Range parser loop — interval={interval}s, "

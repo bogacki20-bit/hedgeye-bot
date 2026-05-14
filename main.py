@@ -82,12 +82,43 @@ if __name__ == "__main__":
     # Toggle off via PARSER_ENABLED=false on Railway if needed.
     if os.getenv("PARSER_ENABLED", "true").lower() in ("true", "1", "yes"):
         from parser_risk_range import run_parser_loop as run_risk_range_parser
+
+        def _resilient_parser_loop():
+            """Auto-restart wrapper. Pre-fix the daemon could die on an
+            uncaught exception and the bot would keep running with RR silently
+            dark for hours. Now: log the traceback, ping Telegram, sleep
+            briefly, and restart the loop. Each crash bumps a counter so
+            chronic failures are visible."""
+            import time, traceback
+            crash_count = 0
+            while True:
+                try:
+                    run_risk_range_parser()
+                except Exception as e:
+                    crash_count += 1
+                    tb = traceback.format_exc()
+                    log.error(
+                        "Risk Range parser crashed (#%d): %s\n%s",
+                        crash_count, e, tb,
+                    )
+                    try:
+                        from notifier import send_telegram
+                        send_telegram(
+                            "Hedgeye Bot",
+                            (f"Risk Range parser crashed (#{crash_count}): "
+                             f"{type(e).__name__}: {e}\nRestarting in 60s. "
+                             f"Tail: {tb[-400:]}"),
+                        )
+                    except Exception as notify_err:
+                        log.warning("crash notification failed: %s", notify_err)
+                    time.sleep(60)
+
         threading.Thread(
-            target=run_risk_range_parser,
+            target=_resilient_parser_loop,
             daemon=True,
             name="risk_range_parser",
         ).start()
-        log.info("Risk Range parser thread started.")
+        log.info("Risk Range parser thread started (with crash auto-restart).")
     else:
         log.info("Risk Range parser disabled (PARSER_ENABLED=false).")
 

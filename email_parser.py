@@ -649,7 +649,23 @@ def _process_new_email(parsed: dict) -> None:
         # subject match so emails that the classifier couldn't extract
         # tickers from still get routed.
         try:
-            if source == "etf_pro":
+            if source == "risk_range":
+                # Inline RR dispatch. Pre-fix the bot relied on the separate
+                # parser_risk_range daemon (PARSER_INTERVAL=900s default) to
+                # pick this up — meaning up to 15min latency before today's
+                # risk_range row appears. Now it parses the moment the email
+                # lands. The daemon stays as a safety net for emails the
+                # IMAP path skips (e.g. backfill).
+                import parser_risk_range
+                rr_result = parser_risk_range.process_one(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_risk_range: ranges={rr_result.get('rows_parsed')} "
+                    f"changes={rr_result.get('signal_changes_parsed')} "
+                    f"tickers={rr_result.get('ticker_count')}"
+                )
+            elif source == "etf_pro":
                 import parser_etf_pro
                 etf_result = parser_etf_pro.process_email(
                     item["id"], fan_out=bool(tickers_in_msg) is False,
