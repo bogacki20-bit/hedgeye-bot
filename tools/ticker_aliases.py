@@ -32,6 +32,16 @@ ALIASES: dict[str, str] = {
     # the WTI tracker (USO) and the Brent tracker (BNO) to BRENT.
     "USO":  "BRENT",      # United States Oil Fund (WTI-tracking; grouped here)
     "BNO":  "BRENT",      # United States Brent Oil Fund
+
+    # Kinesis-native symbols. Hedgeye macro uses pair names like 'EUR/USD'
+    # / 'GBP/USD' — Kinesis stablecoins map to those.
+    "C1EUR": "EUR/USD",   # Kinesis EUR stablecoin
+    "C1GBP": "GBP/USD",   # Kinesis GBP stablecoin
+    "C1CHF": "CHF/USD",   # bot has no CHF/USD alert today; pin for future
+    "KAU":   "GOLD",      # Kinesis gold (1 g)
+    "KAG":   "SILVER",    # Kinesis silver (10 g)
+    "BTC":    "BITCOIN",
+    "BTCUSD": "BITCOIN",
 }
 
 
