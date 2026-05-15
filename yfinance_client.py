@@ -234,9 +234,20 @@ def fetch_and_save(ticker: str, *, capture_type: str = "email_arrival") -> Optio
 def refresh_for_tickers(tickers: list[str], *,
                         capture_type: str = "email_arrival") -> dict:
     """Fetch + save Yahoo snapshots for each ticker. Returns a summary dict
-    matching mfr_client.refresh_for_tickers' shape."""
+    matching mfr_client.refresh_for_tickers' shape.
+
+    A 0.5s per-ticker sleep paces the calls below Yahoo's per-IP rate-limit
+    (warm_all_monitored 5/15 ran 314 tickers in ~13min with no pacing and
+    got yf_ok=0 / yf_fail=314 despite live single-ticker fetches working).
+    The sleep is skipped after the final ticker so callers feeding a single
+    ticker don't pay the latency.
+    """
+    import time
+
     summary = {"tickers": 0, "ok": 0, "fail": 0}
     seen: set[str] = set()
+    # Dedupe + uppercase first so the indexed loop matches the actual call count.
+    cleaned: list[str] = []
     for t in tickers:
         if not t:
             continue
@@ -244,6 +255,10 @@ def refresh_for_tickers(tickers: list[str], *,
         if sym in seen:
             continue
         seen.add(sym)
+        cleaned.append(sym)
+
+    last_idx = len(cleaned) - 1
+    for i, sym in enumerate(cleaned):
         summary["tickers"] += 1
         try:
             res = fetch_and_save(sym, capture_type=capture_type)
@@ -254,6 +269,9 @@ def refresh_for_tickers(tickers: list[str], *,
         except Exception as e:
             log.exception("yfinance refresh failed for %s: %s", sym, e)
             summary["fail"] += 1
+        # Pace the next call; skip the wait on the final ticker.
+        if i < last_idx:
+            time.sleep(0.5)
     return summary
 
 
