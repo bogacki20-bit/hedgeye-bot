@@ -126,6 +126,20 @@ ALERT_TICKERS = {
     "EUR/USD", "USD/YEN", "GBP/USD", "CAD/USD", "USD",
 }
 
+# Macro tickers (commodities, rates, FX, indices, crypto, vol) for which
+# SpotGamma has NO direct equity-hub coverage. get_spotgamma_ctx's tier-2
+# fallback was returning the latest founder's note (SPY/SPX-focused) for
+# every macro ticker, so alerts for BRENT/UST10Y/GOLD/etc came out citing
+# SPY's $750 call wall. Bypass the SG fetch entirely for these.
+MACRO_NO_SG_TICKERS = {
+    "BRENT", "WTIC", "NATGAS", "GOLD", "SILVER", "COPPER",
+    "UST2Y", "UST10Y", "UST30Y",
+    "USD", "EUR/USD", "GBP/USD", "CAD/USD", "USD/YEN",
+    "BITCOIN", "VIX",
+    "RUT", "COMPQ", "NIKK", "SSEC", "DAX", "FTSE",
+}
+
+
 # Equity-wrapper hints for FX alerts. These get appended to Telegram messages
 # so the alert reminds Kristian which ETF (or proxy) tracks the signal.
 FX_EQUITY_WRAPPER = {
@@ -249,6 +263,40 @@ ZONE_LABELS = {
 }
 
 
+def _framework_alignment(trend: str | None, zone: str) -> str:
+    """Compute the alignment label for a (trend, zone) pair.
+
+    Pre-fix the template hardcoded 'framework-aligned' on every bottom_third
+    and top_third alert regardless of the actual trend; alerts on tickers
+    with NEUTRAL or BEARISH trends still said 'framework-aligned' (a lie).
+
+    Returns one of: 'aligned' / 'counter' / 'neutral' / 'stale'.
+        bottom_third (buy zone): bullish=aligned, bearish=counter, neutral=neutral
+        top_third    (trim zone): bearish=aligned, bullish=counter, neutral=neutral
+        anything else: neutral
+    """
+    t = (trend or "").strip().lower()
+    if t in ("bullish", "up"):
+        if zone == "bottom_third": return "aligned"
+        if zone == "top_third":    return "counter"
+    elif t in ("bearish", "down"):
+        if zone == "bottom_third": return "counter"
+        if zone == "top_third":    return "aligned"
+    elif t in ("neutral", ""):
+        return "neutral"
+    return "neutral"
+
+
+def _framework_phrase(alignment: str) -> str:
+    """Render alignment as the text fragment used inside the alert template."""
+    return {
+        "aligned":  "framework-aligned",
+        "counter":  "framework-counter",
+        "neutral":  "framework-neutral",
+        "stale":    "framework-stale",
+    }.get(alignment, "framework-neutral")
+
+
 def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
     """Build the trailing ' | SG: call wall $X / put wall $Y / ...' suffix
     when SpotGamma context has populated levels. Empty string when no levels
@@ -334,10 +382,18 @@ def compose_recommendation(
     # monitor_context. Both lookups are non-fatal (return {} on any error) and
     # TTL-cached so a fanout cycle doesn't hammer the DB. Resulting dicts get
     # persisted on alerts_fired (JSONB) for ML training context.
+    # Skip SG entirely for macro tickers — SpotGamma has no per-ticker
+    # coverage for commodities / rates / FX / VIX / global indices, and
+    # get_spotgamma_ctx's tier-2 fallback returns the latest SPX-focused
+    # founder's note for ANY non-tier-1 ticker. That's how BRENT and UST10Y
+    # alerts ended up citing $750/$739 walls (the SPY levels).
+    _macro_skip_sg = ticker.upper() in MACRO_NO_SG_TICKERS
+
     try:
         from monitor_context import get_hedgeye_ctx, get_spotgamma_ctx
         hedgeye_ctx = get_hedgeye_ctx() or {}
-        spotgamma_ctx = get_spotgamma_ctx(ticker) or {}
+        spotgamma_ctx = ({} if _macro_skip_sg
+                         else (get_spotgamma_ctx(ticker) or {}))
     except Exception as e:
         log.warning(f"monitor_context lookup failed (continuing with empty ctx): {e}")
         hedgeye_ctx = {}
@@ -374,13 +430,14 @@ def compose_recommendation(
     sg_suffix = _sg_levels_suffix(spotgamma_ctx, price)
 
     if zone == "bottom_third":
+        _align = _framework_alignment(trend, "bottom_third")
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom third of range, framework-aligned).{sg_suffix}"),
+                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
-            "framework_alignment": "aligned" if trend in ("bullish", "up") else "neutral",
+            "framework_alignment": _align,
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
         }
@@ -396,13 +453,14 @@ def compose_recommendation(
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "top_third":
+        _align = _framework_alignment(trend, "top_third")
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top third of range, fade strength).{sg_suffix}"),
+                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
-            "framework_alignment": "aligned" if trend in ("bullish", "up") else "neutral",
+            "framework_alignment": _align,
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
         }
