@@ -237,18 +237,18 @@ LONGS (favored / overweight) in each Quad:
 
   QUAD 1: Tech (XLK), Consumer Discretionary (XLY), Financials (XLF),
           Communications (XLC), Industrials (XLI), Small-Caps (IWM)
-          → Risk-on, growth-equity, cyclicals
+          -> Risk-on, growth-equity, cyclicals
 
   QUAD 2: ENERGY (XLE, XOP, OIH), Materials (XLB), Industrials (XLI),
           Financials (XLF), Tech (selective), Bitcoin (BTC), Small-Caps,
-          Commodities broadly → Pro-cyclical + inflation hedges. Energy
+          Commodities broadly -> Pro-cyclical + inflation hedges. Energy
           is BULLISH in Quad 2.
 
   QUAD 3: Energy (XLE), Gold (GLD), Gold Miners (GDX), Silver (SLV),
-          Utilities (XLU), Staples (XLP), TIPS → Inflation hedges + defensives
+          Utilities (XLU), Staples (XLP), TIPS -> Inflation hedges + defensives
 
   QUAD 4: Bonds (TLT, IEF, AGG), Utilities (XLU), Staples (XLP), Healthcare
-          (XLV), Gold, US Dollar (UUP) → Defensives + duration
+          (XLV), Gold, US Dollar (UUP) -> Defensives + duration
 
 SHORTS (avoid / underweight) in each Quad:
 
@@ -308,13 +308,21 @@ STEP 2 — What does Hedgeye's range say? (Hedgeye is the master range source)
     Middle third = hold, no action.
     Below low boundary  = breach low (deeper opportunity for framework-aligned long; risk-off for framework-aligned short).
     Above high boundary = breach high (trim aggressively; or short on framework-aligned shorts).
-  If ALL three range sources are missing → Monitor.
+  If ALL three range sources are missing -> Monitor.
 
 STEP 3 — Does SpotGamma corroborate?
-  Bottom-third + below Put Wall = strong dealer support (negative gamma below → magnet up).
-  Top-third + above Call Wall = strong dealer resistance (negative gamma above → ceiling).
+  Bottom-third + below Put Wall = strong dealer support (negative gamma below -> magnet up).
+  Top-third + above Call Wall = strong dealer resistance (negative gamma above -> ceiling).
   Hedge Wall is far-OTM, usually not actionable.
   Negative net gamma regime = expect amplified moves, size smaller.
+
+  CITATION REQUIREMENT: When SpotGamma data is present in the user context,
+  your reasoning MUST reference at least one specific level (call wall, put
+  wall, key gamma strike, hedge wall) by name AND value. Do not say "SG looks
+  supportive" — say "price $X sits above put wall $Y, which limits downside
+  hedging pressure" or "price $X is $Z below the call wall at $W, ceiling
+  intact." If SG data is absent, say so explicitly in reasoning rather than
+  inventing levels.
 
 STEP 4 — Does MFR corroborate? (MFR is a CONFIRMATION tool, not a primary signal)
   Hurst > 0.5 = trending; favor trend continuation.
@@ -327,24 +335,24 @@ STEP 5 — Synthesize:
   Four votes are: (1) Quad/sector alignment, (2) Hedgeye range zone (Risk Range
   or ETF Pro Range; MFR substitutes ONLY when both are missing), (3) SpotGamma
   walls/regime, (4) MFR Hurst + trend_signal.
-  All four agree → Best Idea, 100 bps starter or 100 bps add.
-  Three of four agree → Adding, 50 bps.
-  Two or fewer agree, or sharp disagreement → Monitor, no trade.
+  All four agree -> Best Idea, 100 bps starter or 100 bps add.
+  Three of four agree -> Adding, 50 bps.
+  Two or fewer agree, or sharp disagreement -> Monitor, no trade.
 
   HARD CEILING RULES (NOT OVERRIDABLE under any circumstance, no matter how
   strong the framework alignment, no matter what other layers say, no matter
   what HU doctrine you cite):
 
-    R1. ALL Hedgeye range sources missing AND MFR also unavailable → Monitor.
+    R1. ALL Hedgeye range sources missing AND MFR also unavailable -> Monitor.
         Force conviction='Monitor', action='WATCH', bps=null. NO EXCEPTIONS.
 
-    R2. Hedgeye range sources missing but MFR present → max conviction='Adding',
+    R2. Hedgeye range sources missing but MFR present -> max conviction='Adding',
         max bps=50, action='ADD' or 'BUY'. NO EXCEPTIONS. Hedgeye is the master
         signal source; without it we never go full-size. If you find yourself
         about to write 'Best Idea' or '100 bps' here, STOP and downshift to
         'Adding' / 50 bps regardless of how strong the other votes are.
 
-    R3. Account value $0 or unknown → Monitor. Can't size without a denominator.
+    R3. Account value $0 or unknown -> Monitor. Can't size without a denominator.
 
   These ceilings exist because the bot's edge IS Keith's signal. Acting full-
   size without a Hedgeye range means trading on subordinate data — that's
@@ -371,6 +379,62 @@ contradicts the framework above (e.g. "Quad 2 is bad for energy"), the bot's
 output validator will REJECT the decision and you will have produced no value.
 Triple-check that your sector view matches the matrix above.
 """
+
+
+def _spotgamma_framing_line(sg: dict, price) -> str:
+    """Deterministic plain-English summary of where price sits relative to
+    SG levels. Forces the LLM prompt to carry the exact wording it must
+    reference (call_wall / put_wall / key_gamma_strike / hedge_wall) so the
+    post-validator can confirm citation."""
+    if not sg or not isinstance(sg, dict):
+        return ("SpotGamma framing: no data available for this ticker "
+                "(not in tier-1 watchlist or sweep failed).")
+    try:
+        p = float(price) if price is not None else None
+    except (TypeError, ValueError):
+        p = None
+    if p is None:
+        return "SpotGamma framing: price unavailable; cannot anchor levels."
+
+    def _side(level):
+        try:
+            lv = float(level)
+        except (TypeError, ValueError):
+            return None, None, None
+        diff = p - lv
+        pct = (diff / lv * 100.0) if lv else 0.0
+        if abs(pct) < 0.05:
+            side = "at"
+        elif diff > 0:
+            side = "above"
+        else:
+            side = "below"
+        return lv, side, abs(pct)
+
+    lines = [f"SpotGamma framing for price ${p}:"]
+    cw, pw = sg.get("call_wall"), sg.get("put_wall")
+    kg = sg.get("key_gamma_strike")
+    hw = sg.get("hedge_wall")
+
+    lv, side, pct = _side(cw)
+    if lv is not None:
+        lines.append(f"  call wall ${lv}   ->  price is {side} call wall by {pct:.1f}%")
+    lv, side, pct = _side(pw)
+    if lv is not None:
+        lines.append(f"  put wall ${lv}    ->  price is {side} put wall by {pct:.1f}%")
+    lv, side, pct = _side(kg)
+    if lv is not None:
+        regime = ("gamma support active" if side == "above"
+                  else "below gamma — momentum risk")
+        lines.append(f"  key gamma strike ${lv}  ->  price is {side} key gamma strike by {pct:.1f}% ({regime})")
+    lv, side, pct = _side(hw)
+    if lv is not None:
+        lines.append(f"  hedge wall ${lv}  ->  defended {('below' if side=='above' else 'above')} "
+                     "(when price crosses, dealer hedging flips)")
+
+    if len(lines) == 1:
+        return "SpotGamma framing: SG row exists but no numeric levels populated."
+    return "\n".join(lines)
 
 
 def _zone_summary_line(label: str, price, low, high) -> str:
@@ -468,6 +532,7 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     sections.append(json.dumps(_trim(etf_block), indent=2, default=str))
     sections.append("")
     sections.append("## SpotGamma (latest equity hub)")
+    sections.append(_spotgamma_framing_line(ctx.get("spotgamma") or {}, mfr_price))
     sections.append(json.dumps(_trim(ctx.get("spotgamma") or {}), indent=2, default=str))
     sections.append("")
     sections.append("## MFR (latest fractal range — TERTIARY range source; secondary to Hedgeye)")
@@ -499,6 +564,9 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
 # ─────────────────────────── Output validation ───────────────────────────
 
 _UNVERIFIED_TAG = "[REASONING UNVERIFIED] "
+_SG_NOT_CITED_TAG = "[SG NOT CITED] "
+_SG_CITATION_HINTS = ("call wall", "put wall", "gamma strike",
+                      "hedge wall", "vol trigger")
 
 # Substrings worth flagging when they appear in LLM evidence/reasoning but
 # don't match the deterministic zone we computed pre-prompt. Lowercased.
@@ -573,6 +641,33 @@ def _flag_contradictions(decision: dict, ctx: Optional[dict]) -> None:
         decision["reasoning"] = _flag_text(decision["reasoning"])
 
 
+def _flag_sg_not_cited(decision: dict, ctx: Optional[dict]) -> None:
+    """If ctx has SpotGamma data but the LLM's reasoning doesn't cite any of
+    the canonical level names, prepend [SG NOT CITED] to reasoning so the
+    alert visibly carries the gap. Don't reject."""
+    if not ctx:
+        return
+    sg = ctx.get("spotgamma") or {}
+    if not isinstance(sg, dict):
+        return
+    # Only flag when SG actually has numeric levels worth citing
+    has_levels = any(sg.get(k) is not None
+                     for k in ("call_wall", "put_wall",
+                               "key_gamma_strike", "hedge_wall",
+                               "vol_trigger"))
+    if not has_levels:
+        return
+    reasoning = decision.get("reasoning")
+    if not isinstance(reasoning, str):
+        return
+    blob = reasoning.lower()
+    if any(h in blob for h in _SG_CITATION_HINTS):
+        return
+    # Avoid double-tagging if [REASONING UNVERIFIED] already prepended.
+    if not reasoning.startswith(_SG_NOT_CITED_TAG):
+        decision["reasoning"] = _SG_NOT_CITED_TAG + reasoning
+
+
 def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
     """Extract the JSON object from Claude's response and validate against
     the schema constraints. Raises ValueError on hard violations.
@@ -626,6 +721,8 @@ def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
 
     # If we have ctx, flag breach-framing that contradicts compute_zone.
     _flag_contradictions(data, ctx)
+    # Flag when SG was available but the LLM didn't cite any level by name.
+    _flag_sg_not_cited(data, ctx)
     return data
 
 
