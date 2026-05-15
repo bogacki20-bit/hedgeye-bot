@@ -249,6 +249,54 @@ ZONE_LABELS = {
 }
 
 
+def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
+    """Build the trailing ' | SG: call wall $X / put wall $Y / ...' suffix
+    when SpotGamma context has populated levels. Empty string when no levels
+    are available so the alert stays clean.
+
+    Mirrors decision_engine._spotgamma_framing_line in spirit but tuned for
+    the single-line alert format and the persisted ctx shape, where the
+    levels can live either flat or nested under 'key_levels'.
+    """
+    if not sg_ctx or not isinstance(sg_ctx, dict):
+        return ""
+    levels = sg_ctx.get("key_levels") if isinstance(sg_ctx.get("key_levels"), dict) else sg_ctx
+    cw = levels.get("call_wall")
+    pw = levels.get("put_wall")
+    kg = levels.get("key_gamma_strike")
+    hw = levels.get("hedge_wall")
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    cw_f, pw_f, kg_f, hw_f = _f(cw), _f(pw), _f(kg), _f(hw)
+    parts: list[str] = []
+    if cw_f is not None: parts.append(f"call wall ${cw_f:g}")
+    if pw_f is not None: parts.append(f"put wall ${pw_f:g}")
+    if kg_f is not None: parts.append(f"key gamma ${kg_f:g}")
+    if hw_f is not None: parts.append(f"hedge wall ${hw_f:g}")
+    if not parts:
+        return ""
+
+    # Anchor sentence using call wall first, falling back to put wall.
+    anchor_lv = cw_f if cw_f is not None else pw_f
+    anchor_name = "call wall" if cw_f is not None else "put wall"
+    try:
+        p = float(price) if price is not None else None
+    except (TypeError, ValueError):
+        p = None
+    anchor_phrase = ""
+    if p is not None and anchor_lv:
+        diff_pct = (p - anchor_lv) / anchor_lv * 100.0
+        side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
+        anchor_phrase = f" (price ${p:g} {side} {anchor_name} by {abs(diff_pct):.1f}%)"
+
+    return " | SG: " + " / ".join(parts) + anchor_phrase
+
+
 def compose_recommendation(
     ticker: str,
     zone: str,
@@ -319,9 +367,16 @@ def compose_recommendation(
         _starter_usd, _add_usd = 500.0, 500.0
         STARTER_BPS, ADD_BPS_LOW = 100, 50
 
+    # Build SG suffix once and append to every zone's text (when SG has
+    # populated levels). Keeps the alert visibly anchored to dealer levels —
+    # the path bypasses decision_engine entirely so 8b1cab2's flagger never
+    # fires on these boundary alerts. Cited directly in the template instead.
+    sg_suffix = _sg_levels_suffix(spotgamma_ctx, price)
+
     if zone == "bottom_third":
         return {
-            "text": f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, bottom third of range, framework-aligned).",
+            "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
+                     f"bottom third of range, framework-aligned).{sg_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -331,7 +386,8 @@ def compose_recommendation(
         }
     if zone == "below_range":
         return {
-            "text": f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, broken below range, contrarian add).",
+            "text": (f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, "
+                     f"broken below range, contrarian add).{sg_suffix}"),
             "suggested_action": "BUY",
             "suggested_dollars": _starter_usd,
             "suggested_bps": STARTER_BPS,
@@ -341,7 +397,8 @@ def compose_recommendation(
         }
     if zone == "top_third":
         return {
-            "text": f"TRIM 50% {ticker} at {price:.2f} (top third of range, fade strength).",
+            "text": (f"TRIM 50% {ticker} at {price:.2f} "
+                     f"(top third of range, fade strength).{sg_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
@@ -351,7 +408,8 @@ def compose_recommendation(
         }
     if zone == "above_range":
         return {
-            "text": f"WATCH {ticker} at {price:.2f} — broke above range. Trim or let it run?",
+            "text": (f"WATCH {ticker} at {price:.2f} — broke above range. "
+                     f"Trim or let it run?{sg_suffix}"),
             "suggested_action": "WATCH",
             "suggested_dollars": None,
             "suggested_bps": None,
