@@ -54,6 +54,52 @@ def _load_framework_canon() -> str:
     return ""
 
 
+def _doctrine_summary_block() -> str:
+    """Static Hedgeye-doctrine summary for the cached framework block:
+    Quad definitions, position-sizing caps, long/short ratio. Identical
+    across all tickers/calls (changes only with the doctrine YAML), so it
+    belongs in the cached prefix, not the per-ticker context."""
+    try:
+        from tools.doctrine import load_doctrine
+        d = load_doctrine()
+        lines = ["## Hedgeye GIP Quad doctrine (reference)"]
+        for q, desc in (d.get("quad_definitions") or {}).items():
+            lines.append(f"- {q}: {desc}")
+        caps = d.get("position_sizing_caps") or {}
+        lines.append("Position-sizing caps (max % of account per position): "
+                      + ", ".join(
+                          f"{k}={v.get('max_pct', v.get('max_long_pct'))}%"
+                          for k, v in caps.items()))
+        lsr = (d.get("long_short_ratio") or {}).get("max_long_short_ratio")
+        if lsr:
+            lines.append(f"Max long:short equity allocation ratio = {lsr}.")
+        fd = d.get("formation_doctrine") or {}
+        if fd:
+            lines.append(f"TRADE/TREND/TAIL: {fd.get('bullish','')} "
+                          f"{fd.get('bearish','')}")
+        return "\n".join(lines)
+    except Exception as e:
+        log.debug("doctrine summary block skipped: %s", e)
+        return ""
+
+
+def _static_framework_block() -> str:
+    """The cacheable static prefix sent on EVERY decide() call: the
+    framework canon (operating rulebook) + Hedgeye doctrine summary.
+    Identical across tickers and calls until the canon file or doctrine
+    YAML changes — so Anthropic prompt-caching gives a ~90% input-token
+    discount on it after the first call (~40% total cost cut)."""
+    parts = []
+    canon = _load_framework_canon()
+    if canon:
+        parts.append("## Framework canon (authoritative operating rules)")
+        parts.append(canon)
+    dsum = _doctrine_summary_block()
+    if dsum:
+        parts.append(dsum)
+    return "\n\n".join(parts).strip()
+
+
 # ─────────────────────────── Context gathering ───────────────────────────
 
 def _get_risk_range(ticker: str) -> Optional[dict]:
@@ -737,15 +783,10 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
 
     sections = []
 
-    # Framework canon FIRST — this is the bot's operating rulebook (Hedgeye +
-    # SpotGamma + market-maker mechanics) and must be considered before
-    # interpreting any of the dynamic context blocks that follow.
-    canon = _load_framework_canon()
-    if canon:
-        sections.append("## Framework canon (authoritative operating rules)")
-        sections.append(canon)
-        sections.append("")
-
+    # NOTE: the framework canon + Hedgeye doctrine summary used to live
+    # here; they moved to _static_framework_block() so they can be sent as
+    # a cache_control'd prefix block (see decide()). This function now
+    # returns ONLY the dynamic, per-ticker context.
     sections.append(f"## Ticker: {ctx['ticker']}")
     sections.append(f"As of: {ctx['as_of']}")
     sections.append(f"Account value (for bps sizing): ${account_value:,.0f}")
@@ -1046,18 +1087,39 @@ def decide(
         log.error("ANTHROPIC_API_KEY not set; cannot run decision_engine")
         return None
 
+    # Prompt caching: the static framework block (canon + doctrine
+    # summary) is identical on every call, so we mark it cache_control
+    # ephemeral and send it as the FIRST content block. The dynamic
+    # per-ticker context follows uncached. After the first call this
+    # cuts input-token cost on the static prefix by ~90% (~40% total).
+    static_block = _static_framework_block()
+    cache_usage = {"cache_creation_input_tokens": 0,
+                   "cache_read_input_tokens": 0,
+                   "input_tokens": 0, "output_tokens": 0}
     try:
         client = anthropic.Anthropic(api_key=api_key)
+        content_blocks = []
+        if static_block:
+            content_blocks.append({
+                "type": "text",
+                "text": static_block,
+                "cache_control": {"type": "ephemeral"},
+            })
+        content_blocks.append({"type": "text", "text": user_msg})
         resp = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=1500,
             system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": content_blocks}],
         )
         raw_text = "".join(
             getattr(b, "text", "") for b in resp.content
             if getattr(b, "type", None) == "text"
         )
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            for k in cache_usage:
+                cache_usage[k] = getattr(u, k, 0) or 0
     except Exception as e:
         log.error("decision_engine: Claude API call failed for %s: %s", ticker, e)
         return None
@@ -1075,6 +1137,11 @@ def decide(
     decision["signal_conviction"] = signal_conviction
     decision["account_value_usd"] = account_value_usd
     decision["decided_at"]        = datetime.utcnow().isoformat() + "Z"
+    # Prompt-cache telemetry (smoke tests + cost tracking)
+    decision["cache_creation_input_tokens"] = cache_usage["cache_creation_input_tokens"]
+    decision["cache_read_input_tokens"]     = cache_usage["cache_read_input_tokens"]
+    decision["input_tokens"]                = cache_usage["input_tokens"]
+    decision["output_tokens"]               = cache_usage["output_tokens"]
     # Compute the implied dollar size from bps for caller convenience
     from recommender import size_from_bps
     if decision.get("bps") in (50, 100):
