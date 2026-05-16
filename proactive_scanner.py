@@ -61,16 +61,26 @@ def _resolve_watchlist(explicit: Optional[list[str]],
                       max_tickers: Optional[int],
                       priority: str = "all",
                       quad_filtered: bool = False,
-                      use_monthly_quad: bool = False) -> list[str]:
+                      use_monthly_quad: bool = False,
+                      source: str = "monitored",
+                      lookback_days: int = 7) -> list[str]:
     """Return the deduped list of tickers this scan should evaluate.
 
     Resolution order:
-      explicit > quad-filtered universe (--quad-filtered) >
+      explicit > source=hedgeye_active (Hedgeye product feed union) >
+      source=quad / --quad-filtered (doctrine Quad universe) >
       tools.list_monitored_tickers (with --priority) > ticker_inventory view.
 
-    `priority` can be 'high' / 'tail' / 'all'. 'high' is the recently-stamped
-    Hedgeye-touched bucket and fits in a sub-5-min cycle; the scheduled
-    scanner uses it so each fire's alerts cite a fresh price.
+    `source`:
+      'hedgeye_active' — tickers Keith is ACTIVELY surfacing through Hedgeye
+        products (RR+SS+PS+ETF Pro+II) in the last `lookback_days`. This is
+        the operational expression of his Quad view and the production
+        default for the scheduled scanner.
+      'quad' — Hedgeye favored longs+shorts for the active Quad (the slide-
+        derived framework reference; also reached via legacy --quad-filtered).
+      'monitored' — the legacy ticker_inventory view, sliced by `priority`.
+
+    `priority` ('high'/'tail'/'all') only applies to source='monitored'.
 
     When `quad_filtered` and no explicit list is given, the universe is the
     Hedgeye favored longs+shorts for the active Quad (monthly if
@@ -79,7 +89,22 @@ def _resolve_watchlist(explicit: Optional[list[str]],
     if explicit:
         return sorted({t.upper().strip() for t in explicit if t and t.strip()})
 
-    if quad_filtered:
+    if source == "hedgeye_active":
+        try:
+            from tools import list_monitored_tickers as L
+            uni = L.fetch_hedgeye_active(lookback_days)
+            if uni:
+                log.info("scanner: hedgeye-active universe = %d tickers "
+                         "(lookback=%dd)", len(uni), lookback_days)
+                if max_tickers and len(uni) > max_tickers:
+                    uni = uni[:max_tickers]
+                return uni
+            log.warning("scanner: hedgeye-active universe empty; falling back")
+        except Exception as e:
+            log.warning("scanner: hedgeye-active resolver failed (%s); "
+                        "falling back", e)
+
+    if quad_filtered or source == "quad":
         try:
             from tools.doctrine import universe_for_quad
             q = _active_quad(use_monthly_quad)
@@ -336,7 +361,9 @@ def scan(tickers: Optional[list[str]] = None,
          priority: str = "all",
          max_workers: int = 1,
          quad_filtered: bool = False,
-         use_monthly_quad: bool = False) -> dict:
+         use_monthly_quad: bool = False,
+         source: str = "monitored",
+         lookback_days: int = 7) -> dict:
     """Run a proactive scan. Returns a summary dict.
 
     max_workers > 1 parallelises _scan_one across a ThreadPoolExecutor so
@@ -346,7 +373,9 @@ def scan(tickers: Optional[list[str]] = None,
     """
     watchlist = _resolve_watchlist(tickers, max_tickers, priority=priority,
                                     quad_filtered=quad_filtered,
-                                    use_monthly_quad=use_monthly_quad)
+                                    use_monthly_quad=use_monthly_quad,
+                                    source=source,
+                                    lookback_days=lookback_days)
     started_at = datetime.now(timezone.utc)
     log.info("scanner: starting scan over %d tickers (dry_run=%s, priority=%s, workers=%d)",
              len(watchlist), dry_run, priority, max_workers)
@@ -426,9 +455,22 @@ def _cli() -> int:
     ap.add_argument("--workers", type=int, default=1,
                     help="ThreadPool workers for the per-ticker loop. 8 is "
                          "safe for the Anthropic API; default 1 = serial.")
+    ap.add_argument("--source", choices=("hedgeye_active", "quad", "monitored"),
+                    default="monitored",
+                    help="Universe source. 'hedgeye_active' = tickers Keith "
+                         "is actively surfacing through Hedgeye products "
+                         "(RR+SS+PS+ETF Pro+II) in the last --lookback-days "
+                         "(production default for the scheduled scanner). "
+                         "'quad' = doctrine Quad universe. 'monitored' "
+                         "(default) = legacy inventory view sliced by "
+                         "--priority.")
+    ap.add_argument("--lookback-days", type=int, default=7,
+                    help="Lookback window for --source hedgeye_active "
+                         "(default: 7).")
     ap.add_argument("--quad-filtered", action="store_true",
-                    help="Default universe = Hedgeye favored longs+shorts "
-                         "for the active Quad (strategic/quarterly).")
+                    help="Back-compat alias for --source quad: Hedgeye "
+                         "favored longs+shorts for the active Quad "
+                         "(strategic/quarterly).")
     ap.add_argument("--use-monthly-quad", action="store_true",
                     help="With --quad-filtered, use the MONTHLY (tactical) "
                          "Quad instead of the quarterly one.")
@@ -450,6 +492,8 @@ def _cli() -> int:
         max_workers=args.workers,
         quad_filtered=args.quad_filtered,
         use_monthly_quad=args.use_monthly_quad,
+        source=("quad" if args.quad_filtered else args.source),
+        lookback_days=args.lookback_days,
     )
     print(json.dumps(summary, indent=2, default=str), flush=True)
     sys.stdout.flush()

@@ -37,7 +37,7 @@ Add-Content -Path $logFile -Value "==== scanner run $start (pid=$PID) ===="
 
 # Run scanner, capturing both streams; PowerShell's 2>&1 merges stderr into stdout pipeline.
 # Append both into the daily log file.
-& $python $script --quad-filtered --priority all --max-tickers 300 --workers 16 --throttle 0 *>&1 |
+& $python $script --source hedgeye_active --lookback-days 7 --workers 16 --throttle 0 *>&1 |
     ForEach-Object { $_.ToString() } |
     Out-File -FilePath $logFile -Append -Encoding utf8
 

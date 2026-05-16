@@ -80,11 +80,71 @@ def fetch_tail() -> list[str]:
     return [t for t in fetch_all() if t not in high]
 
 
+def fetch_hedgeye_active(lookback_days: int = 7) -> list[str]:
+    """Tickers Keith is ACTIVELY surfacing through Hedgeye products.
+
+    Union of every ticker that has landed in a Hedgeye product feed
+    (Risk Range / Signal Strength / Portfolio Solutions / ETF Pro /
+    Investing Ideas) within the last `lookback_days`. This is the
+    operational expression of his Quad view — the slide-derived Quad
+    universe is only the framework reference.
+
+    Tickers are normalized via ticker_aliases.normalize_ticker, deduped,
+    and sorted. Empty/null tickers are dropped.
+    """
+    window = f"{int(lookback_days)} days"
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT ticker FROM hedgeye_risk_ranges
+                    WHERE signal_date >= CURRENT_DATE - interval %s
+                UNION
+                SELECT DISTINCT ticker FROM hedgeye_signal_strength
+                    WHERE snapshot_date >= CURRENT_DATE - interval %s
+                UNION
+                SELECT DISTINCT ticker FROM hedgeye_portfolio_solutions
+                    WHERE snapshot_date >= CURRENT_DATE - interval %s
+                UNION
+                SELECT DISTINCT ticker FROM hedgeye_etf_pro_ranges
+                    WHERE week_of >= CURRENT_DATE - interval %s
+                UNION
+                SELECT DISTINCT ticker FROM hedgeye_investing_ideas
+                    WHERE snapshot_date >= CURRENT_DATE - interval %s
+                """,
+                (window, window, window, window, window),
+            )
+            rows = [r[0] for r in cur.fetchall()]
+
+    try:
+        from tools.ticker_aliases import normalize_ticker
+    except ImportError:
+        from ticker_aliases import normalize_ticker  # type: ignore
+
+    out: set[str] = set()
+    for t in rows:
+        n = normalize_ticker(t)
+        if n and n.strip():
+            out.add(n.strip())
+    return sorted(out)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
+        "--source", choices=("hedgeye_active", "quad", "monitored"),
+        default="monitored",
+        help="Universe source. 'hedgeye_active' = tickers Keith is actively "
+             "surfacing through Hedgeye products in the last --lookback-days. "
+             "'monitored' (default) preserves the legacy --priority behavior.",
+    )
+    ap.add_argument(
+        "--lookback-days", type=int, default=7,
+        help="Lookback window for --source hedgeye_active (default: 7)",
+    )
+    ap.add_argument(
         "--priority", choices=("high", "tail", "all"), default="all",
-        help="Which slice to print (default: all)",
+        help="Which slice to print for --source monitored (default: all)",
     )
     ap.add_argument(
         "--count", action="store_true",
@@ -92,7 +152,15 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if args.priority == "high":
+    if args.source == "hedgeye_active":
+        tickers = fetch_hedgeye_active(args.lookback_days)
+    elif args.source == "quad":
+        # Quad-derived universe lives in proactive_scanner / tools.doctrine;
+        # this resolver only owns the monitored + hedgeye_active sources.
+        print("ERROR: --source quad is resolved by proactive_scanner, "
+              "not list_monitored_tickers", file=sys.stderr)
+        return 2
+    elif args.priority == "high":
         tickers = fetch_high()
     elif args.priority == "tail":
         tickers = fetch_tail()
