@@ -1,0 +1,276 @@
+# Hedgeye GIP-model doctrine — source of truth for Quad-aware positioning.
+#
+# Extracted via vision from the four Hedgeye doctrine slides:
+#   slide_1  "The Quads Provide A Reliable Starting Point" (TRADE/TREND/TAIL)
+#   slide_2  "Position Sizing" matrix
+#   slide_3  "Quarterly Expected Values By GIP Model Quad Regime" (heatmap)
+#   slide_4  "Highest/Lowest Expected Values By Quad Regime"
+#
+# Quad definitions (GIP = Growth, Inflation, Policy):
+#   Quad 1  Goldilocks  — growth accelerating, inflation decelerating
+#   Quad 2  Reflation   — growth accelerating, inflation accelerating
+#   Quad 3  Stagflation — growth decelerating, inflation accelerating
+#   Quad 4  Deflation   — growth decelerating, inflation decelerating
+#
+# Hedgeye runs a MULTI-TIMEFRAME model: track BOTH the quarterly Quad
+# (strategic — universe + asset-class caps) and the monthly Quad
+# (tactical — alert calibration, daily bias). tools/doctrine.py reads
+# this file; tools/detect_quads.py keeps the active Quads in bot_state.
+
+# ---------------------------------------------------------------------------
+# A. quad_universe — favored longs / shorts per Quad, by asset class.
+#    Sourced from slide_4 (Highest/Lowest Expected Values By Quad Regime).
+#    Sector / style-factor names are mapped to their liquid ETF proxies
+#    via `sector_etf` / `style_factor_etf` below.
+# ---------------------------------------------------------------------------
+quad_universe:
+  "Quad 1":
+    label: Goldilocks
+    longs:
+      equities:     [XLK, XLY, XLC, XLI, XLB, XLRE, SPHB, MTUM, QQQ, IWR]
+      fixed_income: [BIZD, CWB, HYG, EMB, BKLN]
+      commodities:  [DBC, USO, CPER]
+      fx:           [FXE, FXB, FXA]          # pro-risk FX vs USD
+      crypto:       [GBTC, ETHE]
+    shorts:
+      equities:     [XLU, XLP, XLV, SPLV, IWD, SDY]
+      fixed_income: [TLT, IEF, MBB, TIP, SHY]
+      fx:           [UUP]                    # short USD in Quad 1
+  "Quad 2":
+    label: Reflation
+    longs:
+      equities:     [XLK, XLI, XLF, XLE, XLY, SPHB, MTUM, QQQ, IWM]
+      fixed_income: [CWB, BIZD, PFF, BKLN, HYG]
+      commodities:  [DBC, USO, UNG, CPER]
+      fx:           [FXE, FXA, FXC]
+      crypto:       [GBTC, ETHE]
+    shorts:
+      equities:     [XLU, XLC, XLP, XLRE, XLV, SPLV, SDY, IWD]
+      fixed_income: [TLT, IEF, MUB, MBB, LQD]
+      fx:           [UUP]
+  "Quad 3":
+    label: Stagflation
+    longs:
+      equities:     [XLU, XLE, XLRE, XLK, XLP, XLV, MTUM, QUAL, SPLV]
+      fixed_income: [MUB, EMB, TLT, TIP, IEF]
+      commodities:  [GLD, DBC, USO, UNG]
+      fx:           [UUP]                    # USD/gold bid in Quad 3
+    shorts:
+      equities:     [XLC, XLF, XLY, XLI, XLB, IWM, SDY, IWD]
+      fixed_income: [BIZD, PFF, CWB, BKLN, HYG]
+  "Quad 4":
+    label: Deflation
+    longs:
+      equities:     [XLP, XLV, XLU, SPLV, SDY, QUAL]
+      fixed_income: [TLT, IEF, LQD, MUB, MBB]
+      commodities:  [GLD]
+      fx:           [UUP]                    # long USD in Quad 4
+    shorts:
+      equities:     [XLE, XLK, XLF, XLI, XLY, SPHB, MTUM, QQQ]
+      fixed_income: [PFF, EMLC, BIZD, BKLN, TIP]
+      commodities:  [DBC, USO, UNG, CPER]
+      crypto:       [GBTC, ETHE]
+
+# ---------------------------------------------------------------------------
+# B. position_sizing_caps — Hedgeye "Position Sizing" matrix (slide_2).
+#    Per-position maximum as a % of account value, by asset class.
+#    Long-Short equity allocation: max long 6% / short 3% (per slide_2
+#    "Maximum" row); mid 4%/2%; min 2%/1%.
+# ---------------------------------------------------------------------------
+position_sizing_caps:
+  foreign_currency: { max_pct: 12 }
+  fixed_income:     { max_pct: 10 }
+  equities:         { max_long_pct: 6, max_short_pct: 3 }
+  commodities:      { max_pct: 4 }
+  options:          { max_pct: 2 }            # slide_2 shows 1-2%; cap at 2
+  crypto:           { max_pct: 4 }            # FIXME: not on slide_2; treated
+                                              # as commodity-equivalent risk
+long_short_ratio:
+  max_long_short_ratio: "6:3"
+  equity_long:  { max_pct: 6, mid_pct: 4, min_pct: 2 }
+  equity_short: { max_pct: 3, mid_pct: 2, min_pct: 1 }
+
+# ---------------------------------------------------------------------------
+# C. expected_returns — per Quad x ticker historical quarterly avg return
+#    from slide_3 ("Quarterly Expected Values By GIP Model Quad Regime",
+#    "EV by Quadrant" columns 1-4).
+#
+#    The slide_3 heatmap is ~70 rows x dozens of columns at a resolution
+#    where exact per-cell percentages are NOT reliably legible from the
+#    attached PNG. The directionally-confident, high-signal rows are
+#    encoded below. For the FULL precise matrix, re-extract from the
+#    300-DPI Macro Show PDF per the master-prompt fallback:
+#      cd data/snapshots/hedgeye/<latest>/macro_show/
+#      pdftoppm -f 11 -l 11 -r 300 HE_TMS_*_*.pdf slide_11 -png
+#    then read slide_11-11.png with vision and fill the FIXME rows.
+#
+#    Values are average quarterly % return when that Quad is active.
+expected_returns:
+  # ticker:        [Quad1, Quad2, Quad3, Quad4]   (percent)
+  SPY:             [6.2,  4.6,  -0.7,  -2.5]      # S&P 500
+  XLK:             [8.8,  7.7,   0.7,  -3.7]      # Info Tech
+  XLY:             [7.5,  4.6,  -0.7,  -3.1]      # Cons. Discretionary
+  XLI:             [6.2,  5.1,  -0.4,  -1.5]      # Industrials
+  XLB:             [6.0,  4.1,  -0.7,  -0.7]      # Materials
+  XLF:             [5.1,  4.8,  -0.8,  -2.1]      # Financials
+  XLE:             [5.6,  4.6,   2.0,  -2.0]      # Energy
+  XLRE:            [5.7,  2.9,   0.8,  -3.5]      # REITs
+  XLC:             [7.4,  1.4,  -1.0,  -2.5]      # Comm. Services
+  XLP:             [5.3,  3.9,   3.6,   3.2]      # Cons. Staples (Q4 bid)
+  XLV:             [4.2,  3.9,   2.2,   3.2]      # Health Care (Q4 bid)
+  XLU:             [3.6,  3.8,   4.5,   2.1]      # Utilities (Q3 bid)
+  SPHB:            [8.6,  8.2,  -2.9,  -6.2]      # High Beta
+  SPLV:            [3.9,  2.3,   2.2,   3.7]      # Low Beta (Q4 bid)
+  MTUM:            [7.4,  5.1,   1.6,  -3.5]      # Momentum
+  QUAL:            [6.6,  4.7,   1.0,   2.3]      # Quality
+  SDY:             [5.4,  3.2,  -0.2,   3.0]      # Dividend Yield (Q4 bid)
+  IWD:             [5.4,  3.4,   0.0,   2.8]      # Value
+  QQQ:             [7.6,  7.7,   0.6,  -3.9]      # Secular Growth proxy
+  IWM:             [6.0,  5.7,  -0.5,  -4.3]      # Small Caps
+  GBTC:            [75.3, 53.2, 157.2, -16.5]     # Bitcoin (FIXME verify Q4)
+  USO:             [7.0,  6.0,   6.8,  -2.0]      # WTI Crude
+  UNG:             [1.3,  3.8,   5.9,  -6.7]      # Natural Gas
+  GLD:             [2.8,  3.2,   5.7,   4.6]      # Gold (Q3/Q4 bid)
+  TLT:             [1.5,  0.6,   1.3,   3.6]      # Long Bond (Q4 bid)
+  IEF:             [1.3,  0.6,   1.0,   2.1]      # Treasury Belly (Q4 bid)
+  TIP:             [1.0,  0.8,   1.7,   1.0]      # TIPS
+  LQD:             [1.9,  0.9,   0.6,   1.5]      # IG Credit
+  HYG:             [3.1,  2.1,   0.0,  -0.4]      # HY Credit
+  BIZD:            [5.3,  5.8,  -1.1,  -2.0]      # BDCs
+  CWB:             [5.0,  5.8,  -0.7,  -1.6]      # Convertibles
+  PFF:             [2.0,  2.9,  -0.3,   1.3]      # Preferreds
+  EMB:             [2.7,  1.8,   0.7,   0.1]      # EM USD Debt
+  UUP:             [-0.5, -0.5,  1.3,   1.9]      # US Dollar (Q3/Q4 bid)
+  # FIXME(slide_3): remaining ~45 rows (BKLN, EMLC, SHY, IEI, TLH, STIP,
+  # MBB, MUB, BAB, DBC, CPER, FX crosses, China Quad column) require the
+  # 300-DPI PDF re-extraction described above. doctrine.expected_return()
+  # returns None for tickers absent here — callers must treat None as
+  # "no historical tilt available", not zero.
+
+# ---------------------------------------------------------------------------
+# D. ticker_to_asset_class — every universe ticker -> cap category.
+#    Categories match position_sizing_caps keys:
+#      equities | fixed_income | commodities | foreign_currency
+#      | options | crypto
+# ---------------------------------------------------------------------------
+ticker_to_asset_class:
+  # --- equities (broad, sector, style-factor ETFs) ---
+  SPY: equities
+  QQQ: equities
+  IWM: equities
+  IWR: equities
+  IWD: equities
+  IWF: equities
+  RSP: equities
+  OEF: equities
+  XLK: equities
+  XLY: equities
+  XLC: equities
+  XLI: equities
+  XLB: equities
+  XLRE: equities
+  XLU: equities
+  XLP: equities
+  XLV: equities
+  XLF: equities
+  XLE: equities
+  SPHB: equities
+  SPLV: equities
+  MTUM: equities
+  QUAL: equities
+  SDY: equities
+  # --- fixed income ---
+  AGG: fixed_income
+  TLT: fixed_income
+  IEF: fixed_income
+  IEI: fixed_income
+  TLH: fixed_income
+  SHY: fixed_income
+  TIP: fixed_income
+  STIP: fixed_income
+  LQD: fixed_income
+  HYG: fixed_income
+  MBB: fixed_income
+  MUB: fixed_income
+  BAB: fixed_income
+  BKLN: fixed_income
+  BIZD: fixed_income
+  CWB: fixed_income
+  PFF: fixed_income
+  EMB: fixed_income
+  EMLC: fixed_income
+  # --- commodities ---
+  DBC: commodities
+  USO: commodities
+  UNG: commodities
+  GLD: commodities
+  SLV: commodities
+  CPER: commodities
+  # --- foreign currency ---
+  UUP: foreign_currency
+  FXE: foreign_currency
+  FXB: foreign_currency
+  FXA: foreign_currency
+  FXC: foreign_currency
+  FXY: foreign_currency
+  # --- crypto ---
+  GBTC: crypto
+  ETHE: crypto
+
+# ---------------------------------------------------------------------------
+# E. sector / style-factor -> ETF proxy maps (used to resolve slide_4
+#    sector & factor names into the tickers in quad_universe).
+# ---------------------------------------------------------------------------
+sector_etf:
+  Tech: XLK
+  "Consumer Discretionary": XLY
+  "Communication Services": XLC
+  Industrials: XLI
+  Materials: XLB
+  REITs: XLRE
+  Utilities: XLU
+  "Consumer Staples": XLP
+  "Health Care": XLV
+  Financials: XLF
+  Energy: XLE
+style_factor_etf:
+  "High Beta": SPHB
+  "Low Beta": SPLV
+  Momentum: MTUM
+  Quality: QUAL
+  "Dividend Yield": SDY
+  Value: IWD
+  "Secular Growth": QQQ
+  "Mid Caps": IWR
+  "Small Caps": IWM
+fixed_income_sector_etf:
+  BDCs: BIZD
+  Convertibles: CWB
+  "HY Credit": HYG
+  "EM $ Debt": EMB
+  "Leveraged Loans": BKLN
+  Preferreds: PFF
+  "IG Credit": LQD
+  "Long Bond": TLT
+  "Treasury Belly": IEF
+  TIPS: TIP
+  Munis: MUB
+  MBS: MBB
+  "Short Duration Treasurys": SHY
+  "EM Local Currency": EMLC
+
+# ---------------------------------------------------------------------------
+# F. quad_definitions — narrative + TRADE/TREND/TAIL doctrine (slide_1).
+#    "Bullish Formation" = last price > all of TRADE, TREND, TAIL (buy dips).
+#    "Bearish Formation" = inverse (short strength). TRADE <=3wk, TREND
+#    >=3mo, TAIL <=3yr.
+# ---------------------------------------------------------------------------
+quad_definitions:
+  "Quad 1": "Goldilocks: growth accelerating, inflation decelerating. Best: Equities, Credit, Commodities, FX. Worst: Fixed Income, USD."
+  "Quad 2": "Reflation: growth accelerating, inflation accelerating. Best: Commodities, Equities, Credit, FX. Worst: Fixed Income, USD."
+  "Quad 3": "Stagflation: growth decelerating, inflation accelerating. Best: Gold, Commodities, Fixed Income. Worst: Credit."
+  "Quad 4": "Deflation: growth decelerating, inflation decelerating. Best: Fixed Income, Gold, USD. Worst: Commodities, Equities, Credit, FX."
+formation_doctrine:
+  bullish: "Last price above TRADE, TREND and TAIL (ascending) -> Bullish Formation: buy all dips."
+  bearish: "Last price below all three -> Bearish Formation: short strength repeatedly."
+  durations: { TRADE: "3 weeks or less", TREND: "3 months or more", TAIL: "3 years or less" }

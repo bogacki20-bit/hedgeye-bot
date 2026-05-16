@@ -1,0 +1,29 @@
+# quad_detector_launcher.ps1 — env-loader wrapper for tools.detect_quads.
+# Invoked by Scheduled Task HedgeyeBotQuadDetector daily at 11:00 ET.
+$ErrorActionPreference = 'Continue'
+$repo   = 'C:\Projects\hedgeye-bot'
+$python = 'C:\Users\bogac\AppData\Local\Programs\Python\Python312\python.exe'
+
+# Load .env so DATABASE_PUBLIC_URL / TELEGRAM_* are available.
+$envFile = Join-Path $repo '.env'
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -and -not $line.StartsWith('#') -and $line.Contains('=')) {
+            $idx = $line.IndexOf('=')
+            $k = $line.Substring(0, $idx).Trim()
+            $v = $line.Substring($idx + 1).Trim().Trim('"').Trim("'")
+            if ($k) { [System.Environment]::SetEnvironmentVariable($k, $v, 'Process') }
+        }
+    }
+}
+
+$logDir  = Join-Path $repo 'logs'
+$null    = New-Item -ItemType Directory -Force -Path $logDir
+$date    = Get-Date -Format 'yyyy-MM-dd'
+$logFile = Join-Path $logDir "quad_detector_$date.log"
+
+Set-Location $repo
+& $python -m tools.detect_quads *>&1 |
+    ForEach-Object { $_.ToString() } |
+    Out-File -FilePath $logFile -Append -Encoding utf8

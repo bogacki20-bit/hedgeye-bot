@@ -61,13 +61,16 @@ def size_from_bps(bps, acct_value):
     return round(min(raw, PER_FILL_CEILING_USD), 2)
 
 
-def size_for(conviction, account=None, *, ticker=None):
+def size_for(conviction, account=None, *, ticker=None, side="long"):
     """Style B sizing -- conviction + account -> (dollars, debug).
 
     `account` may be an account_number ('X96383748'), an account_name
     ('Individual' / 'Rollover IRA' / 'Roth IRA'), or None. When None,
     portfolio.account_value(ticker=ticker) is used to route to the
     account that most recently held the ticker (falling back to Individual).
+
+    `side` ('long'|'short') only feeds the ADDITIVE Hedgeye position-cap
+    layer below — it does NOT affect the Style B bps math.
     """
     acct_value = float(account_value(account=account, ticker=ticker) or 0.0)
     bps = _STYLE_B_BPS_BY_CONVICTION.get(conviction)
@@ -81,7 +84,38 @@ def size_for(conviction, account=None, *, ticker=None):
     else:
         dollars = round(raw, 2)
         clamped_by = None
-    return dollars, {"bps": bps, "acct_value": acct_value, "raw": round(raw, 2), "clamped_by": clamped_by}
+    debug = {"bps": bps, "acct_value": acct_value, "raw": round(raw, 2),
+             "clamped_by": clamped_by}
+
+    # --- ADDITIVE Hedgeye position-cap layer (does NOT touch the Style B
+    # bps math, the $1K per-fill ceiling, or any STYLE_B constant above).
+    # Caps the *incremental* fill to the asset class's remaining headroom
+    # under the Hedgeye Position Sizing matrix. Fails OPEN: any doctrine
+    # or portfolio-lookup error leaves `dollars` exactly as computed.
+    if ticker:
+        try:
+            from tools.doctrine import check_position_cap
+            cur_exposure = 0.0
+            try:
+                pos = position_summary(ticker, account=account)
+                if pos:
+                    cur_exposure = abs(float(pos.get("current_value") or 0.0))
+            except Exception:
+                cur_exposure = 0.0
+            allowed_size, cap_reason = check_position_cap(
+                ticker, side, cur_exposure, acct_value)
+            if allowed_size is not None:
+                final_size = min(dollars, max(0.0, allowed_size))
+                if final_size < dollars:
+                    debug["cap_reason"] = cap_reason
+                    debug["capped_from"] = dollars
+                    if final_size <= 0:
+                        debug["clamped_by"] = "hedgeye_cap"
+                    dollars = round(final_size, 2)
+        except Exception as e:
+            log.debug("position-cap layer skipped for %s: %s", ticker, e)
+
+    return dollars, debug
 
 
 def recommend_from_signal(item):
@@ -143,7 +177,9 @@ def recommend_from_signal(item):
         )
         return _save(rec, current)
 
-    raw_dollars, dbg = size_for(conviction, account)
+    raw_dollars, dbg = size_for(
+        conviction, account, ticker=ticker,
+        side=("short" if direction.lower() == "short" else "long"))
     dollars          = _respect_buffer(account, raw_dollars, direction)
     shares           = round(dollars / last_price, 3) if last_price and last_price > 0 else None
 

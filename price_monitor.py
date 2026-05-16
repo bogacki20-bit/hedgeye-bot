@@ -371,6 +371,60 @@ def _hurst_suffix(ticker: str) -> str:
     return f" | Hurst {h:.2f} ({regime})"
 
 
+def _quad_doctrine_suffix(ticker: str, side: str = "long") -> str:
+    """Hedgeye Quad-doctrine tag for the alert: Quad alignment, the
+    ticker's historical quarterly EV in the active Quad, and the
+    position-cap headroom. Empty string on any lookup failure so the
+    alert never breaks on doctrine/portfolio issues.
+    """
+    try:
+        from tools.doctrine import (
+            current_quarterly_quad, universe_for_quad, expected_return,
+            asset_class_for, position_size_cap,
+        )
+    except Exception:
+        return ""
+    try:
+        t = (ticker or "").upper()
+        q = current_quarterly_quad()
+        qn = q.split()[-1]
+        longs = set(universe_for_quad(q, "longs"))
+        shorts = set(universe_for_quad(q, "shorts"))
+        if t in longs:
+            favored, align = "long", ("aligned" if side == "long" else "counter")
+        elif t in shorts:
+            favored, align = "short", ("aligned" if side == "short" else "counter")
+        else:
+            favored, align = "neutral", "neutral"
+        parts = [f" | Quad: {t} is Q{qn} favored {favored} ({align})"]
+
+        ev = expected_return(t, q)
+        if ev is not None:
+            parts.append(f" | Q{qn} historical: {t} avg {ev:+.1f}% per quarter")
+
+        ac = asset_class_for(t)
+        if ac:
+            try:
+                from portfolio import account_value, position_summary
+                acct_val = float(account_value(ticker=t) or 0.0)
+                pos = position_summary(t) or {}
+                cur = abs(float(pos.get("current_value") or 0.0))
+            except Exception:
+                acct_val, cur = 0.0, 0.0
+            cap = position_size_cap(t, side, acct_val) if acct_val else None
+            if cap:
+                cur_pct = (cur / acct_val * 100.0) if acct_val else 0.0
+                cap_pct = (cap / acct_val * 100.0) if acct_val else 0.0
+                room = max(0.0, cap - cur)
+                parts.append(
+                    f" | Position: {ac} {cur_pct:.1f}% of {cap_pct:.0f}% cap"
+                    f" — room for ${room:,.0f}")
+        return "".join(parts)
+    except Exception as e:
+        log.warning(f"quad doctrine suffix failed for {ticker} (continuing): {e}")
+        return ""
+
+
 def _cross_source_suffix(ticker: str, sg_ctx: dict | None) -> str:
     """Build the trailing cross-source alignment tag from RR / MFR / ETF Pro
     / SG. Empty string unless there is a strong signal (high-conviction
@@ -501,12 +555,14 @@ def compose_recommendation(
     # Cross-source range alignment tag (RR/MFR/ETF Pro/SG) — only renders on a
     # strong signal (high-conviction cluster or divergence caution).
     xs_suffix = _cross_source_suffix(ticker, spotgamma_ctx)
+    # Hedgeye Quad-doctrine tag: alignment + historical EV + cap headroom.
+    quad_suffix = _quad_doctrine_suffix(ticker, side="long")
 
     if zone == "bottom_third":
         _align = _framework_alignment(trend, "bottom_third")
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}"),
+                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -517,7 +573,7 @@ def compose_recommendation(
     if zone == "below_range":
         return {
             "text": (f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, "
-                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}{xs_suffix}"),
+                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
             "suggested_action": "BUY",
             "suggested_dollars": _starter_usd,
             "suggested_bps": STARTER_BPS,
@@ -529,7 +585,7 @@ def compose_recommendation(
         _align = _framework_alignment(trend, "top_third")
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}"),
+                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
@@ -540,7 +596,7 @@ def compose_recommendation(
     if zone == "above_range":
         return {
             "text": (f"WATCH {ticker} at {price:.2f} — broke above range. "
-                     f"Trim or let it run?{sg_suffix}{hurst_suffix}{xs_suffix}"),
+                     f"Trim or let it run?{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
             "suggested_action": "WATCH",
             "suggested_dollars": None,
             "suggested_bps": None,

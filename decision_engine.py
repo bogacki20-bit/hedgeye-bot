@@ -685,6 +685,40 @@ def _cross_source_summary(ticker: str, decision_context: Optional[dict]) -> Opti
     return line
 
 
+def _quad_doctrine_line(ticker: str) -> Optional[str]:
+    """Deterministic Hedgeye Quad-doctrine line for the LLM prompt:
+    active quarterly/monthly Quad, whether the ticker is favored
+    long/short, its historical quarterly EV, and the asset-class
+    position cap. None on any doctrine error (prompt stays clean)."""
+    try:
+        from tools.doctrine import (
+            current_quarterly_quad, current_monthly_quad,
+            universe_for_quad, expected_return, asset_class_for,
+        )
+        t = (ticker or "").upper()
+        qq = current_quarterly_quad()
+        mq = current_monthly_quad()
+        qn = qq.split()[-1]
+        longs = set(universe_for_quad(qq, "longs"))
+        shorts = set(universe_for_quad(qq, "shorts"))
+        if t in longs:
+            favored = f"{t} is a Q{qn} FAVORED LONG"
+        elif t in shorts:
+            favored = f"{t} is a Q{qn} FAVORED SHORT"
+        else:
+            favored = f"{t} is NOT in the Q{qn} favored long/short universe"
+        bits = [f"Hedgeye doctrine: quarterly {qq}, monthly {mq}. {favored}."]
+        ev = expected_return(t, qq)
+        if ev is not None:
+            bits.append(f"Historical {qq} avg return for {t}: {ev:+.1f}% per quarter.")
+        ac = asset_class_for(t)
+        if ac:
+            bits.append(f"Asset class: {ac} (Hedgeye position-sizing cap applies).")
+        return "## Hedgeye Quad doctrine\n" + " ".join(bits)
+    except Exception:
+        return None
+
+
 def _format_user_message(ctx: dict, *, signal_origin: str,
                          signal_conviction: Optional[str],
                          account_value: float) -> str:
@@ -736,6 +770,13 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     xs_line = _cross_source_summary(ctx.get("ticker"), ctx)
     if xs_line:
         sections.append(xs_line)
+        sections.append("")
+
+    # Hedgeye Quad doctrine — strategic/tactical regime + favored side +
+    # historical EV tilt, so the LLM weights the framework before ranges.
+    quad_line = _quad_doctrine_line(ctx.get("ticker"))
+    if quad_line:
+        sections.append(quad_line)
         sections.append("")
 
     sections.append("## Hedgeye Risk Range (latest daily signal — PRIMARY range source)")

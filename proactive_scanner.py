@@ -46,20 +46,54 @@ DEFAULT_DEDUP_HOURS    = 4
 
 # ─────────────────────────── Watchlist resolution ───────────────────────────
 
+def _active_quad(use_monthly: bool = False) -> str:
+    """Active Quad for universe/alignment — quarterly (strategic) by
+    default, monthly (tactical) when --use-monthly-quad is set."""
+    try:
+        from tools.doctrine import current_monthly_quad, current_quarterly_quad
+        return current_monthly_quad() if use_monthly else current_quarterly_quad()
+    except Exception as e:
+        log.warning("scanner: doctrine quad lookup failed (%s); default Quad 1", e)
+        return "Quad 1"
+
+
 def _resolve_watchlist(explicit: Optional[list[str]],
                       max_tickers: Optional[int],
-                      priority: str = "all") -> list[str]:
+                      priority: str = "all",
+                      quad_filtered: bool = False,
+                      use_monthly_quad: bool = False) -> list[str]:
     """Return the deduped list of tickers this scan should evaluate.
 
     Resolution order:
-      explicit > tools.list_monitored_tickers (with --priority) > ticker_inventory view.
+      explicit > quad-filtered universe (--quad-filtered) >
+      tools.list_monitored_tickers (with --priority) > ticker_inventory view.
 
     `priority` can be 'high' / 'tail' / 'all'. 'high' is the recently-stamped
     Hedgeye-touched bucket and fits in a sub-5-min cycle; the scheduled
     scanner uses it so each fire's alerts cite a fresh price.
+
+    When `quad_filtered` and no explicit list is given, the universe is the
+    Hedgeye favored longs+shorts for the active Quad (monthly if
+    `use_monthly_quad`, else quarterly).
     """
     if explicit:
         return sorted({t.upper().strip() for t in explicit if t and t.strip()})
+
+    if quad_filtered:
+        try:
+            from tools.doctrine import universe_for_quad
+            q = _active_quad(use_monthly_quad)
+            uni = universe_for_quad(q, "longs") + universe_for_quad(q, "shorts")
+            uni = sorted(set(uni))
+            if uni:
+                log.info("scanner: quad-filtered universe = %d tickers (%s)",
+                         len(uni), q)
+                if max_tickers and len(uni) > max_tickers:
+                    uni = uni[:max_tickers]
+                return uni
+            log.warning("scanner: quad universe empty; falling back to inventory")
+        except Exception as e:
+            log.warning("scanner: quad-filter failed (%s); falling back", e)
 
     tickers: list[str] = []
     try:
@@ -199,6 +233,31 @@ def _send_alert(decision: dict) -> bool:
 
 # ─────────────────────────── Per-ticker scan ───────────────────────────
 
+def _quad_alignment(ticker: str, direction: Optional[str]) -> str:
+    """'aligned' / 'counter' / 'neutral' — is the decision's direction
+    consistent with the active Quad's favored longs/shorts universe?"""
+    try:
+        from tools.doctrine import universe_for_quad
+        q = _active_quad()
+        longs = set(universe_for_quad(q, "longs"))
+        shorts = set(universe_for_quad(q, "shorts"))
+        t = (ticker or "").upper()
+        d = (direction or "").lower()
+        if d in ("long", "buy"):
+            if t in longs:
+                return "aligned"
+            if t in shorts:
+                return "counter"
+        elif d in ("short", "sell", "close"):
+            if t in shorts:
+                return "aligned"
+            if t in longs:
+                return "counter"
+        return "neutral"
+    except Exception:
+        return "neutral"
+
+
 def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
               dedup_hours: int) -> dict:
     """Evaluate a single ticker. Returns a result summary."""
@@ -243,6 +302,7 @@ def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
         "bps":        decision.get("bps"),
         "dollars":    decision.get("recommended_dollars"),
         "confidence": decision.get("confidence"),
+        "quad_alignment": _quad_alignment(ticker, decision.get("direction")),
     }
 
     conviction = decision.get("conviction") or ""
@@ -274,7 +334,9 @@ def scan(tickers: Optional[list[str]] = None,
          dedup_hours: int = DEFAULT_DEDUP_HOURS,
          throttle_seconds: float = 0.0,
          priority: str = "all",
-         max_workers: int = 1) -> dict:
+         max_workers: int = 1,
+         quad_filtered: bool = False,
+         use_monthly_quad: bool = False) -> dict:
     """Run a proactive scan. Returns a summary dict.
 
     max_workers > 1 parallelises _scan_one across a ThreadPoolExecutor so
@@ -282,7 +344,9 @@ def scan(tickers: Optional[list[str]] = None,
     Anthropic API tolerates 8 concurrent messages calls comfortably. The
     network-bound legs (yfinance / MFR) also parallelise well.
     """
-    watchlist = _resolve_watchlist(tickers, max_tickers, priority=priority)
+    watchlist = _resolve_watchlist(tickers, max_tickers, priority=priority,
+                                    quad_filtered=quad_filtered,
+                                    use_monthly_quad=use_monthly_quad)
     started_at = datetime.now(timezone.utc)
     log.info("scanner: starting scan over %d tickers (dry_run=%s, priority=%s, workers=%d)",
              len(watchlist), dry_run, priority, max_workers)
@@ -362,6 +426,12 @@ def _cli() -> int:
     ap.add_argument("--workers", type=int, default=1,
                     help="ThreadPool workers for the per-ticker loop. 8 is "
                          "safe for the Anthropic API; default 1 = serial.")
+    ap.add_argument("--quad-filtered", action="store_true",
+                    help="Default universe = Hedgeye favored longs+shorts "
+                         "for the active Quad (strategic/quarterly).")
+    ap.add_argument("--use-monthly-quad", action="store_true",
+                    help="With --quad-filtered, use the MONTHLY (tactical) "
+                         "Quad instead of the quarterly one.")
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -378,6 +448,8 @@ def _cli() -> int:
         throttle_seconds=args.throttle,
         priority=args.priority,
         max_workers=args.workers,
+        quad_filtered=args.quad_filtered,
+        use_monthly_quad=args.use_monthly_quad,
     )
     print(json.dumps(summary, indent=2, default=str), flush=True)
     sys.stdout.flush()
