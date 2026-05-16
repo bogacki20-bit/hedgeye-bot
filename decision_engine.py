@@ -539,6 +539,33 @@ def _hurst_regime_line(value) -> Optional[str]:
     return f"Hurst regime: {regime} (H={h:.2f}) — {framing}"
 
 
+def _vol_premium_line(iv, rv) -> Optional[str]:
+    """Implied-vs-realized vol premium framing.
+
+    premium% = (IV - RV) / RV * 100.
+      > +15%        sellers' market  (options rich — favor premium selling /
+                                      expect mean reversion of IV)
+      -10% .. +15%  fair             (no strong vol edge)
+      < -10%        buyers' market   (options cheap — favor owning convexity)
+    Returns None when IV/RV missing or RV<=0.
+    """
+    try:
+        ivf = float(iv) if iv is not None else None
+        rvf = float(rv) if rv is not None else None
+    except (TypeError, ValueError):
+        return None
+    if ivf is None or rvf is None or rvf <= 0:
+        return None
+    pct = (ivf - rvf) / rvf * 100.0
+    if pct > 15.0:
+        cat = "sellers_market"
+    elif pct < -10.0:
+        cat = "buyers_market"
+    else:
+        cat = "fair_market"
+    return f"Vol premium: IV {ivf:g} vs RV {rvf:g} = {pct:+.0f}% ({cat})"
+
+
 def _xs_fmt(v) -> str:
     """Compact number format for the cross-source line: ints render bare,
     fractionals keep up to 2 decimals with trailing zeros stripped."""
@@ -882,6 +909,9 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     hurst_line = _hurst_regime_line(mfr_block.get("hurst"))
     if hurst_line:
         sections.append(hurst_line)
+    vol_line = _vol_premium_line(mfr_block.get("iv"), mfr_block.get("rv"))
+    if vol_line:
+        sections.append(vol_line)
     sections.append(json.dumps(_trim(mfr_block), indent=2, default=str))
     sections.append("")
     # NOTE: the live Yahoo snapshot moved to the dynamic per-call block

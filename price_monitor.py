@@ -345,6 +345,28 @@ def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
     return " | SG: " + " / ".join(parts) + anchor_phrase
 
 
+def _vol_suffix(ticker: str) -> str:
+    """' | Vol: IV/RV 1.32x (+32% premium)' tag — only renders when the
+    IV/RV premium exceeds 15% absolute (i.e. a vol edge worth noting).
+    Empty string otherwise so routine alerts stay clean."""
+    try:
+        from decision_engine import _get_mfr_latest
+        mfr = _get_mfr_latest(ticker) or {}
+        iv = float(mfr["iv"]) if mfr.get("iv") is not None else None
+        rv = float(mfr["rv"]) if mfr.get("rv") is not None else None
+    except (TypeError, ValueError, KeyError):
+        return ""
+    except Exception as e:
+        log.warning(f"vol suffix lookup failed for {ticker} (continuing): {e}")
+        return ""
+    if iv is None or rv is None or rv <= 0:
+        return ""
+    premium_pct = (iv - rv) / rv * 100.0
+    if abs(premium_pct) <= 15.0:
+        return ""
+    return f" | Vol: IV/RV {iv / rv:.2f}x ({premium_pct:+.0f}% premium)"
+
+
 def _hurst_suffix(ticker: str) -> str:
     """Build the trailing ' | Hurst 0.62 (trending)' tag from the latest
     MFR snapshot. Empty string when MFR/Hurst is unavailable so the alert
@@ -557,12 +579,14 @@ def compose_recommendation(
     xs_suffix = _cross_source_suffix(ticker, spotgamma_ctx)
     # Hedgeye Quad-doctrine tag: alignment + historical EV + cap headroom.
     quad_suffix = _quad_doctrine_suffix(ticker, side="long")
+    # IV/RV vol-premium tag — only on a >15% absolute premium/discount.
+    vol_suffix = _vol_suffix(ticker)
 
     if zone == "bottom_third":
         _align = _framework_alignment(trend, "bottom_third")
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
+                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -573,7 +597,7 @@ def compose_recommendation(
     if zone == "below_range":
         return {
             "text": (f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, "
-                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
+                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "BUY",
             "suggested_dollars": _starter_usd,
             "suggested_bps": STARTER_BPS,
@@ -585,7 +609,7 @@ def compose_recommendation(
         _align = _framework_alignment(trend, "top_third")
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
+                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
@@ -596,7 +620,7 @@ def compose_recommendation(
     if zone == "above_range":
         return {
             "text": (f"WATCH {ticker} at {price:.2f} — broke above range. "
-                     f"Trim or let it run?{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}"),
+                     f"Trim or let it run?{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "WATCH",
             "suggested_dollars": None,
             "suggested_bps": None,
