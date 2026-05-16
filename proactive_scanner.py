@@ -47,20 +47,37 @@ DEFAULT_DEDUP_HOURS    = 4
 # ─────────────────────────── Watchlist resolution ───────────────────────────
 
 def _resolve_watchlist(explicit: Optional[list[str]],
-                      max_tickers: Optional[int]) -> list[str]:
+                      max_tickers: Optional[int],
+                      priority: str = "all") -> list[str]:
     """Return the deduped list of tickers this scan should evaluate.
 
-    Priority: explicit > ticker_inventory.monitored_tickers().
+    Resolution order:
+      explicit > tools.list_monitored_tickers (with --priority) > ticker_inventory view.
+
+    `priority` can be 'high' / 'tail' / 'all'. 'high' is the recently-stamped
+    Hedgeye-touched bucket and fits in a sub-5-min cycle; the scheduled
+    scanner uses it so each fire's alerts cite a fresh price.
     """
     if explicit:
         return sorted({t.upper().strip() for t in explicit if t and t.strip()})
 
+    tickers: list[str] = []
     try:
-        import ticker_inventory
-        tickers = ticker_inventory.monitored_tickers() or []
+        from tools import list_monitored_tickers as L
+        if priority == "high":
+            tickers = L.fetch_high()
+        elif priority == "tail":
+            tickers = L.fetch_tail()
+        else:
+            tickers = L.fetch_all()
     except Exception as e:
-        log.warning("scanner: ticker_inventory unavailable, falling back to empty: %s", e)
-        tickers = []
+        log.warning("scanner: list_monitored_tickers unavailable, falling back: %s", e)
+        try:
+            import ticker_inventory
+            tickers = ticker_inventory.monitored_tickers() or []
+        except Exception as e2:
+            log.warning("scanner: ticker_inventory also unavailable: %s", e2)
+            tickers = []
 
     if max_tickers and len(tickers) > max_tickers:
         tickers = tickers[:max_tickers]
@@ -255,31 +272,62 @@ def scan(tickers: Optional[list[str]] = None,
          dry_run: bool = False,
          refresh: bool = True,
          dedup_hours: int = DEFAULT_DEDUP_HOURS,
-         throttle_seconds: float = 0.0) -> dict:
-    """Run a proactive scan. Returns a summary dict."""
-    watchlist = _resolve_watchlist(tickers, max_tickers)
-    started_at = datetime.now(timezone.utc)
-    log.info("scanner: starting scan over %d tickers (dry_run=%s)",
-             len(watchlist), dry_run)
+         throttle_seconds: float = 0.0,
+         priority: str = "all",
+         max_workers: int = 1) -> dict:
+    """Run a proactive scan. Returns a summary dict.
 
-    per_ticker = []
+    max_workers > 1 parallelises _scan_one across a ThreadPoolExecutor so
+    a 50-ticker cycle completes in ~1 min instead of ~10 min serially. The
+    Anthropic API tolerates 8 concurrent messages calls comfortably. The
+    network-bound legs (yfinance / MFR) also parallelise well.
+    """
+    watchlist = _resolve_watchlist(tickers, max_tickers, priority=priority)
+    started_at = datetime.now(timezone.utc)
+    log.info("scanner: starting scan over %d tickers (dry_run=%s, priority=%s, workers=%d)",
+             len(watchlist), dry_run, priority, max_workers)
+
+    per_ticker: list = [None] * len(watchlist)
     counts = {"actionable": 0, "alerted": 0, "deduped": 0, "errors": 0}
 
-    for i, ticker in enumerate(watchlist):
-        log.info("scanner: [%d/%d] %s", i + 1, len(watchlist), ticker)
-        r = _scan_one(ticker, dry_run=dry_run, refresh=refresh,
-                     dedup_hours=dedup_hours)
-        per_ticker.append(r)
-        if r["actionable"]:
-            counts["actionable"] += 1
-        if r["alerted"]:
-            counts["alerted"] += 1
-        if r["deduped"]:
-            counts["deduped"] += 1
-        if r["error"]:
-            counts["errors"] += 1
-        if throttle_seconds and i < len(watchlist) - 1:
-            time.sleep(throttle_seconds)
+    if max_workers and max_workers > 1 and watchlist:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_idx = {
+                pool.submit(_scan_one, t, dry_run=dry_run, refresh=refresh,
+                            dedup_hours=dedup_hours): i
+                for i, t in enumerate(watchlist)
+            }
+            done_count = 0
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                ticker = watchlist[idx]
+                try:
+                    r = fut.result()
+                except Exception as e:
+                    log.exception("scanner: %s raised in worker: %s", ticker, e)
+                    r = {"ticker": ticker, "actionable": False, "alerted": False,
+                         "deduped": False, "error": str(e), "decision": None}
+                per_ticker[idx] = r
+                done_count += 1
+                log.info("scanner: [%d/%d] %s done (actionable=%s)",
+                         done_count, len(watchlist), ticker, r.get("actionable"))
+                if r["actionable"]: counts["actionable"] += 1
+                if r["alerted"]:    counts["alerted"] += 1
+                if r["deduped"]:    counts["deduped"] += 1
+                if r["error"]:      counts["errors"] += 1
+    else:
+        for i, ticker in enumerate(watchlist):
+            log.info("scanner: [%d/%d] %s", i + 1, len(watchlist), ticker)
+            r = _scan_one(ticker, dry_run=dry_run, refresh=refresh,
+                         dedup_hours=dedup_hours)
+            per_ticker[i] = r
+            if r["actionable"]: counts["actionable"] += 1
+            if r["alerted"]:    counts["alerted"] += 1
+            if r["deduped"]:    counts["deduped"] += 1
+            if r["error"]:      counts["errors"] += 1
+            if throttle_seconds and i < len(watchlist) - 1:
+                time.sleep(throttle_seconds)
 
     summary = {
         "started_at":   started_at.isoformat(),
@@ -308,6 +356,12 @@ def _cli() -> int:
                     help="Sleep N seconds between tickers (rate limiting)")
     ap.add_argument("--dry-run", action="store_true",
                     help="Decide but do not persist or notify")
+    ap.add_argument("--priority", choices=("high","tail","all"), default="all",
+                    help="Watchlist slice (default 'all'). 'high' = today's "
+                         "Hedgeye-touched tickers; fits a sub-5-min cycle.")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="ThreadPool workers for the per-ticker loop. 8 is "
+                         "safe for the Anthropic API; default 1 = serial.")
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -322,6 +376,8 @@ def _cli() -> int:
         refresh=not args.no_refresh,
         dedup_hours=args.dedup_hours,
         throttle_seconds=args.throttle,
+        priority=args.priority,
+        max_workers=args.workers,
     )
     print(json.dumps(summary, indent=2, default=str), flush=True)
     sys.stdout.flush()
