@@ -235,6 +235,62 @@ def _get_corpus_snippets(ticker: str, *, signal_conviction: Optional[str]) -> st
         return ""
 
 
+def _get_flowpatrol_for_ticker(ticker: str) -> str:
+    """SpotGamma Flow Patrol context for a ticker: the latest
+    spotgamma_flowpatrol corpus doc's Executive Summary / Headlines
+    (market-wide positioning) plus any lines that name the ticker.
+    Empty string when no Flow Patrol doc is ingested."""
+    if not ticker:
+        return ""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT full_text, source_date
+                  FROM corpus_documents
+                 WHERE source = 'spotgamma_flowpatrol'
+                 ORDER BY source_date DESC, id DESC
+                 LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+        if not row or not row[0]:
+            return ""
+        text, sdate = row[0], row[1]
+        lines = text.splitlines()
+
+        # Market-wide header: keep through the Executive Summary section.
+        head, in_exec = [], False
+        for ln in lines:
+            low = ln.strip().lower()
+            if low.startswith("## "):
+                in_exec = ("headline" in low or "executive summary" in low
+                           or "summary" in low)
+            if in_exec or ln.strip().startswith("#"):
+                head.append(ln)
+            if len(head) >= 25:
+                break
+
+        t = ticker.upper()
+        hits = [ln.strip() for ln in lines
+                if t in ln.upper() and len(ln.strip()) > 3][:8]
+
+        parts = [f"## SpotGamma Flow Patrol ({sdate})"]
+        if head:
+            parts.append("\n".join(head).strip())
+        if hits:
+            parts.append(f"\nFlow Patrol mentions of {t}:")
+            parts += [f"- {h}" for h in hits]
+        elif not head:
+            return ""
+        out = "\n".join(parts).strip()
+        return out[:1800]
+    except Exception as e:
+        log.debug("flowpatrol lookup failed for %s: %s", ticker, e)
+        return ""
+
+
 def gather_context(ticker: str, *, signal_conviction: Optional[str] = None) -> dict:
     """Assemble every available context piece for a ticker. Returns a dict
     with each source's data plus a `_corpus_block` formatted prompt string.
@@ -896,6 +952,10 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     sections.append(_spotgamma_framing_line(ctx.get("spotgamma") or {}, mfr_price))
     sections.append(json.dumps(_trim(ctx.get("spotgamma") or {}), indent=2, default=str))
     sections.append("")
+    fp_block = _get_flowpatrol_for_ticker(ctx.get("ticker"))
+    if fp_block:
+        sections.append(fp_block)
+        sections.append("")
     sections.append("## MFR (latest fractal range — TERTIARY range source; secondary to Hedgeye)")
     # Deterministic zone + trend so the LLM can't hallucinate "above range high"
     # or "pullback" out of the raw JSON. Anchor wording must match price_monitor.
