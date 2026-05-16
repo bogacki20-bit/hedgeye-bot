@@ -291,6 +291,32 @@ def _get_flowpatrol_for_ticker(ticker: str) -> str:
         return ""
 
 
+def _get_macro_commentary_for_ticker(ticker: str) -> str:
+    """Keith's per-ticker Macro Show take from the latest
+    per_ticker_commentary.json (built by
+    tools.extract_macro_show_commentary). Empty string if absent."""
+    if not ticker:
+        return ""
+    try:
+        import glob as _glob
+        from pathlib import Path as _P
+        base = _P(__file__).resolve().parent / "data" / "snapshots" / "hedgeye"
+        dirs = sorted(_glob.glob(str(base / "20*")), reverse=True)
+        for d in dirs:
+            j = _P(d) / "macro_show" / "per_ticker_commentary.json"
+            if j.is_file():
+                data = json.loads(j.read_text(encoding="utf-8"))
+                snip = data.get(ticker.upper())
+                if snip:
+                    return ("## Macro Show commentary (Keith's daily take):\n"
+                            + snip)
+                return ""
+        return ""
+    except Exception as e:
+        log.debug("macro commentary lookup failed for %s: %s", ticker, e)
+        return ""
+
+
 def gather_context(ticker: str, *, signal_conviction: Optional[str] = None) -> dict:
     """Assemble every available context piece for a ticker. Returns a dict
     with each source's data plus a `_corpus_block` formatted prompt string.
@@ -955,6 +981,10 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     fp_block = _get_flowpatrol_for_ticker(ctx.get("ticker"))
     if fp_block:
         sections.append(fp_block)
+        sections.append("")
+    mc_block = _get_macro_commentary_for_ticker(ctx.get("ticker"))
+    if mc_block:
+        sections.append(mc_block)
         sections.append("")
     sections.append("## MFR (latest fractal range — TERTIARY range source; secondary to Hedgeye)")
     # Deterministic zone + trend so the LLM can't hallucinate "above range high"
