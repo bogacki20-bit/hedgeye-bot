@@ -471,6 +471,28 @@ def _zone_summary_line(label: str, price, low, high) -> str:
             f"{zone} ({pct:.0f}% through range; {verdict})")
 
 
+def _hurst_regime_line(value) -> Optional[str]:
+    """Classify MFR Hurst exponent into a trading regime + framing.
+
+    H >= 0.6 = trending, H <= 0.4 = mean-reverting, in between = random walk.
+    Returns None when Hurst is missing/non-numeric so callers can skip the line
+    the same way they skip an absent trend_signal.
+    """
+    try:
+        h = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    if h is None:
+        return None
+    if h >= 0.6:
+        regime, framing = "trending", "trend persistence high — breakouts more likely to extend"
+    elif h <= 0.4:
+        regime, framing = "mean_reverting", "mean-reverting regime — fade extremes, range edges hold"
+    else:
+        regime, framing = "random_walk", "no clear regime — give signals less conviction"
+    return f"Hurst regime: {regime} (H={h:.2f}) — {framing}"
+
+
 def _format_user_message(ctx: dict, *, signal_origin: str,
                          signal_conviction: Optional[str],
                          account_value: float) -> str:
@@ -545,6 +567,9 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     mfr_trend = mfr_block.get("trend_signal")
     if mfr_trend:
         sections.append(f"Recent trend: {mfr_trend} (from MFR trend_signal)")
+    hurst_line = _hurst_regime_line(mfr_block.get("hurst"))
+    if hurst_line:
+        sections.append(hurst_line)
     sections.append(json.dumps(_trim(mfr_block), indent=2, default=str))
     sections.append("")
     sections.append("## Yahoo (latest snapshot)")

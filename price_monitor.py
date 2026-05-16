@@ -345,6 +345,32 @@ def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
     return " | SG: " + " / ".join(parts) + anchor_phrase
 
 
+def _hurst_suffix(ticker: str) -> str:
+    """Build the trailing ' | Hurst 0.62 (trending)' tag from the latest
+    MFR snapshot. Empty string when MFR/Hurst is unavailable so the alert
+    stays clean. Regime thresholds mirror decision_engine._hurst_regime_line
+    (H >= 0.6 trending, H <= 0.4 mean_reverting, else random_walk).
+    """
+    try:
+        from decision_engine import _get_mfr_latest
+        mfr = _get_mfr_latest(ticker) or {}
+        h = float(mfr.get("hurst")) if mfr.get("hurst") is not None else None
+    except (TypeError, ValueError):
+        return ""
+    except Exception as e:
+        log.warning(f"hurst suffix lookup failed for {ticker} (continuing): {e}")
+        return ""
+    if h is None:
+        return ""
+    if h >= 0.6:
+        regime = "trending"
+    elif h <= 0.4:
+        regime = "mean_reverting"
+    else:
+        regime = "random_walk"
+    return f" | Hurst {h:.2f} ({regime})"
+
+
 def compose_recommendation(
     ticker: str,
     zone: str,
@@ -428,12 +454,15 @@ def compose_recommendation(
     # the path bypasses decision_engine entirely so 8b1cab2's flagger never
     # fires on these boundary alerts. Cited directly in the template instead.
     sg_suffix = _sg_levels_suffix(spotgamma_ctx, price)
+    # Hurst regime tag appended after the SG suffix (i.e. after the trend tag)
+    # so the alert carries MFR's trending / mean-reverting read at a glance.
+    hurst_suffix = _hurst_suffix(ticker)
 
     if zone == "bottom_third":
         _align = _framework_alignment(trend, "bottom_third")
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}"),
+                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -444,7 +473,7 @@ def compose_recommendation(
     if zone == "below_range":
         return {
             "text": (f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, "
-                     f"broken below range, contrarian add).{sg_suffix}"),
+                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}"),
             "suggested_action": "BUY",
             "suggested_dollars": _starter_usd,
             "suggested_bps": STARTER_BPS,
@@ -456,7 +485,7 @@ def compose_recommendation(
         _align = _framework_alignment(trend, "top_third")
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}"),
+                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
@@ -467,7 +496,7 @@ def compose_recommendation(
     if zone == "above_range":
         return {
             "text": (f"WATCH {ticker} at {price:.2f} — broke above range. "
-                     f"Trim or let it run?{sg_suffix}"),
+                     f"Trim or let it run?{sg_suffix}{hurst_suffix}"),
             "suggested_action": "WATCH",
             "suggested_dollars": None,
             "suggested_bps": None,
