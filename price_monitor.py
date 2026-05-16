@@ -371,6 +371,47 @@ def _hurst_suffix(ticker: str) -> str:
     return f" | Hurst {h:.2f} ({regime})"
 
 
+def _cross_source_suffix(ticker: str, sg_ctx: dict | None) -> str:
+    """Build the trailing cross-source alignment tag from RR / MFR / ETF Pro
+    / SG. Empty string unless there is a strong signal (high-conviction
+    cluster, or divergence worth a caution). Reuses decision_engine's
+    cross-source math so the long-form prompt and this tag never drift.
+    """
+    try:
+        from decision_engine import (
+            _get_risk_range, _get_mfr_latest, _get_etf_pro_range,
+            _cross_source_eval, _xs_fmt,
+        )
+        sg = sg_ctx or {}
+        if isinstance(sg.get("key_levels"), dict):
+            sg = sg["key_levels"]
+        dctx = {
+            "rr":  _get_risk_range(ticker) or {},
+            "mfr": _get_mfr_latest(ticker) or {},
+            "etf_pro": _get_etf_pro_range(ticker) or {},
+            "sg":  sg,
+        }
+        ev = _cross_source_eval(dctx)
+    except Exception as e:
+        log.warning(f"cross-source suffix lookup failed for {ticker} (continuing): {e}")
+        return ""
+    if not ev:
+        return ""
+    strong = [c for c in ev["clusters"] if c["n_sources"] >= 3]
+    if ev["high_conviction"] or strong:
+        if strong:
+            best = max(strong, key=lambda c: c["n_sources"])
+            return (f" | Cross-source: {best['n_sources']} sources align at "
+                    f"level cluster {_xs_fmt(best['center'])} (high-conviction zone)")
+        return (f" | Cross-source: {ev['n_sources']} sources align "
+                f"(lows within {ev['low_spread']:.1f}%, highs within "
+                f"{ev['high_spread']:.1f}%) (high-conviction zone)")
+    if ev["divergence"]:
+        return (f" | Cross-source: sources diverge (low spread "
+                f"{ev['low_spread']:.1f}%, high spread {ev['high_spread']:.1f}%) — caution")
+    return ""
+
+
 def compose_recommendation(
     ticker: str,
     zone: str,
@@ -457,12 +498,15 @@ def compose_recommendation(
     # Hurst regime tag appended after the SG suffix (i.e. after the trend tag)
     # so the alert carries MFR's trending / mean-reverting read at a glance.
     hurst_suffix = _hurst_suffix(ticker)
+    # Cross-source range alignment tag (RR/MFR/ETF Pro/SG) — only renders on a
+    # strong signal (high-conviction cluster or divergence caution).
+    xs_suffix = _cross_source_suffix(ticker, spotgamma_ctx)
 
     if zone == "bottom_third":
         _align = _framework_alignment(trend, "bottom_third")
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}"),
+                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -473,7 +517,7 @@ def compose_recommendation(
     if zone == "below_range":
         return {
             "text": (f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, "
-                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}"),
+                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}{xs_suffix}"),
             "suggested_action": "BUY",
             "suggested_dollars": _starter_usd,
             "suggested_bps": STARTER_BPS,
@@ -485,7 +529,7 @@ def compose_recommendation(
         _align = _framework_alignment(trend, "top_third")
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}"),
+                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
@@ -496,7 +540,7 @@ def compose_recommendation(
     if zone == "above_range":
         return {
             "text": (f"WATCH {ticker} at {price:.2f} — broke above range. "
-                     f"Trim or let it run?{sg_suffix}{hurst_suffix}"),
+                     f"Trim or let it run?{sg_suffix}{hurst_suffix}{xs_suffix}"),
             "suggested_action": "WATCH",
             "suggested_dollars": None,
             "suggested_bps": None,

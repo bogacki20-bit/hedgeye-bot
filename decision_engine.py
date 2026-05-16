@@ -493,6 +493,198 @@ def _hurst_regime_line(value) -> Optional[str]:
     return f"Hurst regime: {regime} (H={h:.2f}) — {framing}"
 
 
+def _xs_fmt(v) -> str:
+    """Compact number format for the cross-source line: ints render bare,
+    fractionals keep up to 2 decimals with trailing zeros stripped."""
+    if v is None:
+        return "?"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "?"
+    if abs(f - round(f)) < 1e-9:
+        return f"{int(round(f))}"
+    return f"{f:.2f}".rstrip("0").rstrip(".")
+
+
+def _cross_source_eval(decision_context: Optional[dict]) -> Optional[dict]:
+    """Core cross-source range math shared by the LLM-prompt summary and the
+    price_monitor short tag.
+
+    Accepts a normalized context with any of these sub-dicts (flat key OR the
+    ctx key used by _format_user_message):
+        rr / risk_range   -> buy_trade, sell_trade
+        mfr               -> range_low, range_high
+        etf_pro / etf_pro_range -> range_low, range_high
+        sg / spotgamma    -> put_wall, call_wall, hedge_wall, key_gamma_strike
+
+    Returns None when fewer than 2 sources are present. Otherwise a dict:
+        parts            list[str]  per-source display fragments
+        low_spread       float      % spread across source lows
+        high_spread      float      % spread across source highs
+        n_sources        int        sources with any range data
+        high_conviction  bool       lows AND highs within 1%
+        divergence       bool       low OR high spread > 3%
+        clusters         list[dict] {center, n_sources, sources, side}
+                                    for levels >=3 sources cite within 0.5%
+    """
+    ctx = decision_context or {}
+
+    def _grp(*keys):
+        for k in keys:
+            v = ctx.get(k)
+            if isinstance(v, dict):
+                return v
+        return {}
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    rr  = _grp("rr", "risk_range")
+    mfr = _grp("mfr")
+    etf = _grp("etf_pro", "etf_pro_range")
+    sg  = _grp("sg", "spotgamma")
+
+    sources: dict[str, tuple] = {}   # name -> (low, high)
+    parts: list[str] = []
+    levels: list[tuple] = []         # (source_name, value)
+
+    rr_lo, rr_hi = _f(rr.get("buy_trade")), _f(rr.get("sell_trade"))
+    if rr_lo is not None or rr_hi is not None:
+        sources["RR"] = (rr_lo, rr_hi)
+        parts.append(f"RR {_xs_fmt(rr_lo)}-{_xs_fmt(rr_hi)}")
+        if rr_lo is not None: levels.append(("RR", rr_lo))
+        if rr_hi is not None: levels.append(("RR", rr_hi))
+
+    mfr_lo, mfr_hi = _f(mfr.get("range_low")), _f(mfr.get("range_high"))
+    if mfr_lo is not None or mfr_hi is not None:
+        sources["MFR"] = (mfr_lo, mfr_hi)
+        parts.append(f"MFR {_xs_fmt(mfr_lo)}-{_xs_fmt(mfr_hi)}")
+        if mfr_lo is not None: levels.append(("MFR", mfr_lo))
+        if mfr_hi is not None: levels.append(("MFR", mfr_hi))
+
+    etf_lo, etf_hi = _f(etf.get("range_low")), _f(etf.get("range_high"))
+    if etf_lo is not None or etf_hi is not None:
+        sources["ETF Pro"] = (etf_lo, etf_hi)
+        parts.append(f"ETF Pro {_xs_fmt(etf_lo)}-{_xs_fmt(etf_hi)}")
+        if etf_lo is not None: levels.append(("ETF Pro", etf_lo))
+        if etf_hi is not None: levels.append(("ETF Pro", etf_hi))
+
+    sg_pw = _f(sg.get("put_wall"))
+    sg_cw = _f(sg.get("call_wall"))
+    sg_hw = _f(sg.get("hedge_wall"))
+    sg_kg = _f(sg.get("key_gamma_strike"))
+    if sg_pw is not None or sg_cw is not None:
+        sources["SG"] = (sg_pw, sg_cw)   # put_wall ~ range low, call_wall ~ range high
+        sg_bits = []
+        if sg_pw is not None: sg_bits.append(f"put_wall {_xs_fmt(sg_pw)}")
+        if sg_cw is not None: sg_bits.append(f"call_wall {_xs_fmt(sg_cw)}")
+        if sg_hw is not None: sg_bits.append(f"hedge_wall {_xs_fmt(sg_hw)}")
+        if sg_kg is not None: sg_bits.append(f"key_gamma {_xs_fmt(sg_kg)}")
+        parts.append("SG " + " / ".join(sg_bits))
+        for v in (sg_pw, sg_cw, sg_hw, sg_kg):
+            if v is not None:
+                levels.append(("SG", v))
+
+    if len(sources) < 2:
+        return None
+
+    def _spread_pct(vals):
+        vals = [x for x in vals if x is not None]
+        if len(vals) < 2:
+            return 0.0
+        base = sum(vals) / len(vals)
+        if base == 0:
+            return 0.0
+        return (max(vals) - min(vals)) / abs(base) * 100.0
+
+    lows  = [v[0] for v in sources.values() if v[0] is not None]
+    highs = [v[1] for v in sources.values() if v[1] is not None]
+    low_spread  = _spread_pct(lows)
+    high_spread = _spread_pct(highs)
+    high_conviction = (
+        len(lows) >= 2 and len(highs) >= 2
+        and low_spread <= 1.0 and high_spread <= 1.0
+    )
+    divergence = low_spread > 3.0 or high_spread > 3.0
+
+    # Greedy cluster on sorted level values: members within 0.5% of the
+    # cluster anchor. A cluster qualifies when >=3 DISTINCT sources cite it.
+    def _median(xs):
+        s = sorted(xs)
+        n = len(s)
+        return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+    clusters = []
+    all_vals = [lv for _, lv in levels]
+    if all_vals:
+        mid = (min(all_vals) + max(all_vals)) / 2.0
+        ordered = sorted(levels, key=lambda t: t[1])
+        i = 0
+        while i < len(ordered):
+            anchor = ordered[i][1]
+            members = [ordered[i]]
+            j = i + 1
+            while j < len(ordered):
+                if anchor == 0:
+                    break
+                if abs(ordered[j][1] - anchor) / abs(anchor) * 100.0 <= 0.5:
+                    members.append(ordered[j])
+                    j += 1
+                else:
+                    break
+            names = sorted({m[0] for m in members})
+            if len(names) >= 3:
+                center = _median([m[1] for m in members])
+                clusters.append({
+                    "center": center,
+                    "n_sources": len(names),
+                    "sources": names,
+                    "side": "UPPER" if center >= mid else "LOWER",
+                })
+            i = j if j > i + 1 else i + 1
+
+    return {
+        "parts": parts,
+        "low_spread": low_spread,
+        "high_spread": high_spread,
+        "n_sources": len(sources),
+        "high_conviction": high_conviction,
+        "divergence": divergence,
+        "clusters": clusters,
+    }
+
+
+def _cross_source_summary(ticker: str, decision_context: Optional[dict]) -> Optional[str]:
+    """One-line cross-source range alignment summary for the LLM prompt.
+
+    Example:
+      Cross-source: RR 738-745 | MFR 740-748 | ETF Pro 735-745 | SG put_wall
+      730 / call_wall 745 / key_gamma 740 — UPPER level cluster at 745
+      (4 sources: ETF Pro, MFR, RR, SG)
+    """
+    ev = _cross_source_eval(decision_context)
+    if not ev or not ev["parts"]:
+        return None
+    line = "Cross-source: " + " | ".join(ev["parts"])
+    tail = []
+    if ev["high_conviction"]:
+        tail.append(f"HIGH-CONVICTION (lows within {ev['low_spread']:.1f}%, "
+                    f"highs within {ev['high_spread']:.1f}%)")
+    elif ev["divergence"]:
+        tail.append(f"sources disagree (low spread {ev['low_spread']:.1f}%, "
+                    f"high spread {ev['high_spread']:.1f}%)")
+    for c in ev["clusters"]:
+        tail.append(f"{c['side']} level cluster at {_xs_fmt(c['center'])} "
+                    f"({c['n_sources']} sources: {', '.join(c['sources'])})")
+    if tail:
+        line += " — " + ", ".join(tail)
+    return line
+
+
 def _format_user_message(ctx: dict, *, signal_origin: str,
                          signal_conviction: Optional[str],
                          account_value: float) -> str:
@@ -538,6 +730,13 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     rr_block = ctx.get("risk_range") or {}
     etf_block = ctx.get("etf_pro_range") or {}
     mfr_price = mfr_block.get("price") or yahoo_block.get("price")
+
+    # Cross-source range alignment FIRST, above the per-source dumps, so the
+    # LLM reads the consensus/divergence verdict before the raw numbers.
+    xs_line = _cross_source_summary(ctx.get("ticker"), ctx)
+    if xs_line:
+        sections.append(xs_line)
+        sections.append("")
 
     sections.append("## Hedgeye Risk Range (latest daily signal — PRIMARY range source)")
     sections.append(_zone_summary_line(
