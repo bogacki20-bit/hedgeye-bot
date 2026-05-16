@@ -46,6 +46,35 @@ def get_conn():
         conn.close()
 
 
+_COLUMN_CACHE: dict[tuple[str, str], bool] = {}
+
+
+def _column_exists(table: str, column: str) -> bool:
+    """True if `table.column` exists. Cached per process so migrations
+    added later are picked up only on restart (acceptable — schema is
+    stable within a run). Used to keep INSERTs safe before additive
+    migrations are applied."""
+    key = (table, column)
+    if key in _COLUMN_CACHE:
+        return _COLUMN_CACHE[key]
+    ok = False
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_name = %s AND column_name = %s
+                """,
+                (table, column),
+            )
+            ok = cur.fetchone() is not None
+    except Exception as e:
+        log.debug("column-exists check failed for %s.%s: %s", table, column, e)
+        ok = False
+    _COLUMN_CACHE[key] = ok
+    return ok
+
+
 # ─────────────────────────── Email lake ───────────────────────────
 
 def save_raw_email(
@@ -431,6 +460,7 @@ def record_alert(
     framework_alignment: str | None = None,
     hedgeye_context: dict | None = None,
     spotgamma_context: dict | None = None,
+    prompt_context_full: dict | None = None,
 ) -> int | None:
     """Record that an alert fired. Returns new id, or None if duplicate.
 
@@ -438,33 +468,66 @@ def record_alert(
     context: what the bot recommended, why it was framework-aligned, and
     snapshots of the Hedgeye/SpotGamma reasoning at the moment of alert.
     These let user_actions reference back to the alert for ML training.
+
+    `prompt_context_full` (migration 012) stores the COMPLETE LLM prompt
+    context as JSON for ML. The column is included only when it exists,
+    so this is safe before the migration is applied (graceful no-op).
     """
+    have_pcf = _column_exists("alerts_fired", "prompt_context_full")
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO alerts_fired
-                  (ticker, boundary, range_zone, signal_date,
-                   price_at_fire, range_at_fire, notification_id,
-                   recommendation_text, suggested_action, suggested_dollars,
-                   framework_alignment, hedgeye_context, spotgamma_context)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (ticker, boundary, signal_date) DO NOTHING
-                RETURNING id
-                """,
-                (
-                    ticker, boundary, range_zone, signal_date,
-                    price_at_fire,
-                    json.dumps(range_at_fire) if range_at_fire is not None else None,
-                    notification_id,
-                    recommendation_text,
-                    suggested_action,
-                    suggested_dollars,
-                    framework_alignment,
-                    json.dumps(hedgeye_context) if hedgeye_context is not None else None,
-                    json.dumps(spotgamma_context) if spotgamma_context is not None else None,
-                ),
-            )
+            if have_pcf:
+                cur.execute(
+                    """
+                    INSERT INTO alerts_fired
+                      (ticker, boundary, range_zone, signal_date,
+                       price_at_fire, range_at_fire, notification_id,
+                       recommendation_text, suggested_action, suggested_dollars,
+                       framework_alignment, hedgeye_context, spotgamma_context,
+                       prompt_context_full)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ticker, boundary, signal_date) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        ticker, boundary, range_zone, signal_date,
+                        price_at_fire,
+                        json.dumps(range_at_fire) if range_at_fire is not None else None,
+                        notification_id,
+                        recommendation_text,
+                        suggested_action,
+                        suggested_dollars,
+                        framework_alignment,
+                        json.dumps(hedgeye_context) if hedgeye_context is not None else None,
+                        json.dumps(spotgamma_context) if spotgamma_context is not None else None,
+                        json.dumps(prompt_context_full) if prompt_context_full is not None else None,
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO alerts_fired
+                      (ticker, boundary, range_zone, signal_date,
+                       price_at_fire, range_at_fire, notification_id,
+                       recommendation_text, suggested_action, suggested_dollars,
+                       framework_alignment, hedgeye_context, spotgamma_context)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ticker, boundary, signal_date) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        ticker, boundary, range_zone, signal_date,
+                        price_at_fire,
+                        json.dumps(range_at_fire) if range_at_fire is not None else None,
+                        notification_id,
+                        recommendation_text,
+                        suggested_action,
+                        suggested_dollars,
+                        framework_alignment,
+                        json.dumps(hedgeye_context) if hedgeye_context is not None else None,
+                        json.dumps(spotgamma_context) if spotgamma_context is not None else None,
+                    ),
+                )
             row = cur.fetchone()
         conn.commit()
         return row[0] if row else None

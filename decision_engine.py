@@ -765,11 +765,41 @@ def _quad_doctrine_line(ticker: str) -> Optional[str]:
         return None
 
 
+def _recent_alerts_line(ticker: str) -> str:
+    """Per-call dynamic: alerts_fired for this ticker in the last hour."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT boundary, suggested_action, fired_at
+                  FROM alerts_fired
+                 WHERE ticker = %s AND fired_at >= NOW() - INTERVAL '1 hour'
+                 ORDER BY fired_at DESC LIMIT 5
+                """,
+                ((ticker or "").upper(),),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return "Recent alerts (last hour): none"
+        return "Recent alerts (last hour): " + "; ".join(
+            f"{b}/{a} @ {ts:%H:%M}" for b, a, ts in rows)
+    except Exception as e:
+        log.debug("recent-alerts lookup skipped for %s: %s", ticker, e)
+        return "Recent alerts (last hour): unavailable"
+
+
 def _format_user_message(ctx: dict, *, signal_origin: str,
                          signal_conviction: Optional[str],
-                         account_value: float) -> str:
-    """Compose the user message: structured context + corpus snippets +
-    explicit account value so Claude can size."""
+                         account_value: float) -> tuple[str, str]:
+    """Return (per_ticker_static, dynamic_per_call).
+
+    per_ticker_static  — RR/ETF Pro/SG/MFR/macro/corpus/quad-doctrine; the
+                          same for a ticker all day (daily snapshot refresh),
+                          so it is sent as a 1h-TTL cache_control block.
+    dynamic_per_call   — ticker framing, account value, live Yahoo price,
+                          recent alerts, cycle timestamp; changes every call.
+    """
     # Strip None / empty / heavy fields for prompt clarity, keep typed numbers.
     def _trim(d):
         if not isinstance(d, dict):
@@ -781,20 +811,21 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
                 and not str(k) == "full_payload"
                 and not str(k) == "raw_text"}
 
-    sections = []
-
-    # NOTE: the framework canon + Hedgeye doctrine summary used to live
-    # here; they moved to _static_framework_block() so they can be sent as
-    # a cache_control'd prefix block (see decide()). This function now
-    # returns ONLY the dynamic, per-ticker context.
-    sections.append(f"## Ticker: {ctx['ticker']}")
-    sections.append(f"As of: {ctx['as_of']}")
-    sections.append(f"Account value (for bps sizing): ${account_value:,.0f}")
-    sections.append(f"Signal origin: {signal_origin}")
+    # ---- dynamic, per-call framing ----
+    dyn = []
+    dyn.append(f"## Ticker: {ctx['ticker']}")
+    dyn.append(f"As of: {ctx['as_of']}")
+    dyn.append(f"Account value (for bps sizing): ${account_value:,.0f}")
+    dyn.append(f"Signal origin: {signal_origin}")
     if signal_conviction:
-        sections.append(f"Hedgeye-tagged conviction (input): {signal_conviction}")
-    sections.append("")
+        dyn.append(f"Hedgeye-tagged conviction (input): {signal_conviction}")
+    dyn.append(_recent_alerts_line(ctx.get("ticker")))
+    dyn.append("## Yahoo (live snapshot at decision time)")
+    dyn.append(json.dumps(_trim(ctx.get("yahoo") or {}), indent=2, default=str))
+    dyn.append("")
 
+    # ---- per-ticker static (daily-stable) ----
+    sections = []
     sections.append("## Hedgeye macro context")
     sections.append(json.dumps(_trim(ctx.get("hedgeye_macro") or {}), indent=2, default=str))
     sections.append("")
@@ -853,9 +884,8 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
         sections.append(hurst_line)
     sections.append(json.dumps(_trim(mfr_block), indent=2, default=str))
     sections.append("")
-    sections.append("## Yahoo (latest snapshot)")
-    sections.append(json.dumps(_trim(yahoo_block), indent=2, default=str))
-    sections.append("")
+    # NOTE: the live Yahoo snapshot moved to the dynamic per-call block
+    # above (price changes every cycle — must NOT be in the 1h cache).
 
     if ctx.get("_corpus_block"):
         sections.append("## Relevant corpus snippets (Hedgeye U, Macro Show, VolSignals)")
@@ -864,7 +894,7 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
 
     sections.append("## Task")
     sections.append("Propose the sized recommendation as JSON per the system prompt's schema.")
-    return "\n".join(sections)
+    return "\n".join(sections), "\n".join(dyn)
 
 
 # ─────────────────────────── Output validation ───────────────────────────
@@ -1070,7 +1100,7 @@ def decide(
             account_value_usd = 50_000.0  # safe fallback for sizing math
 
     ctx = gather_context(ticker, signal_conviction=signal_conviction)
-    user_msg = _format_user_message(
+    per_ticker_static, dynamic_block = _format_user_message(
         ctx, signal_origin=signal_origin,
         signal_conviction=signal_conviction,
         account_value=account_value_usd,
@@ -1098,19 +1128,35 @@ def decide(
                    "input_tokens": 0, "output_tokens": 0}
     try:
         client = anthropic.Anthropic(api_key=api_key)
+        # 3-block content array:
+        #  1) static framework  — cache_control ephemeral (5-min default TTL)
+        #  2) per-ticker static  — cache_control ephemeral, 1h extended TTL
+        #     (SG/MFR/RR/macro — same per ticker all day; only price +
+        #     recent activity change). Needs the extended-cache-ttl beta.
+        #  3) dynamic per-call   — uncached (live price, recent alerts, ts)
         content_blocks = []
         if static_block:
+            # 1h TTL: framework canon + doctrine are the most static of
+            # all — and a longer-TTL block must not follow a shorter-TTL
+            # one (API processes blocks in order), so this leads.
             content_blocks.append({
                 "type": "text",
                 "text": static_block,
-                "cache_control": {"type": "ephemeral"},
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
             })
-        content_blocks.append({"type": "text", "text": user_msg})
+        if per_ticker_static:
+            content_blocks.append({
+                "type": "text",
+                "text": per_ticker_static,
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            })
+        content_blocks.append({"type": "text", "text": dynamic_block})
         resp = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=1500,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content_blocks}],
+            extra_headers={"anthropic-beta": "extended-cache-ttl-2025-04-11"},
         )
         raw_text = "".join(
             getattr(b, "text", "") for b in resp.content
@@ -1142,6 +1188,17 @@ def decide(
     decision["cache_read_input_tokens"]     = cache_usage["cache_read_input_tokens"]
     decision["input_tokens"]                = cache_usage["input_tokens"]
     decision["output_tokens"]               = cache_usage["output_tokens"]
+    # FULL prompt context for ML — the complete feature vector that fed
+    # the LLM (not a thinned summary). Persisted to
+    # alerts_fired.prompt_context_full when an alert fires (migration 012).
+    decision["prompt_context_full"] = {
+        "static_framework":  static_block,
+        "per_ticker_static": per_ticker_static,
+        "dynamic":           dynamic_block,
+        "system_prompt_sha": None,
+        "model":             CLAUDE_MODEL,
+        "decided_at":        decision["decided_at"],
+    }
     # Compute the implied dollar size from bps for caller convenience
     from recommender import size_from_bps
     if decision.get("bps") in (50, 100):
