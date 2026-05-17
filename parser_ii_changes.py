@@ -34,9 +34,11 @@ log = logging.getLogger(__name__)
 # Ideas : Long: X" body grammar. NOT the Leaderboard snapshot.
 SUBJECT_RE = re.compile(
     r"(^\s*\d+\s+Changes?\s*:)"
-    r"|(\bTop\s+Stock\s+Picks\b.*\b(?:REMOVE|ADD)\b)"
+    r"|(\bTop\s+Stock\s+Picks\b.*\b(?:REMOVE|ADD)\b)"   # incl. "CORRECTION ..."
     r"|(^\s*(?:Add|Remove)\b.*(?:\bto\s+(?:LONG|SHORT)\s+Side\b"
-    r"|\([A-Z][A-Z.]{0,7}\)))",
+    r"|\([A-Z][A-Z.]{0,7}\)))"
+    r"|(^\s*(?:Add|Remove)\s+(?:Long|Short)\b)"          # "Remove Long GOOGL"
+    r"|(^\s*Position\s+Monitor\s+Change\b)",             # "Position Monitor Change | Removing PYPL"
     re.I,
 )
 LEADERBOARD_RE = re.compile(r"Leaderboard", re.I)
@@ -290,10 +292,11 @@ def process_one(message_id: str, *, fan_out: bool = True) -> dict:
 
 
 _SUBJ_SQL = (r"(subject ~ '^[0-9]+ Changes?:' "
-             r"OR subject ILIKE 'Top Stock Picks%REMOVE%' "
-             r"OR subject ILIKE 'Top Stock Picks%ADD%' "
+             r"OR subject ~* 'Top Stock Picks.*(REMOVE|ADD)' "      # incl. CORRECTION prefix
              r"OR subject ~* '^(Add|Remove) .*(to (LONG|SHORT) Side"
-             r"|\([A-Z][A-Z.]{0,7}\))') "
+             r"|\([A-Z][A-Z.]{0,7}\))' "
+             r"OR subject ~* '^(Add|Remove) (Long|Short) ' "        # Remove Long GOOGL
+             r"OR subject ~* '^Position Monitor Change') "          # Position Monitor Change | Removing PYPL
              r"AND subject NOT ILIKE '%Leaderboard%'")
 
 
