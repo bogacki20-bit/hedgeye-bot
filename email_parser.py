@@ -676,6 +676,15 @@ def _process_new_email(parsed: dict) -> None:
                     f"signal={rta_result.get('signal_type')} "
                     f"action={rta_result.get('action')}"
                 )
+            elif re.search(r"\bFinancials?\b.*\bEarnings\s+Recap\b",
+                           item.get("subject") or "", re.I):
+                import parser_financials
+                fin_result = parser_financials.process_one(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_financials: rows={fin_result.get('rows_parsed')}"
+                )
             elif source == "hedgai_signals":
                 import parser_hedgai
                 hg_result = parser_hedgai.process_one(
