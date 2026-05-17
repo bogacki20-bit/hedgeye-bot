@@ -709,6 +709,20 @@ def _process_new_email(parsed: dict) -> None:
                     f"added={len(ss_result.get('added',[]))} "
                     f"removed={len(ss_result.get('removed',[]))}"
                 )
+            elif (re.match(r"\s*\d+\s+Changes?\s*:", item.get("subject") or "", re.I)
+                  or (re.search(r"Top Stock Picks.*\b(?:REMOVE|ADD)\b",
+                                item.get("subject") or "", re.I)
+                      and "leaderboard" not in subject_lower)):
+                # Investing Ideas roster CHANGES ("3 Changes: ...",
+                # "Top Stock Picks | REMOVE: X; ADD: Y") — distinct from the
+                # Leaderboard snapshot handled below.
+                import parser_ii_changes
+                iic_result = parser_ii_changes.process_one(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_ii_changes: rows={iic_result.get('rows_parsed')}"
+                )
             elif source == "investing_ideas":
                 import parser_investing_ideas
                 ii_result = parser_investing_ideas.process_email(
