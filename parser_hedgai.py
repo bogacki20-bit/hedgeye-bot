@@ -252,7 +252,7 @@ def process_latest(dry_run: bool = False) -> dict:
             cur.execute(
                 "SELECT message_id FROM hedgeye_emails_raw "
                 "WHERE subject ILIKE %s ORDER BY received_at DESC LIMIT 1",
-                ("HedgAI Signals%",),
+                ("%HedgAI Signals%",),
             )
             row = cur.fetchone()
     if not row:
@@ -270,7 +270,7 @@ def backfill_all_unparsed(fan_out: bool = False) -> dict:
                 "WHERE subject ILIKE %s "
                 "  AND COALESCE(classified_as,'') NOT IN "
                 "('hedgai','hedgai_parse_failed') ORDER BY received_at ASC",
-                ("HedgAI Signals%",),
+                ("%HedgAI Signals%",),
             )
             candidates = cur.fetchall()
     for (mid,) in candidates:
@@ -294,7 +294,7 @@ def run_parser_cycle(batch_size: int = 100, fan_out: bool = False) -> dict:
                 "  AND COALESCE(classified_as,'') NOT IN "
                 "('hedgai','hedgai_parse_failed') "
                 "ORDER BY received_at ASC LIMIT %s",
-                ("HedgAI Signals%", batch_size),
+                ("%HedgAI Signals%", batch_size),
             )
             candidates = cur.fetchall()
     for (mid,) in candidates:
