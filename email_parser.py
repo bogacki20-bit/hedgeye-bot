@@ -665,6 +665,17 @@ def _process_new_email(parsed: dict) -> None:
                     f"changes={rr_result.get('signal_changes_parsed')} "
                     f"tickers={rr_result.get('ticker_count')}"
                 )
+            elif source == "rta":
+                import parser_rta
+                rta_result = parser_rta.process_one(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_rta: ticker={rta_result.get('ticker')} "
+                    f"analyst={rta_result.get('analyst')} "
+                    f"signal={rta_result.get('signal_type')} "
+                    f"action={rta_result.get('action')}"
+                )
             elif source == "etf_pro":
                 import parser_etf_pro
                 etf_result = parser_etf_pro.process_email(
