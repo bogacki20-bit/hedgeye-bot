@@ -751,6 +751,21 @@ def _process_new_email(parsed: dict) -> None:
                     f"product={pm_result.get('product')} "
                     f"sector={pm_result.get('sector')}"
                 )
+            elif re.search(
+                    r"^\s*EARLY LOOK|^\s*MARKET SITUATION REPORT|"
+                    r"Monthly Inflation Nowcast|Federal Reserve Weekly H|"
+                    r"^\s*Macro Week Summary Notes|^\s*JT TAYLOR|"
+                    r"^\s*Quads?/GIP Update|^\s*Hedgeye QIO|"
+                    r"^\s*Monthly Commentary|Senior Loan Officer|"
+                    r"^\s*Weekly Position Monitor|^\s*Updated Levels|"
+                    r"^\s*Trend & Tail Levels|Top 3 Things",
+                    item.get("subject") or "", re.I):
+                import parser_research_notes
+                rn_result = parser_research_notes.process_one(item["id"])
+                log.info(
+                    f"  parser_research_notes: "
+                    f"product={rn_result.get('product')}"
+                )
             elif source == "hedgai_signals":
                 import parser_hedgai
                 hg_result = parser_hedgai.process_one(
@@ -795,6 +810,10 @@ def _process_new_email(parsed: dict) -> None:
             elif (re.match(r"\s*\d+\s+Changes?\s*:", item.get("subject") or "", re.I)
                   or re.match(r"\s*(?:Add|Remove)\b.*(?:\bto\s+(?:LONG|SHORT)"
                               r"\s+Side\b|\([A-Z][A-Z.]{0,7}\))",
+                              item.get("subject") or "", re.I)
+                  or re.match(r"\s*(?:Add|Remove)\s+(?:Long|Short)\b",
+                              item.get("subject") or "", re.I)
+                  or re.match(r"\s*Position\s+Monitor\s+Change\b",
                               item.get("subject") or "", re.I)
                   or (re.search(r"Top Stock Picks.*\b(?:REMOVE|ADD)\b",
                                 item.get("subject") or "", re.I)
