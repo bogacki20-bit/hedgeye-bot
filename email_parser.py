@@ -702,6 +702,35 @@ def _process_new_email(parsed: dict) -> None:
                     f"  parser_retail: product={ret_result.get('product')} "
                     f"rows={ret_result.get('rows_parsed')}"
                 )
+            elif re.match(r"\s*Model\s+Portfolio\s+Changes\b",
+                           item.get("subject") or "", re.I):
+                import parser_model_portfolio
+                mp_result = parser_model_portfolio.process_one(item["id"])
+                log.info(
+                    f"  parser_model_portfolio: "
+                    f"effective={mp_result.get('effective_date')}"
+                )
+            elif re.search(r"Keith'?s\s+Signal\s+Longs?\s*/\s*Shorts?",
+                           item.get("subject") or "", re.I):
+                import parser_keiths_signals
+                ks_result = parser_keiths_signals.process_one(item["id"])
+                log.info(
+                    f"  parser_keiths_signals: "
+                    f"rows={ks_result.get('rows_parsed')}"
+                )
+            elif re.match(r"\s*THE\s+MACRO\s+SHOW\b",
+                           item.get("subject") or "", re.I):
+                import parser_macro_show
+                ms_result = parser_macro_show.process_one(item["id"])
+                log.info(
+                    f"  parser_macro_show: rows={ms_result.get('rows_parsed')}"
+                )
+            elif re.match(r"\s*The\s+Call\b", item.get("subject") or "", re.I):
+                import parser_the_call
+                tc_result = parser_the_call.process_one(item["id"])
+                log.info(
+                    f"  parser_the_call: rows={tc_result.get('rows_parsed')}"
+                )
             elif re.search(r"\bFinancials?\b.*\bEarnings\s+Recap\b",
                            item.get("subject") or "", re.I):
                 import parser_financials
