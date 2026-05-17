@@ -676,6 +676,17 @@ def _process_new_email(parsed: dict) -> None:
                     f"signal={rta_result.get('signal_type')} "
                     f"action={rta_result.get('action')}"
                 )
+            elif re.search(r"Actionable\s+Retail\s+Soundbites|"
+                           r"KEY\s+RETAIL\s+CALLOUTS|Sunday\s+Retail\s+EDGE",
+                           item.get("subject") or "", re.I):
+                import parser_retail
+                ret_result = parser_retail.process_one(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_retail: product={ret_result.get('product')} "
+                    f"rows={ret_result.get('rows_parsed')}"
+                )
             elif re.search(r"\bFinancials?\b.*\bEarnings\s+Recap\b",
                            item.get("subject") or "", re.I):
                 import parser_financials
@@ -684,6 +695,17 @@ def _process_new_email(parsed: dict) -> None:
                 )
                 log.info(
                     f"  parser_financials: rows={fin_result.get('rows_parsed')}"
+                )
+            elif re.search(r"Position\s+Monitors?\s*\||Founder'?s?\s+Choice\s*:",
+                           item.get("subject") or "", re.I):
+                import parser_position_monitors
+                pm_result = parser_position_monitors.process_one(
+                    item["id"], fan_out=False,
+                )
+                log.info(
+                    f"  parser_position_monitors: "
+                    f"product={pm_result.get('product')} "
+                    f"sector={pm_result.get('sector')}"
                 )
             elif source == "hedgai_signals":
                 import parser_hedgai
@@ -727,6 +749,9 @@ def _process_new_email(parsed: dict) -> None:
                     f"removed={len(ss_result.get('removed',[]))}"
                 )
             elif (re.match(r"\s*\d+\s+Changes?\s*:", item.get("subject") or "", re.I)
+                  or re.match(r"\s*(?:Add|Remove)\b.*(?:\bto\s+(?:LONG|SHORT)"
+                              r"\s+Side\b|\([A-Z][A-Z.]{0,7}\))",
+                              item.get("subject") or "", re.I)
                   or (re.search(r"Top Stock Picks.*\b(?:REMOVE|ADD)\b",
                                 item.get("subject") or "", re.I)
                       and "leaderboard" not in subject_lower)):
