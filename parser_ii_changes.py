@@ -28,9 +28,15 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Match "N Changes:" or "Top Stock Picks | REMOVE/ADD" but NOT the Leaderboard
+# Match "N Changes:", "Top Stock Picks | REMOVE/ADD", or single-name
+# model-portfolio moves ("Add <Co> (TICKER) to LONG Side", "Remove Long
+# <Co> (ENB)") — all carry the identical "We are ADDING ... Investing
+# Ideas : Long: X" body grammar. NOT the Leaderboard snapshot.
 SUBJECT_RE = re.compile(
-    r"(^\s*\d+\s+Changes?\s*:)|(\bTop\s+Stock\s+Picks\b.*\b(?:REMOVE|ADD)\b)",
+    r"(^\s*\d+\s+Changes?\s*:)"
+    r"|(\bTop\s+Stock\s+Picks\b.*\b(?:REMOVE|ADD)\b)"
+    r"|(^\s*(?:Add|Remove)\b.*(?:\bto\s+(?:LONG|SHORT)\s+Side\b"
+    r"|\([A-Z][A-Z.]{0,7}\)))",
     re.I,
 )
 LEADERBOARD_RE = re.compile(r"Leaderboard", re.I)
@@ -285,7 +291,9 @@ def process_one(message_id: str, *, fan_out: bool = True) -> dict:
 
 _SUBJ_SQL = (r"(subject ~ '^[0-9]+ Changes?:' "
              r"OR subject ILIKE 'Top Stock Picks%REMOVE%' "
-             r"OR subject ILIKE 'Top Stock Picks%ADD%') "
+             r"OR subject ILIKE 'Top Stock Picks%ADD%' "
+             r"OR subject ~* '^(Add|Remove) .*(to (LONG|SHORT) Side"
+             r"|\([A-Z][A-Z.]{0,7}\))') "
              r"AND subject NOT ILIKE '%Leaderboard%'")
 
 
