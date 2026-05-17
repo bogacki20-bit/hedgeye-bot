@@ -649,7 +649,22 @@ def _process_new_email(parsed: dict) -> None:
         # subject match so emails that the classifier couldn't extract
         # tickers from still get routed.
         try:
-            if source == "risk_range":
+            if re.match(r"\s*MOMO\s+Tracker\b", item.get("subject") or "", re.I):
+                # MUST precede the risk_range branch: some MOMO subjects
+                # contain "RR=" / "Risk Range" and were being misrouted to
+                # parser_risk_range (classified_as risk_range_subject_mism).
+                import parser_momo
+                mo_result = parser_momo.process_one(item["id"])
+                log.info(
+                    f"  parser_momo: rows={mo_result.get('rows_parsed')}"
+                )
+            elif re.match(r"\s*CRYPTO\s+QUANT\b", item.get("subject") or "", re.I):
+                import parser_crypto_quant
+                cq_result = parser_crypto_quant.process_one(item["id"])
+                log.info(
+                    f"  parser_crypto_quant: rows={cq_result.get('rows_parsed')}"
+                )
+            elif source == "risk_range":
                 # Inline RR dispatch. Pre-fix the bot relied on the separate
                 # parser_risk_range daemon (PARSER_INTERVAL=900s default) to
                 # pick this up — meaning up to 15min latency before today's
