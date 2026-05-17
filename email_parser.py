@@ -676,6 +676,14 @@ def _process_new_email(parsed: dict) -> None:
                     f"signal={rta_result.get('signal_type')} "
                     f"action={rta_result.get('action')}"
                 )
+            elif source == "hedgai_signals":
+                import parser_hedgai
+                hg_result = parser_hedgai.process_one(
+                    item["id"], fan_out=not bool(tickers_in_msg),
+                )
+                log.info(
+                    f"  parser_hedgai: rows={hg_result.get('rows_parsed')}"
+                )
             elif source == "etf_pro":
                 import parser_etf_pro
                 etf_result = parser_etf_pro.process_email(
