@@ -838,6 +838,16 @@ def _process_new_email(parsed: dict) -> None:
                 log.info(
                     f"  parser_ii_changes: rows={iic_result.get('rows_parsed')}"
                 )
+            elif re.match(r"\s*Investing\s+Ideas\s+Newsletter\b",
+                           item.get("subject") or "", re.I):
+                # Weekly full roster + price levels — distinct from the
+                # Leaderboard (source==investing_ideas) handled below.
+                import parser_ii_newsletter
+                iin_result = parser_ii_newsletter.process_one(item["id"])
+                log.info(
+                    f"  parser_ii_newsletter: "
+                    f"rows={iin_result.get('rows_parsed')}"
+                )
             elif source == "investing_ideas":
                 import parser_investing_ideas
                 ii_result = parser_investing_ideas.process_email(
