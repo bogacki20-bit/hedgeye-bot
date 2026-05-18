@@ -751,9 +751,19 @@ def _process_new_email(parsed: dict) -> None:
                     f"product={pm_result.get('product')} "
                     f"sector={pm_result.get('sector')}"
                 )
+            elif re.search(r"Inflation\s+Nowcast", item.get("subject") or "", re.I):
+                # Dedicated parser (extracts CPI prints / nowcast / regime).
+                # MUST precede the research_notes catch-all.
+                import parser_inflation_nowcast
+                in_result = parser_inflation_nowcast.process_one(item["id"])
+                log.info(
+                    f"  parser_inflation_nowcast: "
+                    f"hl={in_result.get('parsed', {}).get('headline_cpi_yoy')} "
+                    f"regime={in_result.get('parsed', {}).get('regime')}"
+                )
             elif re.search(
                     r"^\s*EARLY LOOK|^\s*MARKET SITUATION REPORT|"
-                    r"Monthly Inflation Nowcast|Federal Reserve Weekly H|"
+                    r"Federal Reserve Weekly H|"
                     r"^\s*Macro Week Summary Notes|^\s*JT TAYLOR|"
                     r"^\s*Quads?/GIP Update|^\s*Hedgeye QIO|"
                     r"^\s*Monthly Commentary|Senior Loan Officer|"

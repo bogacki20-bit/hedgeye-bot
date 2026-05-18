@@ -31,7 +31,7 @@ CLASSIFIED = "research_note"
 _PRODUCTS = [
     (re.compile(r"^\s*EARLY\s+LOOK\b", re.I),               "early_look"),
     (re.compile(r"^\s*MARKET\s+SITUATION\s+REPORT\b", re.I), "market_situation_report"),
-    (re.compile(r"Monthly\s+Inflation\s+Nowcast", re.I),    "inflation_nowcast"),
+    # Inflation Nowcast now has its own dedicated parser/table (parser_inflation_nowcast).
     (re.compile(r"Federal\s+Reserve\s+Weekly\s+H", re.I),   "fed_h8"),
     (re.compile(r"^\s*Macro\s+Week\s+Summary\s+Notes", re.I), "macro_week"),
     (re.compile(r"^\s*JT\s+TAYLOR\b", re.I),                "jt_taylor"),
@@ -49,7 +49,6 @@ _PRODUCTS = [
 _SUBJ_SQL = (
     "(subject ILIKE 'EARLY LOOK%' "
     "OR subject ILIKE 'MARKET SITUATION REPORT%' "
-    "OR subject ILIKE '%Monthly Inflation Nowcast%' "
     "OR subject ILIKE '%Federal Reserve Weekly H%' "
     "OR subject ILIKE 'Macro Week Summary Notes%' "
     "OR subject ILIKE 'JT TAYLOR%' "
