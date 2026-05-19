@@ -93,6 +93,7 @@ def _snapshot_date_from_filename(path: Path) -> date:
 
 def ingest(csv_path: str | Path) -> dict:
     import db_pg
+    from tools._snapshot_sync import sync as _snapshot_sync
     from tools.ticker_aliases import normalize_ticker
 
     p = Path(csv_path).expanduser().resolve()
@@ -183,6 +184,11 @@ def ingest(csv_path: str | Path) -> dict:
                         summary["rows_failed"] += 1
                         if len(summary["errors"]) < 10:
                             summary["errors"].append(f"{sym}: {e!s}")
+                try:
+                    summary["positions_snapshot_rows"] = _snapshot_sync(
+                        cur, snap, source="fidelity", crypto=False)
+                except Exception as e:
+                    summary["errors"].append(f"positions_snapshot sync: {e!s}")
                 conn.commit()
     return summary
 

@@ -179,6 +179,11 @@ ticker_to_asset_class:
   MTUM: equities
   QUAL: equities
   SDY: equities
+  # --- inverse single-stock (Direxion Daily 1X Bear) — equities, NOT
+  #     financials. These are short-MSFT / short-META expressions and
+  #     show up as "MSFT bear" / "META bear" in Fidelity history. ---
+  MSFD: equities
+  METD: equities
   # --- fixed income ---
   AGG: fixed_income
   TLT: fixed_income
@@ -216,6 +221,24 @@ ticker_to_asset_class:
   # --- crypto ---
   GBTC: crypto
   ETHE: crypto
+
+# ---------------------------------------------------------------------------
+# D2. Inverse single-stock ETF metadata. These resolve to `equities`
+#     above (asset-class cap). This block records the directional intent:
+#     holding the ETF long == a SHORT in `underlying`. Sector is the
+#     underlying's GICS bucket so they are NOT mis-bucketed as financials.
+# ---------------------------------------------------------------------------
+inverse_single_stock:
+  MSFD:
+    kind: inverse_single_stock_short
+    underlying: MSFT
+    sector: Tech/Comms
+    description: Direxion Daily MSFT Bear 1X
+  METD:
+    kind: inverse_single_stock_short
+    underlying: META
+    sector: Tech/Comms
+    description: Direxion Daily META Bear 1X
 
 # ---------------------------------------------------------------------------
 # E. sector / style-factor -> ETF proxy maps (used to resolve slide_4

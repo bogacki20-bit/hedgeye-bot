@@ -109,12 +109,12 @@ def ingest(csv_path: str | Path) -> dict:
                             run_date, account_name, account_number,
                             action, raw_symbol, normalized_symbol,
                             qty, price, amount, commission, fees,
-                            type, raw_row, settlement_date
+                            type, source, raw_row, settlement_date
                         ) VALUES (
                             %s, %s, %s,
                             %s, %s, %s,
                             %s, %s, %s, %s, %s,
-                            %s, %s, %s
+                            %s, %s, %s, %s
                         )
                         ON CONFLICT (run_date, account_number,
                                      COALESCE(raw_symbol, ''),
@@ -135,6 +135,7 @@ def ingest(csv_path: str | Path) -> dict:
                             _money(row.get("Commission")),
                             _money(row.get("Fees")),
                             (row.get("Type") or "").strip() or None,
+                            "fidelity",
                             Json({k: v for k, v in row.items() if v not in (None, "")}),
                             settle_date,
                         ),

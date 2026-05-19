@@ -61,6 +61,7 @@ def _parse_date(s) -> date | None:
 
 def ingest(csv_path: str | Path) -> dict:
     import db_pg
+    from tools._snapshot_sync import sync as _snapshot_sync
     from tools.ticker_aliases import normalize_ticker
 
     p = Path(csv_path).expanduser().resolve()
@@ -68,6 +69,7 @@ def ingest(csv_path: str | Path) -> dict:
     summary = {"path": str(p), "rows_seen": 0, "rows_upserted": 0,
                "rows_failed": 0, "errors": []}
 
+    snaps: set = set()
     with p.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         with db_pg.get_conn() as conn:
@@ -120,11 +122,21 @@ def ingest(csv_path: str | Path) -> dict:
                         )
                         cur.execute("RELEASE SAVEPOINT row_sp")
                         summary["rows_upserted"] += 1
+                        snaps.add(snap)
                     except Exception as e:
                         cur.execute("ROLLBACK TO SAVEPOINT row_sp")
                         summary["rows_failed"] += 1
                         if len(summary["errors"]) < 10:
                             summary["errors"].append(f"{asset}: {e!s}")
+                snap_rows = 0
+                for sd in sorted(s for s in snaps if s):
+                    try:
+                        snap_rows += _snapshot_sync(
+                            cur, sd, source="kinesis", crypto=True)
+                    except Exception as e:
+                        summary["errors"].append(
+                            f"positions_snapshot sync {sd}: {e!s}")
+                summary["positions_snapshot_rows"] = snap_rows
                 conn.commit()
     return summary
 
