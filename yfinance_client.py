@@ -6,6 +6,11 @@ is_stale. When a Hedgeye email surfaces a ticker, this module captures
 that day's OHLCV + prev-close into yahoo_snapshots so the bot has a
 point-in-time price record aligned with the MFR + SpotGamma fetches.
 
+As of 2026-05-24 the underlying fetch routes through the PRICE_FEED env
+flag — 'yfinance' (default) or 'polygon' (uses tools.price_feed_polygon).
+The yahoo_snapshots table name stays the same regardless of feed for
+schema stability.
+
 Mapping: relies on price_monitor.HEDGEYE_TO_YFINANCE for Hedgeye-label →
 yfinance-symbol translation (e.g. SPX → ^GSPC, BITCOIN → BTC-USD). If a
 ticker isn't in that map, we try the ticker itself as the Yahoo symbol
@@ -20,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from datetime import date as date_cls, datetime
 from typing import Optional
 
@@ -53,15 +59,30 @@ def _resolve_yf_symbol(ticker: str) -> Optional[str]:
 # ─────────────────────────── Fetch ───────────────────────────
 
 def fetch_raw(ticker: str) -> Optional[dict]:
-    """Fetch today's OHLCV + prev close for `ticker` via yfinance.
+    """Fetch today's OHLCV + prev close for `ticker`.
 
+    Routes through PRICE_FEED env flag — 'yfinance' (default) or 'polygon'.
     Returns a flat dict with: yf_symbol, snapshot_date, price, open, high,
     low, close, prev_close, daily_change, daily_change_pct, volume,
-    full_payload (the raw 5-day frame as records).
+    full_payload.
 
-    Returns None on 404, malformed data, or if yfinance is unavailable.
+    Returns None on 404, malformed data, or if the feed is unavailable.
     Never raises.
     """
+    feed = (os.environ.get("PRICE_FEED") or "yfinance").lower().strip()
+    if feed == "polygon":
+        try:
+            from tools.price_feed_polygon import get_quote
+        except ImportError as e:
+            log.warning("tools.price_feed_polygon unavailable, falling back "
+                        "to yfinance: %s", e)
+        else:
+            q = get_quote(ticker)
+            if q is not None:
+                return q
+            log.warning("polygon returned no quote for %s; falling back to yfinance",
+                        ticker)
+
     yf_symbol = _resolve_yf_symbol(ticker)
     if not yf_symbol:
         return None
