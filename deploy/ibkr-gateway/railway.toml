@@ -1,25 +1,18 @@
 # deploy/ibkr-gateway/railway.toml
-# Railway service config for the IBKR market-data gateway. This is a SECOND
-# service deployed alongside the bot; the bot talks to it on the Railway
-# private network. See README.md in this directory for setup steps.
+# Railway service config for the IBKR market-data gateway. Second service
+# alongside the bot; the bot talks to it on the Railway private network at
+# http://ibkr-gateway.railway.internal:5000. See README.md.
 
 [build]
-# Build from the public voyz/ibeam image — no local Dockerfile.
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
-# Internal port — ibeam exposes the Client Portal API on 5000. Do NOT
-# create a public domain for this service; the bot reaches it via
-# ibkr-gateway.railway.internal:5000.
+# /v1/api/iserver/auth/status returns 200 immediately at startup with
+# authenticated:false (the Flask app comes up in seconds; the Selenium
+# login runs in a background thread). So unlike ibeam (15 min healthcheck
+# timeout to absorb IB Gateway JVM cold-boot), 60s is plenty here.
 healthcheckPath = "/v1/api/iserver/auth/status"
-# ibeam first boot is dominated by IB Gateway JVM cold-boot inside the
-# container (~280s observed in diagnostic logs) BEFORE login even starts.
-# Then login + TOTP code-gen + IBKR session handshake adds another minute
-# or two. 900s = 15 min: ~5 min Gateway cold-boot + ~5 min auth flow +
-# ~5 min safety buffer. Subsequent restarts are faster (image cached).
-# If we ever need to make this faster, point the healthcheck at ibeam's
-# port 5001 health endpoint (up immediately, before IB auth).
-healthcheckTimeout = 900
+healthcheckTimeout = 60

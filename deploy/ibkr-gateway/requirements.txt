@@ -1,0 +1,13 @@
+# Custom IBKR gateway — replaces voyz/ibeam.
+# See README.md for why we forked off ibeam (post-login selector regressions
+# vs current IBKR login UI on 0.5.11 AND 0.5.12).
+
+flask==3.0.3
+gunicorn==23.0.0
+requests==2.32.3
+pyotp==2.9.0
+selenium==4.25.0
+# webdriver-manager is intentionally NOT used — the Docker image installs
+# a matched chromium + chromedriver pair via apt, and we pass the binary
+# paths explicitly. That avoids a network download on cold boot and a
+# Chrome-major-version skew between driver and browser.
