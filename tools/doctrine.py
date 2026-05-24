@@ -1,8 +1,13 @@
 """Hedgeye GIP-model doctrine accessor.
 
-Reads config/hedgeye_doctrine.yaml and the live Quad state (bot_state
-table, or CURRENT_QUARTERLY_QUAD_OVERRIDE / CURRENT_MONTHLY_QUAD_OVERRIDE
-env escape hatches) and exposes the doctrine to the rest of the bot:
+Reads config/hedgeye_doctrine.yaml and the live Quad state.
+
+As of 2026-05-24, the canonical Quad inputs are the env vars
+CURRENT_QUARTERLY_QUAD_OVERRIDE and CURRENT_MONTHLY_QUAD_OVERRIDE — the
+operator sets them after reading the macro show. The bot_state fallback
+(written historically by tools/detect_quads.py) is still consulted if env
+is missing, and a final default of "Quad 1" is logged loudly so a misconfig
+shows up in logs rather than silently routing trades.
 
     load_doctrine()                              -> dict (cached)
     current_quarterly_quad()                     -> "Quad N"
@@ -68,19 +73,42 @@ def _quad_from_bot_state(key: str) -> Optional[str]:
 
 
 def current_quarterly_quad() -> str:
-    """Active QUARTERLY Quad (strategic). Env override > bot_state > default."""
+    """Active QUARTERLY Quad (strategic).
+
+    Canonical: CURRENT_QUARTERLY_QUAD_OVERRIDE env var (set by operator).
+    Fallback: bot_state row (historical autodetect path; disabled by default).
+    Final: _DEFAULT_QUAD with a loud log line so misconfig is visible.
+    """
     override = _normalize_quad(os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE"))
     if override:
         return override
-    return _quad_from_bot_state("current_quarterly_quad") or _DEFAULT_QUAD
+    state = _quad_from_bot_state("current_quarterly_quad")
+    if state:
+        log.warning("CURRENT_QUARTERLY_QUAD_OVERRIDE not set; using bot_state "
+                    "fallback %s. Set the env var to make Quad input explicit.",
+                    state)
+        return state
+    log.warning("No quarterly Quad input found (env or bot_state); defaulting "
+                "to %s. Set CURRENT_QUARTERLY_QUAD_OVERRIDE.", _DEFAULT_QUAD)
+    return _DEFAULT_QUAD
 
 
 def current_monthly_quad() -> str:
-    """Active MONTHLY Quad (tactical). Env override > bot_state > quarterly."""
+    """Active MONTHLY Quad (tactical).
+
+    Canonical: CURRENT_MONTHLY_QUAD_OVERRIDE env var (set by operator).
+    Fallback: bot_state row, then the active quarterly Quad.
+    """
     override = _normalize_quad(os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE"))
     if override:
         return override
-    return _quad_from_bot_state("current_monthly_quad") or current_quarterly_quad()
+    state = _quad_from_bot_state("current_monthly_quad")
+    if state:
+        log.warning("CURRENT_MONTHLY_QUAD_OVERRIDE not set; using bot_state "
+                    "fallback %s. Set the env var to make Quad input explicit.",
+                    state)
+        return state
+    return current_quarterly_quad()
 
 
 def universe_for_quad(quad: str, side: str = "longs") -> list[str]:

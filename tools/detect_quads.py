@@ -1,6 +1,13 @@
 """Auto-detect the live Hedgeye Quad regime from the latest Macro Show
 dashboard and persist it to bot_state.
 
+DISABLED IN THE LIVE PATH AS OF 2026-05-24. The canonical Quad input is now
+the manual env vars CURRENT_QUARTERLY_QUAD_OVERRIDE and
+CURRENT_MONTHLY_QUAD_OVERRIDE, set by the operator after reading the macro
+show. To re-enable autodetect, set QUAD_AUTODETECT=1 in the environment;
+without it, this script is a no-op that exits 0 (so the existing
+quad_detector_launcher.ps1 Task Scheduler entry can remain in place).
+
 Reads:
     data/snapshots/hedgeye/<latest>/macro_show/dashboard_<date>.md
 
@@ -152,6 +159,15 @@ def _tactical_note(prev_q, new_q, prev_m, new_m) -> str:
 
 
 def run(dry_run: bool = False) -> int:
+    # Feature flag — autodetect is OFF by default as of 2026-05-24.
+    # Manual env vars (CURRENT_QUARTERLY_QUAD_OVERRIDE /
+    # CURRENT_MONTHLY_QUAD_OVERRIDE) are the canonical Quad input.
+    # Set QUAD_AUTODETECT=1 to re-enable this script's behavior.
+    if os.environ.get("QUAD_AUTODETECT") != "1":
+        print("QUAD_AUTODETECT not set — manual env vars are canonical. "
+              "Skipping detect_quads (no DB writes, no alerts).")
+        return 0
+
     # Env overrides short-circuit detection entirely.
     env_q = os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE")
     env_m = os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE")
