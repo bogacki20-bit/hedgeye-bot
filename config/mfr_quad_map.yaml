@@ -1,0 +1,2645 @@
+# config/mfr_quad_map.yaml — per-Quad ticker classification.
+# Built by tools/build_mfr_quad_map.py. Operator-curated entries
+# (meta source=operator) win over rebuilds.
+#
+# Sides per Quad: long | short | neutral.
+# Generated 2026-05-24. Tickers: 298.
+
+tickers:
+  AAAU:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: long
+    sector: Commodity-Gold
+  AAPL:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  ABNB:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  ACHC:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  ADBE:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  AFRM:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Fintech
+  AGG:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-IGCredit
+  AKAM:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Tech
+  ALLW:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-BroadDBC
+  ALLY:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  AMD:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  AMLP:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Energy
+  AMZN:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  APD:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  APLE:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  ARCO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  ARGT:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-EM
+  AS:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  ATRO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  ATZAF:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  AVGO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  BA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  BAB:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: FixedIncome-Munis
+  BAC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  BBWI:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  BHP:
+    quad_1: short
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  BITCOIN:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Crypto
+  BIZD:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FixedIncome-BDCs
+  BJRI:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  BKLN:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FixedIncome-LeveragedLoans
+  BLMN:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  BLOK:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  BND:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-IGCredit
+  BNO:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Oil
+  BRENT:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Oil
+  BROS:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Consumer
+  BTI:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  BUXX:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  C:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  CACC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  CAD/USD:
+    quad_1: long
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: FX-CAD
+  CAKE:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  CANE:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Agriculture
+  CARR:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  CASY:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  CAVA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  CBRS:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  CFG:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  CHRD:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  CIBR:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Tech
+  CLOX:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FixedIncome-LeveragedLoans
+  CLOZ:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FixedIncome-LeveragedLoans
+  CMI:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrial
+  CNXT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  COAL:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  COIN:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Crypto
+  COLO:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrial
+  COM:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-BroadDBC
+  COMPQ:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  COPPER:
+    quad_1: long
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Commodity-Copper
+  CORN:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Agriculture
+  CPAY:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  CPER:
+    quad_1: long
+    quad_2: long
+    quad_4: short
+    quad_3: neutral
+    sector: Commodity-Copper
+  CRCL:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  CRM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  CRWV:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  CVX:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  CWB:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: neutral
+    sector: FixedIncome-Convertibles
+  CYB:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: FX-CNY
+  DAR:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  DAX:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  DBB:
+    quad_1: long
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Commodity-Copper
+  DBC:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-BroadDBC
+  DDOG:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  DESK:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Tech
+  DIA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  DOW:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  DRAM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  DXY:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FX-USD
+  EAT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  EMB:
+    quad_1: long
+    quad_3: long
+    quad_2: neutral
+    quad_4: neutral
+    sector: FixedIncome-EMDebt
+  EMLC:
+    quad_4: short
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    sector: FixedIncome-EMDebt
+  EPHE:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  EQRR:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  ETHA:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  ETHE:
+    quad_1: long
+    quad_2: long
+    quad_4: short
+    quad_3: neutral
+    sector: Crypto
+  EUR/USD:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FX-EUR
+  EWC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  EWG:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-EM-Germany
+  EWH:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-EM-HongKong
+  EWN:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-EM-Belgium
+  EWP:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-EM-Spain
+  EWQ:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-EM-France
+  EWW:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  EXP:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  FDRXX:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  FI:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  FIVE:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  FWONK:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  FXA:
+    quad_1: long
+    quad_2: long
+    quad_3: neutral
+    quad_4: neutral
+    sector: FX-AUD
+  FXB:
+    quad_1: long
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: FX-GBP
+  FXC:
+    quad_2: long
+    quad_1: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: FX-CAD
+  FXE:
+    quad_1: long
+    quad_2: long
+    quad_3: neutral
+    quad_4: neutral
+    sector: FX-EUR
+  FXF:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FX-CHF
+  FXM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FX-MXN
+  FXY:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FX-JPY
+  FYBR:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  GBP/USD:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FX-GBP
+  GBTC:
+    quad_1: long
+    quad_2: long
+    quad_4: short
+    quad_3: neutral
+    sector: Crypto
+  GII:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  GLD:
+    quad_3: long
+    quad_4: long
+    quad_1: neutral
+    quad_2: neutral
+    sector: Commodity-Gold
+  GME:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Consumer
+  GOLD:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: long
+    sector: Commodity-Gold
+  GOOG:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  GOOGL:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  GRNY:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  GS:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  GTBIF:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  HLT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  HOOD:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  HQY:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  HYG:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: neutral
+    sector: FixedIncome-HYCredit
+  IAK:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  IAU:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: long
+    sector: Commodity-Gold
+  IBIT:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Crypto
+  IDX:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  IEF:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  IEI:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  IGV:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  IHF:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: long
+    sector: Equity-Healthcare
+  ILMN:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  INDA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  INTC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  ITA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  ITB:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  ITT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  IVES:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Tech
+  IVV:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  IWD:
+    quad_1: short
+    quad_2: short
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Value
+  IWF:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Growth
+  IWM:
+    quad_2: long
+    quad_3: short
+    quad_1: neutral
+    quad_4: neutral
+    sector: Equity-SmallCap
+  IWR:
+    quad_1: long
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-SmallCap
+  JBHT:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrial
+  JNK:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: FixedIncome-HYCredit
+  JPM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  KRE:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  KWT:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  LFMD:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  LII:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  LLY:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  LOTMY:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  LQD:
+    quad_2: short
+    quad_4: long
+    quad_1: neutral
+    quad_3: neutral
+    sector: FixedIncome-IGCredit
+  LYB:
+    quad_1: short
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  LYV:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  MA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  MAGS:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  MARA:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  MBB:
+    quad_1: short
+    quad_2: short
+    quad_4: long
+    quad_3: neutral
+    sector: FixedIncome-IGCredit
+  META:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  MGM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  MNST:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  MP:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  MS:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  MSFO:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  MSFT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  MSOS:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  MSTY:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  MTDR:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  MTUM:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Momentum
+  MUB:
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    quad_1: neutral
+    sector: FixedIncome-Munis
+  NATGAS:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-NatGas
+  NBIS:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  NET:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  NFLX:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  NIKK:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  NLR:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Utilities
+  NORW:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  NVDA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  NVO:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  OAEM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  OC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  OEF:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  OIH:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  OMF:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: long
+    sector: Equity-Finance
+  ONTO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  ORCL:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  OSK:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  OXY:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  OZEM:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  PALL:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: neutral
+    sector: Commodity-Silver
+  PBR:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  PCAR:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  PEB:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: neutral
+    sector: Equity-REITs
+  PFF:
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    quad_1: neutral
+    sector: FixedIncome-Preferreds
+  PFIX:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-LongDuration
+  PINK:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  PINS:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  PM:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  PR:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  PRMB:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  PRVA:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  PSCH:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Tech
+  PSP:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  PVH:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  QQQ:
+    quad_1: long
+    quad_2: long
+    quad_4: short
+    quad_3: neutral
+    sector: Equity-Tech
+  QQQM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  QSR:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  QTUM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  QUAL:
+    quad_3: long
+    quad_4: long
+    quad_1: neutral
+    quad_2: neutral
+    sector: Equity-Quality
+  RDNT:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  REAL:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  RHP:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: neutral
+    sector: Equity-REITs
+  RIO:
+    quad_1: short
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  ROBO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  ROKU:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  ROST:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  RSP:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  RTO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  RUT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-SmallCap
+  SBUX:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  SDY:
+    quad_1: short
+    quad_2: short
+    quad_3: short
+    quad_4: long
+    sector: Equity-Dividend
+  SHY:
+    quad_1: short
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: FixedIncome-TreasuryBelly
+  SILVER:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: neutral
+    sector: Commodity-Silver
+  SITM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  SKYY:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Tech
+  SLV:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: neutral
+    sector: Commodity-Silver
+  SLX:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  SMH:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  SOYB:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-BroadDBC
+  SPDN:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Inverse
+  SPHB:
+    quad_1: long
+    quad_2: long
+    quad_4: short
+    quad_3: neutral
+    sector: Equity-HighBeta
+  SPHR:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  SPLV:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-LowBeta
+  SPX:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  SPY:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  SSEC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  STIP:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: neutral
+    sector: FixedIncome-TIPS
+  SXT:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  SYF:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  TAN:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  TCNNF:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  TILL:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: neutral
+    sector: FixedIncome-TIPS
+  TIP:
+    quad_1: short
+    quad_3: long
+    quad_4: short
+    quad_2: neutral
+    sector: FixedIncome-TIPS
+  TKO:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  TLH:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  TLT:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FixedIncome-LongDuration
+  TMFS:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  TPYP:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  TSLA:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  TSN:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  TSSI:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  TT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  TTWO:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  TUR:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  TWLO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  TXG:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  U:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  UFO:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Consumer
+  UNG:
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    quad_1: neutral
+    sector: Commodity-NatGas
+  UNH:
+    quad_1: long
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: long
+    sector: Equity-Healthcare
+  URI:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrial
+  USD:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FX-USD
+  USD/YEN:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FX-JPY
+  USO:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Oil
+  UST10Y:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  UST2Y:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-TreasuryBelly
+  UST30Y:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-LongDuration
+  UUP:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: FX-USD
+  V:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  VGT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
+  VIK:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  VIX:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Volatility
+  VMC:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
+  VOO:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Broad
+  VXF:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-SmallCap
+  VYM:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: long
+    sector: Equity-Dividend
+  WEAT:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Agriculture
+  WFC:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
+  WRBY:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  WTIC:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Oil
+  XBI:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  XLB:
+    quad_1: long
+    quad_3: short
+    quad_2: neutral
+    quad_4: neutral
+    sector: Equity-Materials
+  XLC:
+    quad_1: long
+    quad_2: short
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Comm
+  XLE:
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    quad_1: neutral
+    sector: Equity-Energy
+  XLF:
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    quad_1: neutral
+    sector: Equity-Financials
+  XLI:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  XLK:
+    quad_1: long
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Tech
+  XLP:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
+  XLRE:
+    quad_1: long
+    quad_2: short
+    quad_3: long
+    quad_4: neutral
+    sector: Equity-REITs
+  XLU:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Utilities
+  XLV:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Healthcare
+  XLY:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
+  XOM:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  XOP:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  XTL:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Comm
+  XYZ:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  YCS:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  ZROZ:
+    quad_1: short
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: FixedIncome-LongDuration
+meta:
+  AAAU:
+    source: seed=heuristic
+    sector_inferred: Commodity-Gold
+  AAPL:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  ABNB:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  ACHC:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  ADBE:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  AFRM:
+    source: inferred=claude
+    sector_inferred: Equity-Fintech
+  AGG:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-IGCredit
+  AKAM:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  ALLW:
+    source: seed=heuristic
+    sector_inferred: Commodity-BroadDBC
+  ALLY:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  AMD:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  AMLP:
+    source: inferred=claude
+    sector_inferred: Commodity-Energy
+  AMZN:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  APD:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  APLE:
+    source: inferred=claude
+    sector_inferred: Unknown
+  ARCO:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  ARGT:
+    source: inferred=claude
+    sector_inferred: Equity-EM
+  AS:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  ATRO:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  ATZAF:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  AVGO:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  BA:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  BAB:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-Munis
+  BAC:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  BBWI:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  BHP:
+    source: inferred=claude
+    sector_inferred: Equity-Materials
+  BITCOIN:
+    source: seed=heuristic
+    sector_inferred: Crypto
+  BIZD:
+    source: seed=doctrine
+  BJRI:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  BKLN:
+    source: seed=doctrine
+  BLMN:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  BLOK:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  BND:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-IGCredit
+  BNO:
+    source: seed=heuristic
+    sector_inferred: Commodity-Oil
+  BRENT:
+    source: seed=heuristic
+    sector_inferred: Commodity-Oil
+  BROS:
+    source: inferred=claude
+    sector_inferred: Equity-Consumer
+  BTI:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  BUXX:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TreasuryBelly
+  C:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  CACC:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  CAD/USD:
+    source: seed=heuristic
+    sector_inferred: FX-CAD
+  CAKE:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  CANE:
+    source: inferred=claude
+    sector_inferred: Commodity-Agriculture
+  CARR:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  CASY:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  CAVA:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  CBRS:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  CFG:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  CHRD:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  CIBR:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  CLOX:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-LeveragedLoans
+  CLOZ:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-LeveragedLoans
+  CMI:
+    source: inferred=claude
+    sector_inferred: Equity-Industrial
+  CNXT:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  COAL:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
+  COIN:
+    source: seed=heuristic
+    sector_inferred: Crypto
+  COLO:
+    source: inferred=claude
+    sector_inferred: Equity-Industrial
+  COM:
+    source: seed=heuristic
+    sector_inferred: Commodity-BroadDBC
+  COMPQ:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  COPPER:
+    source: seed=heuristic
+    sector_inferred: Commodity-Copper
+  CORN:
+    source: inferred=claude
+    sector_inferred: Commodity-Agriculture
+  CPAY:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  CPER:
+    source: seed=doctrine
+  CRCL:
+    source: inferred=claude
+    sector_inferred: Unknown
+  CRM:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  CRWV:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  CVX:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  CWB:
+    source: seed=doctrine
+  CYB:
+    source: seed=heuristic
+    sector_inferred: FX-CNY
+  DAR:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  DAX:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  DBB:
+    source: seed=heuristic
+    sector_inferred: Commodity-Copper
+  DBC:
+    source: seed=doctrine
+  DDOG:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  DESK:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  DIA:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  DOW:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  DRAM:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  DXY:
+    source: seed=heuristic
+    sector_inferred: FX-USD
+  EAT:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  EMB:
+    source: seed=doctrine
+  EMLC:
+    source: seed=doctrine
+  EPHE:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  EQRR:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  ETHA:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  ETHE:
+    source: seed=doctrine
+  EUR/USD:
+    source: seed=heuristic
+    sector_inferred: FX-EUR
+  EWC:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  EWG:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Germany
+  EWH:
+    source: inferred=claude
+    sector_inferred: Equity-EM-HongKong
+  EWN:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Belgium
+  EWP:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Spain
+  EWQ:
+    source: inferred=claude
+    sector_inferred: Equity-EM-France
+  EWW:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  EXP:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  FDRXX:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TreasuryBelly
+  FI:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  FIVE:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  FWONK:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  FXA:
+    source: seed=doctrine
+  FXB:
+    source: seed=doctrine
+  FXC:
+    source: seed=doctrine
+  FXE:
+    source: seed=doctrine
+  FXF:
+    source: seed=heuristic
+    sector_inferred: FX-CHF
+  FXM:
+    source: seed=heuristic
+    sector_inferred: FX-MXN
+  FXY:
+    source: seed=heuristic
+    sector_inferred: FX-JPY
+  FYBR:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  GBP/USD:
+    source: seed=heuristic
+    sector_inferred: FX-GBP
+  GBTC:
+    source: seed=doctrine
+  GII:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  GLD:
+    source: seed=doctrine
+  GME:
+    source: inferred=claude
+    sector_inferred: Equity-Consumer
+  GOLD:
+    source: seed=heuristic
+    sector_inferred: Commodity-Gold
+  GOOG:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  GOOGL:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  GRNY:
+    source: inferred=claude
+    sector_inferred: Unknown
+  GS:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  GTBIF:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  HLT:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  HOOD:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  HQY:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  HYG:
+    source: seed=doctrine
+  IAK:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  IAU:
+    source: seed=heuristic
+    sector_inferred: Commodity-Gold
+  IBIT:
+    source: seed=heuristic
+    sector_inferred: Crypto
+  IDX:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  IEF:
+    source: seed=doctrine
+  IEI:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TreasuryBelly
+  IGV:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  IHF:
+    source: inferred=claude
+    sector_inferred: Equity-Healthcare
+  ILMN:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  INDA:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  INTC:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  ITA:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  ITB:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  ITT:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  IVES:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  IVV:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  IWD:
+    source: seed=doctrine
+  IWF:
+    source: seed=heuristic
+    sector_inferred: Equity-Growth
+  IWM:
+    source: seed=doctrine
+  IWR:
+    source: seed=doctrine
+  JBHT:
+    source: inferred=claude
+    sector_inferred: Equity-Industrial
+  JNK:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-HYCredit
+  JPM:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  KRE:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  KWT:
+    source: inferred=claude
+    sector_inferred: Unknown
+  LFMD:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  LII:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  LLY:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  LOTMY:
+    source: inferred=claude
+    sector_inferred: Unknown
+  LQD:
+    source: seed=doctrine
+  LYB:
+    source: inferred=claude
+    sector_inferred: Equity-Materials
+  LYV:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  MA:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  MAGS:
+    source: inferred=claude
+    sector_inferred: Unknown
+  MARA:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  MBB:
+    source: seed=doctrine
+  META:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  MGM:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  MNST:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  MP:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  MS:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  MSFO:
+    source: inferred=claude
+    sector_inferred: Unknown
+  MSFT:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  MSOS:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  MSTY:
+    source: inferred=claude
+    sector_inferred: Unknown
+  MTDR:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  MTUM:
+    source: seed=doctrine
+  MUB:
+    source: seed=doctrine
+  NATGAS:
+    source: seed=heuristic
+    sector_inferred: Commodity-NatGas
+  NBIS:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  NET:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  NFLX:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  NIKK:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  NLR:
+    source: seed=heuristic
+    sector_inferred: Equity-Utilities
+  NORW:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  NVDA:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  NVO:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  OAEM:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  OC:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  OEF:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  OIH:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  OMF:
+    source: inferred=claude
+    sector_inferred: Equity-Finance
+  ONTO:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  ORCL:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  OSK:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  OXY:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  OZEM:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  PALL:
+    source: seed=heuristic
+    sector_inferred: Commodity-Silver
+  PBR:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  PCAR:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  PEB:
+    source: seed=heuristic
+    sector_inferred: Equity-REITs
+  PFF:
+    source: seed=doctrine
+  PFIX:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-LongDuration
+  PINK:
+    source: inferred=claude
+    sector_inferred: Unknown
+  PINS:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  PM:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  PR:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  PRMB:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  PRVA:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  PSCH:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  PSP:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
+  PVH:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  QQQ:
+    source: seed=doctrine
+  QQQM:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  QSR:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  QTUM:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  QUAL:
+    source: seed=doctrine
+  RDNT:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  REAL:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  RHP:
+    source: seed=heuristic
+    sector_inferred: Equity-REITs
+  RIO:
+    source: inferred=claude
+    sector_inferred: Equity-Materials
+  ROBO:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  ROKU:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  ROST:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  RSP:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  RTO:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  RUT:
+    source: seed=heuristic
+    sector_inferred: Equity-SmallCap
+  SBUX:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  SDY:
+    source: seed=doctrine
+  SHY:
+    source: seed=doctrine
+  SILVER:
+    source: seed=heuristic
+    sector_inferred: Commodity-Silver
+  SITM:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  SKYY:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
+  SLV:
+    source: seed=heuristic
+    sector_inferred: Commodity-Silver
+  SLX:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  SMH:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  SOYB:
+    source: seed=heuristic
+    sector_inferred: Commodity-BroadDBC
+  SPDN:
+    source: inferred=claude
+    sector_inferred: Equity-Inverse
+  SPHB:
+    source: seed=doctrine
+  SPHR:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  SPLV:
+    source: seed=doctrine
+  SPX:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  SPY:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  SSEC:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  STIP:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TIPS
+  SXT:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  SYF:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  TAN:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  TCNNF:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  TILL:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TIPS
+  TIP:
+    source: seed=doctrine
+  TKO:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  TLH:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TreasuryBelly
+  TLT:
+    source: seed=doctrine
+  TMFS:
+    source: inferred=claude
+    sector_inferred: Unknown
+  TPYP:
+    source: inferred=claude
+    sector_inferred: Unknown
+  TSLA:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  TSN:
+    source: seed=heuristic
+    sector_inferred: Equity-Staples
+  TSSI:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  TT:
+    source: seed=heuristic
+    sector_inferred: Equity-Industrials
+  TTWO:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  TUR:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  TWLO:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  TXG:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  U:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  UFO:
+    source: inferred=claude
+    sector_inferred: Equity-Consumer
+  UNG:
+    source: seed=doctrine
+  UNH:
+    source: inferred=claude
+    sector_inferred: Equity-Healthcare
+  URI:
+    source: inferred=claude
+    sector_inferred: Equity-Industrial
+  USD:
+    source: seed=heuristic
+    sector_inferred: FX-USD
+  USD/YEN:
+    source: seed=heuristic
+    sector_inferred: FX-JPY
+  USO:
+    source: seed=doctrine
+  UST10Y:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TreasuryBelly
+  UST2Y:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-TreasuryBelly
+  UST30Y:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-LongDuration
+  UUP:
+    source: seed=doctrine
+  V:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  VGT:
+    source: seed=heuristic
+    sector_inferred: Equity-Tech
+  VIK:
+    source: seed=heuristic
+    sector_inferred: Equity-Discretionary
+  VIX:
+    source: seed=heuristic
+    sector_inferred: Volatility
+  VMC:
+    source: seed=heuristic
+    sector_inferred: Equity-Materials
+  VOO:
+    source: seed=heuristic
+    sector_inferred: Equity-Broad
+  VXF:
+    source: seed=heuristic
+    sector_inferred: Equity-SmallCap
+  VYM:
+    source: seed=heuristic
+    sector_inferred: Equity-Dividend
+  WEAT:
+    source: inferred=claude
+    sector_inferred: Commodity-Agriculture
+  WFC:
+    source: seed=heuristic
+    sector_inferred: Equity-Financials
+  WRBY:
+    source: inferred=claude
+    sector_inferred: Unknown
+  WTIC:
+    source: seed=heuristic
+    sector_inferred: Commodity-Oil
+  XBI:
+    source: seed=heuristic
+    sector_inferred: Equity-Healthcare
+  XLB:
+    source: seed=doctrine
+  XLC:
+    source: seed=doctrine
+  XLE:
+    source: seed=doctrine
+  XLF:
+    source: seed=doctrine
+  XLI:
+    source: seed=doctrine
+  XLK:
+    source: seed=doctrine
+  XLP:
+    source: seed=doctrine
+  XLRE:
+    source: seed=doctrine
+  XLU:
+    source: seed=doctrine
+  XLV:
+    source: seed=doctrine
+  XLY:
+    source: seed=doctrine
+  XOM:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  XOP:
+    source: seed=heuristic
+    sector_inferred: Equity-Energy
+  XTL:
+    source: seed=heuristic
+    sector_inferred: Equity-Comm
+  XYZ:
+    source: inferred=claude
+    sector_inferred: Unknown
+  YCS:
+    source: inferred=claude
+    sector_inferred: Unknown
+  ZROZ:
+    source: seed=heuristic
+    sector_inferred: FixedIncome-LongDuration
