@@ -68,7 +68,9 @@ def _resolve_watchlist(explicit: Optional[list[str]],
     """Return the deduped list of tickers this scan should evaluate.
 
     Resolution order:
-      explicit > source=hedgeye_active (Hedgeye product feed union) >
+      explicit > source=active_slice (monthly ∩ quarterly Quad from
+      config/mfr_quad_map.yaml — production default 2026-05-24) >
+      source=hedgeye_active (Hedgeye product feed union) >
       source=quad / --quad-filtered (doctrine Quad universe) >
       tools.list_monitored_tickers (with --priority) > ticker_inventory view.
 
@@ -89,6 +91,24 @@ def _resolve_watchlist(explicit: Optional[list[str]],
     """
     if explicit:
         return sorted({t.upper().strip() for t in explicit if t and t.strip()})
+
+    if source == "active_slice":
+        try:
+            from tools.active_slice import active_universe
+            longs  = active_universe("long")
+            shorts = active_universe("short")
+            uni = sorted(set(longs) | set(shorts))
+            if uni:
+                log.info("scanner: active_slice universe = %d tickers "
+                         "(%d long, %d short)", len(uni), len(longs), len(shorts))
+                if max_tickers and len(uni) > max_tickers:
+                    uni = uni[:max_tickers]
+                return uni
+            log.warning("scanner: active_slice empty — check Quad env vars "
+                        "and config/mfr_quad_map.yaml; falling back")
+        except Exception as e:
+            log.warning("scanner: active_slice resolver failed (%s); "
+                        "falling back", e)
 
     if source == "hedgeye_active":
         try:
@@ -456,15 +476,17 @@ def _cli() -> int:
     ap.add_argument("--workers", type=int, default=1,
                     help="ThreadPool workers for the per-ticker loop. 8 is "
                          "safe for the Anthropic API; default 1 = serial.")
-    ap.add_argument("--source", choices=("hedgeye_active", "quad", "monitored"),
-                    default="monitored",
-                    help="Universe source. 'hedgeye_active' = tickers Keith "
-                         "is actively surfacing through Hedgeye products "
-                         "(RR+SS+PS+ETF Pro+II) in the last --lookback-days "
-                         "(production default for the scheduled scanner). "
-                         "'quad' = doctrine Quad universe. 'monitored' "
-                         "(default) = legacy inventory view sliced by "
-                         "--priority.")
+    ap.add_argument("--source",
+                    choices=("active_slice", "hedgeye_active", "quad", "monitored"),
+                    default="active_slice",
+                    help="Universe source. 'active_slice' (default) = the "
+                         "intersection of the monthly and quarterly Quads "
+                         "from config/mfr_quad_map.yaml, resolved via "
+                         "tools.active_slice. 'hedgeye_active' = tickers "
+                         "Keith is actively surfacing through Hedgeye "
+                         "products in the last --lookback-days (legacy). "
+                         "'quad' = doctrine Quad universe. 'monitored' = "
+                         "legacy inventory view sliced by --priority.")
     ap.add_argument("--lookback-days", type=int, default=7,
                     help="Lookback window for --source hedgeye_active "
                          "(default: 7).")
