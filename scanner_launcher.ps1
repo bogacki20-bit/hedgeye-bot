@@ -34,9 +34,16 @@ $logFile = Join-Path $logDir "scanner_$date.log"
 
 $python  = 'C:\Users\bogac\AppData\Local\Programs\Python\Python312\python.exe'
 $script  = Join-Path $repo 'proactive_scanner.py'
+$mfrCli  = Join-Path $repo 'mfr_client.py'
 
 # Cycle cadence — sleep N seconds between cycles. Default 900 (15 min).
 $cycleSeconds = if ($env:SCAN_CYCLE_SECONDS) { [int]$env:SCAN_CYCLE_SECONDS } else { 900 }
+
+# MFR-watchlist sync — once per UTC day. Picks up new tickers the operator
+# added via the MFR UI (the canonical fan-out source). Guard via marker file
+# so the daily refresh fires once per calendar date, idempotent across
+# launcher restarts.
+$mfrSyncMarker = Join-Path $logDir 'mfr_watchlist_last_sync_utc.txt'
 
 # Header so log files are easy to scan
 $bootStart = (Get-Date).ToString('o')
@@ -51,6 +58,28 @@ while ($true) {
     $start   = (Get-Date).ToString('o')
     Add-Content -Path $logFile -Value ""
     Add-Content -Path $logFile -Value "==== scanner cycle $start (pid=$PID) ===="
+
+    # MFR-watchlist sync — runs once per UTC day. The marker file holds the
+    # last sync date (YYYY-MM-DD). When the day has rolled, pull the operator's
+    # full MFR watchlist via /v2/asset and refresh every ticker. Idempotent.
+    $todayUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+    $needSync = $true
+    if (Test-Path $mfrSyncMarker) {
+        $lastSync = (Get-Content $mfrSyncMarker -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
+        if ($lastSync -eq $todayUtc) { $needSync = $false }
+    }
+    if ($needSync) {
+        Add-Content -Path $logFile -Value "---- mfr_fanout: starting daily watchlist sync ($todayUtc UTC) ----"
+        & $python $mfrCli --refresh-watchlist *>&1 |
+            ForEach-Object { $_.ToString() } |
+            Out-File -FilePath $logFile -Append -Encoding utf8
+        if ($LASTEXITCODE -eq 0) {
+            Set-Content -Path $mfrSyncMarker -Value $todayUtc -Encoding utf8
+            Add-Content -Path $logFile -Value "---- mfr_fanout: watchlist sync complete; marker updated ----"
+        } else {
+            Add-Content -Path $logFile -Value "---- mfr_fanout: watchlist sync FAILED rc=$LASTEXITCODE (will retry next cycle) ----"
+        }
+    }
 
     # Active universe: monthly ∩ quarterly Quad slice from config/mfr_quad_map.yaml
     # (notifier rollback, 2026-05-24). 16 workers is the tested sweet spot.

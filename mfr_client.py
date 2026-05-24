@@ -39,6 +39,72 @@ def _resolve_token() -> str | None:
     return os.environ.get("MFR_API_TOKEN") or os.environ.get("MFR_TOKEN")
 
 
+# ─────────────────────────── Watchlist (fan-out source of truth) ───────────
+
+def list_watchlist() -> list[str]:
+    """Return the tickers in the operator's MFR account (`createdBy` =
+    whoever the MFR_API_TOKEN belongs to).
+
+    Endpoint: GET /v2/asset (no ticker path component). Returns
+    {"data": [{"payload": {"ticker": ...}}, ...]}.
+
+    This is the canonical source of truth for which tickers the bot should
+    fetch MFR snapshots for. When the operator adds a ticker through the
+    MFR UI, it appears here within one API call — no code change required.
+
+    Returns sorted distinct ticker symbols. Empty list on auth error / API
+    down / malformed payload. Never raises.
+    """
+    token = _resolve_token()
+    if not token:
+        log.warning("MFR_API_TOKEN not set; cannot list watchlist")
+        return []
+    url = f"{MFR_BASE}?token={token}"
+    req = urllib.request.Request(url, headers={"User-Agent": MFR_USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=MFR_TIMEOUT) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log.warning("MFR watchlist fetch failed: %s", e)
+        return []
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        log.warning("MFR watchlist returned non-JSON: %s", body[:200])
+        return []
+    items = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        log.warning("MFR watchlist unexpected shape: %s", str(data)[:200])
+        return []
+    out: set[str] = set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        p = it.get("payload") or {}
+        t = p.get("ticker")
+        if t and isinstance(t, str):
+            out.add(t.strip().upper())
+    return sorted(out)
+
+
+def refresh_watchlist() -> dict:
+    """Pull the operator's MFR watchlist and fetch+save a snapshot for
+    every ticker. Logs `mfr_fanout: pulled N tickers from MFR watchlist`.
+
+    Idempotent — `fetch_and_save` upserts on (ticker, snapshot_date) so
+    re-running on the same day overwrites without duplicating rows.
+    Returns the same shape as `refresh_for_tickers`."""
+    watchlist = list_watchlist()
+    log.info("mfr_fanout: pulled %d tickers from MFR watchlist", len(watchlist))
+    if not watchlist:
+        return {"tickers": 0, "ok": 0, "skip": 0, "fail": 0, "source": "mfr_watchlist"}
+    summary = refresh_for_tickers(watchlist)
+    summary["source"] = "mfr_watchlist"
+    log.info("mfr_fanout: refresh complete — ok=%d fail=%d (of %d)",
+             summary.get("ok", 0), summary.get("fail", 0), summary.get("tickers", 0))
+    return summary
+
+
 def fetch_raw(ticker: str) -> dict | None:
     """GET the MFR API and return the parsed JSON, or None on failure.
 
@@ -444,6 +510,14 @@ def _cli() -> None:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--refresh", action="store_true",
                    help="With --tickers, fetch+save (and mirror to corpus_documents)")
+    g.add_argument("--refresh-watchlist", action="store_true",
+                   help="Fetch the operator's MFR watchlist via GET /v2/asset "
+                        "and refresh every ticker in it. The canonical fan-out "
+                        "path — when the operator adds a ticker through the "
+                        "MFR UI, this run picks it up automatically.")
+    g.add_argument("--list-watchlist", action="store_true",
+                   help="Print the operator's MFR watchlist (one ticker per "
+                        "line) without fetching snapshots.")
     g.add_argument("--backfill-corpus", action="store_true",
                    help="Walk existing mfr_snapshots rows and write corpus_documents rows")
     g.add_argument("--latest", metavar="TICKER",
@@ -458,6 +532,16 @@ def _cli() -> None:
             print("--refresh requires --tickers TICKER1 TICKER2 ...")
             return
         summary = refresh_for_tickers(args.tickers)
+        print(json.dumps(summary, indent=2))
+        return
+
+    if args.list_watchlist:
+        tickers = list_watchlist()
+        print("\n".join(tickers))
+        return
+
+    if args.refresh_watchlist:
+        summary = refresh_watchlist()
         print(json.dumps(summary, indent=2))
         return
 

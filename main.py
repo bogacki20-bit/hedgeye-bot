@@ -135,5 +135,76 @@ if __name__ == "__main__":
     else:
         log.info("Price monitor disabled (MONITOR_ENABLED=false).")
 
+    # MFR watchlist sync — once per UTC day, refresh every ticker in the
+    # operator's MFR account (canonical fan-out source). Catches new tickers
+    # added through the MFR UI without any code change. Toggle off via
+    # MFR_WATCHLIST_SYNC=false. Tracks last-sync UTC date in bot_state so
+    # restarts within the same day don't re-run.
+    if os.getenv("MFR_WATCHLIST_SYNC", "true").lower() in ("true", "1", "yes"):
+        def _mfr_watchlist_loop():
+            """Sleep until next UTC midnight + 2 min, then refresh. On crash,
+            log + ping Telegram + retry after 1h (the daily cadence is loose
+            enough that an occasional skipped day is fine)."""
+            import time, traceback
+            from datetime import datetime, timezone, timedelta
+            import db_pg, mfr_client
+            while True:
+                try:
+                    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    last_sync = None
+                    try:
+                        with db_pg.get_conn() as conn, conn.cursor() as cur:
+                            cur.execute("SELECT value FROM bot_state "
+                                        "WHERE key = 'mfr_watchlist_last_sync_utc'")
+                            row = cur.fetchone()
+                            if row: last_sync = row[0]
+                    except Exception as e:
+                        log.debug("bot_state read failed (continuing): %s", e)
+
+                    if last_sync != today:
+                        summary = mfr_client.refresh_watchlist()
+                        try:
+                            with db_pg.get_conn() as conn, conn.cursor() as cur:
+                                cur.execute(
+                                    """INSERT INTO bot_state (key, value, updated_at)
+                                       VALUES ('mfr_watchlist_last_sync_utc', %s, NOW())
+                                       ON CONFLICT (key) DO UPDATE
+                                         SET value = EXCLUDED.value, updated_at = NOW()""",
+                                    (today,),
+                                )
+                                conn.commit()
+                        except Exception as e:
+                            log.warning("bot_state write for mfr_watchlist failed: %s", e)
+                        log.info("mfr_watchlist_sync: done — %s", summary)
+                    else:
+                        log.debug("mfr_watchlist_sync: already synced today (%s)", today)
+
+                    # Sleep to next UTC midnight + 2 minutes (small offset so
+                    # multiple instances on the same day don't dogpile at 00:00).
+                    now = datetime.now(timezone.utc)
+                    nxt = (now + timedelta(days=1)).replace(hour=0, minute=2,
+                                                            second=0, microsecond=0)
+                    secs = max(60, int((nxt - now).total_seconds()))
+                    time.sleep(secs)
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    log.error("mfr_watchlist_sync crashed: %s\n%s", e, tb)
+                    try:
+                        from notifier import send_telegram
+                        send_telegram(
+                            "Hedgeye Bot",
+                            f"MFR watchlist sync crashed: {type(e).__name__}: {e}\n"
+                            f"Retrying in 1h. Tail: {tb[-300:]}",
+                        )
+                    except Exception:
+                        pass
+                    time.sleep(3600)
+
+        threading.Thread(target=_mfr_watchlist_loop, daemon=True,
+                         name="mfr_watchlist_sync").start()
+        log.info("MFR watchlist sync thread started.")
+    else:
+        log.info("MFR watchlist sync disabled (MFR_WATCHLIST_SYNC=false).")
+
     log.info("Hedgeye bot running — email parser → Postgres lake.")
     run_email_loop()
