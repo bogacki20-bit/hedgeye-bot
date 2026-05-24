@@ -158,7 +158,13 @@ def _get_etf_pro_range(ticker: str) -> Optional[dict]:
 
 
 def _get_mfr_latest(ticker: str) -> Optional[dict]:
-    """Most recent mfr_snapshots row for the ticker, typed columns only."""
+    """Most recent mfr_snapshots row for the ticker, typed columns only.
+
+    Includes the gamma-wall columns (call_wall_mfr / put_wall_mfr /
+    zero_gamma / absolute_gamma / iv30_mfr) added in migration 028 — they
+    are None for tickers MFR doesn't price options on (commodities, FX,
+    VIX) and the notifier omits the wall line entirely in that case.
+    """
     try:
         import db_pg
         import psycopg2.extras
@@ -169,6 +175,8 @@ def _get_mfr_latest(ticker: str) -> Optional[dict]:
                     SELECT ticker, snapshot_date, price, range_low, range_high,
                            trend_signal, momentum_signal, hurst, hurst_3mo,
                            iv, rv, daily_pct_change, previous_day_volume,
+                           call_wall_mfr, put_wall_mfr, zero_gamma,
+                           absolute_gamma, iv30_mfr,
                            fetched_at
                       FROM mfr_snapshots
                      WHERE ticker = %s
@@ -1252,6 +1260,11 @@ def decide_notifier(
     mfr_hi = mfr.get("range_high")
     trend  = mfr.get("trend_signal")
     hurst  = mfr.get("hurst")
+    # MFR gamma walls (migration 028). Populated on ~55% of rows — US
+    # equities with listed options. None on commodities/FX/VIX/thin tickers.
+    call_wall  = mfr.get("call_wall_mfr")
+    put_wall   = mfr.get("put_wall_mfr")
+    zero_gamma = mfr.get("zero_gamma")
 
     # Compute the deterministic zone tag — fold into the prompt so the model
     # doesn't have to do range math.
@@ -1263,13 +1276,24 @@ def decide_notifier(
     except Exception:
         pass
 
+    # Optional wall line — only emit when at least one wall value exists.
+    # Keeps the prompt clean for tickers without options coverage.
+    wall_line = ""
+    wall_bits = []
+    if call_wall  is not None: wall_bits.append(f"call=${call_wall}")
+    if put_wall   is not None: wall_bits.append(f"put=${put_wall}")
+    if zero_gamma is not None: wall_bits.append(f"zero-gamma=${zero_gamma}")
+    if wall_bits:
+        wall_line = "MFR walls: " + " / ".join(wall_bits) + "\n"
+
     user_msg = (
         f"Ticker: {ticker.upper()}\n"
         f"Price: {price}\n"
         f"Hedgeye Risk Range: low={rr_lo}, high={rr_hi}\n"
         f"MFR: range={mfr_lo}-{mfr_hi}, trend={trend}, hurst={hurst}\n"
         f"MFR zone: {zone}\n"
-        f"Signal origin: {signal_origin}"
+        + wall_line
+        + f"Signal origin: {signal_origin}"
         + (f"\nHedgeye-tagged conviction: {signal_conviction}"
            if signal_conviction else "")
     )
@@ -1341,6 +1365,10 @@ def decide_notifier(
             "mfr_hurst":       hurst,
             "yahoo_price":     price,
             "mfr_zone":        zone,
+            # MFR gamma walls (migration 028) — None on tickers w/o options.
+            "mfr_call_wall":   call_wall,
+            "mfr_put_wall":    put_wall,
+            "mfr_zero_gamma":  zero_gamma,
             # SG keys preserved for downstream template compatibility
             "spotgamma_call_wall": None,
             "spotgamma_put_wall":  None,

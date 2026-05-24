@@ -229,9 +229,25 @@ def get_backfill_state(folder: str):
 
 def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                       source_endpoint: str = "/v2/asset"):
-    """Insert MFR snapshot. Surface fields are denormalized from payload."""
+    """Insert MFR snapshot. Surface fields are denormalized from payload.
+
+    Also extracts the gamma-wall fields out of gammaMetrics into typed
+    columns (call_wall_mfr / put_wall_mfr / zero_gamma / absolute_gamma /
+    iv30_mfr) per migration 028_mfr_typed_walls.sql. These are None for
+    tickers MFR doesn't price options on (commodities, FX, VIX).
+    """
     p = payload or {}
     range_data = (p.get("rangeData") or {})
+    # gammaMetrics.gamma — present on US equities with listed options,
+    # absent (null) on commodities/FX/VIX/thin tickers. Drill defensively.
+    gm = (p.get("gammaMetrics") or {})
+    gm_gamma = (gm.get("gamma") if isinstance(gm, dict) else None) or {}
+    gm_quote = (gm_gamma.get("quote") if isinstance(gm_gamma, dict) else None) or {}
+    call_wall_mfr  = gm_gamma.get("callWallLevel")
+    put_wall_mfr   = gm_gamma.get("putWallLevel")
+    zero_gamma     = gm_gamma.get("zeroGamma")
+    absolute_gamma = gm_gamma.get("absoluteGammaLevel")
+    iv30_mfr       = gm_quote.get("iv30")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -240,8 +256,12 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                   (ticker, snapshot_date, price, range_low, range_high,
                    trend_signal, momentum_signal, hurst, hurst_3mo,
                    iv, rv, daily_pct_change, previous_day_volume,
+                   call_wall_mfr, put_wall_mfr, zero_gamma,
+                   absolute_gamma, iv30_mfr,
                    full_payload, fetched_at, source_endpoint)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, NOW(), %s)
                 ON CONFLICT (ticker, snapshot_date) DO UPDATE SET
                   price             = EXCLUDED.price,
                   range_low         = EXCLUDED.range_low,
@@ -254,6 +274,11 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                   rv                = EXCLUDED.rv,
                   daily_pct_change  = EXCLUDED.daily_pct_change,
                   previous_day_volume = EXCLUDED.previous_day_volume,
+                  call_wall_mfr     = EXCLUDED.call_wall_mfr,
+                  put_wall_mfr      = EXCLUDED.put_wall_mfr,
+                  zero_gamma        = EXCLUDED.zero_gamma,
+                  absolute_gamma    = EXCLUDED.absolute_gamma,
+                  iv30_mfr          = EXCLUDED.iv30_mfr,
                   full_payload      = EXCLUDED.full_payload,
                   fetched_at        = NOW()
                 """,
@@ -271,6 +296,11 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                     p.get("rv"),
                     p.get("dailyPercentChange"),
                     p.get("previousDayVolume"),
+                    call_wall_mfr,
+                    put_wall_mfr,
+                    zero_gamma,
+                    absolute_gamma,
+                    iv30_mfr,
                     json.dumps(payload),
                     source_endpoint,
                 ),
