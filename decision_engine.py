@@ -1,13 +1,16 @@
+# spotgamma stripped from live path 2026-05-24; historical snapshots still ingested for ML
 """Bot's decision brain — Claude API call over the multi-source corpus.
 
 The trade decision is NOT a Python rule lookup. It's a Claude API call that
 synthesizes:
   - Hedgeye Quad + VIX bucket            (monitor_context.get_hedgeye_ctx)
   - Hedgeye Risk Range zone              (latest hedgeye_risk_ranges row)
-  - SpotGamma walls + IV/skew + regime   (spotgamma_client.latest)
   - MFR range + Hurst + trend            (mfr_snapshots latest)
   - Yahoo live price                     (yfinance_client.latest)
   - Recent corpus snippets (FTS)         (HU transcripts, Macro Show, VolSignals)
+SpotGamma snapshots are no longer read in the live decision path
+(2026-05-24); the ingestion pipeline still writes spotgamma_snapshots /
+spotgamma_* corpus_documents rows for future ML training.
 
 Output is constrained to the bps sizing schema defined in recommender.py
 (ALLOWED_BPS, PER_FILL_CEILING_USD). Claude proposes a tier; Python validates
@@ -182,13 +185,16 @@ def _get_mfr_latest(ticker: str) -> Optional[dict]:
 
 
 def _get_spotgamma_latest(ticker: str) -> Optional[dict]:
-    """Most recent spotgamma_snapshots row via spotgamma_client.latest."""
-    try:
-        import spotgamma_client
-        return spotgamma_client.latest(ticker)
-    except Exception as e:
-        log.warning("decision_engine: spotgamma fetch failed for %s: %s", ticker, e)
-        return None
+    """SpotGamma stripped from live decision path 2026-05-24. Always None.
+    Ingestion still writes spotgamma_snapshots rows for future ML training,
+    but the live decision path no longer reads them. To restore: delete
+    this stub and uncomment the spotgamma_client.latest() call below."""
+    # try:
+    #     import spotgamma_client
+    #     return spotgamma_client.latest(ticker)
+    # except Exception as e:
+    #     log.warning("decision_engine: spotgamma fetch failed for %s: %s", ticker, e)
+    return None
 
 
 def _get_yahoo_latest(ticker: str) -> Optional[dict]:
@@ -236,10 +242,10 @@ def _get_corpus_snippets(ticker: str, *, signal_conviction: Optional[str]) -> st
 
 
 def _get_flowpatrol_for_ticker(ticker: str) -> str:
-    """SpotGamma Flow Patrol context for a ticker: the latest
-    spotgamma_flowpatrol corpus doc's Executive Summary / Headlines
-    (market-wide positioning) plus any lines that name the ticker.
-    Empty string when no Flow Patrol doc is ingested."""
+    """SpotGamma stripped from live decision path 2026-05-24. Always empty.
+    Flow Patrol corpus docs are still ingested for ML training."""
+    return ""
+    # Disabled. Original implementation kept below for restore.
     if not ticker:
         return ""
     try:
@@ -974,14 +980,8 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     ))
     sections.append(json.dumps(_trim(etf_block), indent=2, default=str))
     sections.append("")
-    sections.append("## SpotGamma (latest equity hub)")
-    sections.append(_spotgamma_framing_line(ctx.get("spotgamma") or {}, mfr_price))
-    sections.append(json.dumps(_trim(ctx.get("spotgamma") or {}), indent=2, default=str))
-    sections.append("")
-    fp_block = _get_flowpatrol_for_ticker(ctx.get("ticker"))
-    if fp_block:
-        sections.append(fp_block)
-        sections.append("")
+    # SpotGamma stripped from live path 2026-05-24 — block intentionally absent.
+    # Snapshots and Flow Patrol corpus docs still ingest for future ML training.
     mc_block = _get_macro_commentary_for_ticker(ctx.get("ticker"))
     if mc_block:
         sections.append(mc_block)
@@ -1336,8 +1336,11 @@ def decide(
         "etf_pro_low":     (ctx.get("etf_pro_range") or {}).get("range_low"),
         "etf_pro_high":    (ctx.get("etf_pro_range") or {}).get("range_high"),
         "etf_pro_week":    (ctx.get("etf_pro_range") or {}).get("week_of"),
-        "spotgamma_call_wall": ((ctx.get("spotgamma") or {}).get("call_wall")),
-        "spotgamma_put_wall":  ((ctx.get("spotgamma") or {}).get("put_wall")),
+        # SG stripped from live path 2026-05-24 — keys preserved as None so
+        # downstream alert templates and the alerts_fired write path don't
+        # need to special-case the absence.
+        "spotgamma_call_wall": None,
+        "spotgamma_put_wall":  None,
         "mfr_range_low":   (ctx.get("mfr") or {}).get("range_low"),
         "mfr_range_high":  (ctx.get("mfr") or {}).get("range_high"),
         "mfr_hurst":       (ctx.get("mfr") or {}).get("hurst"),

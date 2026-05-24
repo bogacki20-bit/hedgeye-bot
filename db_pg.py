@@ -1,3 +1,6 @@
+# spotgamma stripped from live path 2026-05-24; historical snapshots still ingested for ML
+# (alerts_fired.spotgamma_context column preserved; callers now write {} / None.
+#  spotgamma_snapshots writes continue via spotgamma_client.py.)
 """
 Postgres database layer — built alongside SQLite database.py during migration.
 

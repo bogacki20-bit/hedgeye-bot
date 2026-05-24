@@ -1,7 +1,9 @@
+# spotgamma stripped from live path 2026-05-24; historical snapshots still ingested for ML
 """
-Builds Hedgeye / SpotGamma context dicts from corpus_documents. Used by
-price_monitor.compose_recommendation to attach real macro / dealer context to
-alerts_fired rows (replacing the previous hardcoded placeholders).
+Builds Hedgeye / SpotGamma context dicts from corpus_documents.
+SpotGamma read (get_spotgamma_ctx) is no longer called by the live decision
+path as of 2026-05-24; it is kept defined for future restore. Hedgeye
+context (get_hedgeye_ctx) is still consumed by price_monitor.
 
 Both lookups are non-fatal — return {} on any error or if no relevant doc is
 found. Results are TTL-cached (15 min) so a monitor cycle that fans out across

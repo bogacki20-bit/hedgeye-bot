@@ -1,3 +1,4 @@
+# spotgamma stripped from live path 2026-05-24; historical snapshots still ingested for ML
 """
 Live price monitor — polls yfinance, compares to Hedgeye Risk Range levels,
 fires Telegram alerts when price enters scale-in / trim zones or breaks
@@ -521,26 +522,17 @@ def compose_recommendation(
     """
     icon, label = ZONE_LABELS.get(zone, ("", zone))
 
-    # Hedgeye / SpotGamma context — pulled from recent corpus_documents by
-    # monitor_context. Both lookups are non-fatal (return {} on any error) and
-    # TTL-cached so a fanout cycle doesn't hammer the DB. Resulting dicts get
-    # persisted on alerts_fired (JSONB) for ML training context.
-    # Skip SG entirely for macro tickers — SpotGamma has no per-ticker
-    # coverage for commodities / rates / FX / VIX / global indices, and
-    # get_spotgamma_ctx's tier-2 fallback returns the latest SPX-focused
-    # founder's note for ANY non-tier-1 ticker. That's how BRENT and UST10Y
-    # alerts ended up citing $750/$739 walls (the SPY levels).
-    _macro_skip_sg = ticker.upper() in MACRO_NO_SG_TICKERS
-
+    # Hedgeye context still pulled from monitor_context (TTL-cached).
+    # SpotGamma stripped from live path 2026-05-24 — spotgamma_ctx is always
+    # {} now. spotgamma_snapshots / spotgamma_* corpus_documents continue to
+    # ingest for ML training; only the read into the alert template is gone.
     try:
-        from monitor_context import get_hedgeye_ctx, get_spotgamma_ctx
+        from monitor_context import get_hedgeye_ctx
         hedgeye_ctx = get_hedgeye_ctx() or {}
-        spotgamma_ctx = ({} if _macro_skip_sg
-                         else (get_spotgamma_ctx(ticker) or {}))
     except Exception as e:
         log.warning(f"monitor_context lookup failed (continuing with empty ctx): {e}")
         hedgeye_ctx = {}
-        spotgamma_ctx = {}
+    spotgamma_ctx: dict = {}
 
     # Suggested $ size: Style B (bps × account value, clamped at $1K per-fill
     # ceiling). Single source of truth is recommender.size_for(conviction, account).

@@ -1,3 +1,4 @@
+# spotgamma stripped from live path 2026-05-24; historical snapshots still ingested for ML
 """Proactive idea scanner — the bot's own trade-idea generator.
 
 Where the email parser only acts when Hedgeye sends an email, this scanner
@@ -228,7 +229,7 @@ def _format_alert(decision: dict) -> tuple[str, str]:
         f"→ {action} {ticker}  size {size_str}",
         f"confidence: {conf:.0%}" if isinstance(conf, (int, float)) else "",
         f"quad: {ctx.get('hedgeye_quad')} | vix bucket: {ctx.get('vix_bucket')}",
-        f"px {ctx.get('yahoo_price')} | sg put/call walls {ctx.get('spotgamma_put_wall')}/{ctx.get('spotgamma_call_wall')}",
+        f"px {ctx.get('yahoo_price')}",  # SG line stripped 2026-05-24
         f"mfr {ctx.get('mfr_range_low')}–{ctx.get('mfr_range_high')} hurst {ctx.get('mfr_hurst')}",
         "",
         reasoning[:400],
