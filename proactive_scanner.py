@@ -229,38 +229,19 @@ def _persist_recommendation(decision: dict) -> None:
 # ─────────────────────────── Notification ───────────────────────────
 
 def _format_alert(decision: dict) -> tuple[str, str]:
-    """Returns (title, body) Telegram-friendly. Mirrors the email_parser
-    formatter so the user sees a consistent presentation regardless of
-    whether the trigger was an email or a proactive scan."""
-    ticker = decision.get("ticker", "?")
-    action = decision.get("action", "WATCH")
-    conviction = decision.get("conviction", "?")
-    bps = decision.get("bps")
+    """Returns (title, body) Telegram-friendly — 1-line notifier format
+    (rollback architecture, 2026-05-24). The notifier's `reasoning` field is
+    already a fully-formed single line; the body is that line plus a compact
+    sizing tag when bps is populated."""
+    ticker  = decision.get("ticker", "?")
+    action  = decision.get("action", "WATCH")
+    bps     = decision.get("bps")
     dollars = decision.get("recommended_dollars")
-    conf = decision.get("confidence")
-    reasoning = decision.get("reasoning") or ""
-    evidence = decision.get("evidence") or []
-    ctx = decision.get("context_summary") or {}
+    reasoning = (decision.get("reasoning") or "").strip()
 
-    size_str = f"${dollars:.0f} ({bps} bps)" if dollars and bps else "no size"
-    title = f"Scan: {action} {ticker} — {conviction}"
-
-    lines = [
-        f"→ {action} {ticker}  size {size_str}",
-        f"confidence: {conf:.0%}" if isinstance(conf, (int, float)) else "",
-        f"quad: {ctx.get('hedgeye_quad')} | vix bucket: {ctx.get('vix_bucket')}",
-        f"px {ctx.get('yahoo_price')}",  # SG line stripped 2026-05-24
-        f"mfr {ctx.get('mfr_range_low')}–{ctx.get('mfr_range_high')} hurst {ctx.get('mfr_hurst')}",
-        "",
-        reasoning[:400],
-    ]
-    if evidence:
-        lines.append("")
-        lines.append("evidence:")
-        for e in evidence[:4]:
-            lines.append(f"  • {str(e)[:120]}")
-
-    body = "\n".join(L for L in lines if L is not None)
+    title = f"{action} {ticker}"
+    size_tag = f" — ${dollars:.0f} ({bps} bps)" if dollars and bps else ""
+    body = reasoning + size_tag if reasoning else f"{action} {ticker}{size_tag}"
     return title, body[:1024]
 
 

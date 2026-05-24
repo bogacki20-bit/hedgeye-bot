@@ -1184,6 +1184,183 @@ def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
 
 # ─────────────────────────── Main entry point ───────────────────────────
 
+NOTIFIER_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-haiku-4-5-20251001")
+
+_NOTIFIER_PROMPT = """You are a terse trading notifier. Given a ticker plus
+the Hedgeye Risk Range and MyFractalRange data, classify the setup as one of
+three actions:
+
+  BUY   — price near or below RR low / MFR low, trend supportive, scale-in zone
+  WATCH — price mid-range or ambiguous; warrants attention but no fill yet
+  SKIP  — no edge here; ignore this cycle
+
+The ticker has ALREADY passed the Quad-alignment filter (it is in the active
+slice for both the monthly and quarterly Quads). You do not need to second-
+guess the regime call.
+
+Output EXACTLY one line, this shape:
+  ACTION TICKER — brief reason (≤ 80 chars)
+
+Examples:
+  BUY OIH — price 282 sits near RR low 280, MFR trend bullish, scale-in setup
+  WATCH XLE — mid-range, no breakout signal yet
+  SKIP TLT — trend bearish, range break above, fading
+"""
+
+
+def decide_notifier(
+    ticker: str,
+    *,
+    signal_origin: str = "proactive_scan",
+    signal_conviction: Optional[str] = None,
+    account_value_usd: Optional[float] = None,
+) -> Optional[dict]:
+    """Cheap Haiku-4.5 notifier (rollback architecture, 2026-05-24).
+
+    Single API call. ~10-line prompt. 1-line output. No prompt caching, no
+    SG context, no doctrine block — the active-slice resolver already encoded
+    Quad alignment by selecting this ticker in the first place.
+
+    Returns a decision dict that satisfies the same contract as legacy
+    `decide()` — proactive_scanner._persist_recommendation,
+    _was_recently_alerted, and _format_alert only read these keys:
+      conviction, direction, action, bps, recommended_dollars,
+      confidence, reasoning, evidence, context_summary, ticker,
+      signal_origin, signal_conviction, account_value_usd, decided_at.
+
+    None on fatal error (missing API key, network).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        log.error("ANTHROPIC_API_KEY not set; cannot run notifier")
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        log.error("anthropic package not installed")
+        return None
+
+    # Pull the minimal context the notifier needs.
+    rr  = _get_risk_range(ticker)  or {}
+    mfr = _get_mfr_latest(ticker)  or {}
+    yh  = _get_yahoo_latest(ticker) or {}
+
+    price = mfr.get("price") or yh.get("price")
+    rr_lo = rr.get("buy_trade")
+    rr_hi = rr.get("sell_trade")
+    mfr_lo = mfr.get("range_low")
+    mfr_hi = mfr.get("range_high")
+    trend  = mfr.get("trend_signal")
+    hurst  = mfr.get("hurst")
+
+    # Compute the deterministic zone tag — fold into the prompt so the model
+    # doesn't have to do range math.
+    zone = "unknown"
+    try:
+        if price is not None and mfr_lo is not None and mfr_hi is not None:
+            from price_monitor import compute_zone
+            zone = compute_zone(float(price), float(mfr_lo), float(mfr_hi))
+    except Exception:
+        pass
+
+    user_msg = (
+        f"Ticker: {ticker.upper()}\n"
+        f"Price: {price}\n"
+        f"Hedgeye Risk Range: low={rr_lo}, high={rr_hi}\n"
+        f"MFR: range={mfr_lo}-{mfr_hi}, trend={trend}, hurst={hurst}\n"
+        f"MFR zone: {zone}\n"
+        f"Signal origin: {signal_origin}"
+        + (f"\nHedgeye-tagged conviction: {signal_conviction}"
+           if signal_conviction else "")
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=NOTIFIER_MODEL,
+            max_tokens=120,
+            system=_NOTIFIER_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        line = "".join(getattr(b, "text", "") for b in resp.content
+                       if getattr(b, "type", None) == "text").strip().splitlines()[0]
+    except Exception as e:
+        log.error("notifier API call failed for %s: %s", ticker, e)
+        return None
+
+    # Parse the leading verb. Accept BUY/WATCH/SKIP only.
+    head = (line.split(None, 1)[0] if line else "").upper()
+    action_map = {"BUY": "BUY", "WATCH": "WATCH", "SKIP": "WATCH"}
+    action = action_map.get(head)
+    if action is None:
+        log.warning("notifier returned non-conforming line for %s: %s", ticker, line)
+        action = "WATCH"
+
+    # Resolve account value for downstream sizing math.
+    if account_value_usd is None:
+        try:
+            from portfolio import account_value, hedgeye_target_account
+            acct = hedgeye_target_account("Long")
+            account_value_usd = float(account_value(acct) or 0)
+        except Exception:
+            account_value_usd = 50_000.0
+
+    # Sizing: BUY → 50 bps adder by default (notifier doesn't escalate to
+    # 100bps starters automatically; operator promotes via reply). WATCH/SKIP
+    # → null bps, null dollars.
+    bps: Optional[int] = 50 if action == "BUY" else None
+    dollars: Optional[float] = None
+    if bps:
+        try:
+            from recommender import size_from_bps
+            dollars = size_from_bps(bps, account_value_usd)
+        except Exception:
+            dollars = None
+
+    decision: dict = {
+        "ticker":            ticker.upper(),
+        "signal_origin":     signal_origin,
+        "signal_conviction": signal_conviction,
+        "account_value_usd": account_value_usd,
+        "conviction":        "Adding" if action == "BUY" else "Monitor",
+        "direction":         "long",   # notifier defaults to long-side scale-in
+        "action":            action,
+        "bps":               bps,
+        "recommended_dollars": dollars,
+        "confidence":        0.5,     # not used in actionability gate; placeholder
+        "reasoning":         line,
+        "evidence":          [],
+        "decided_at":        datetime.utcnow().isoformat() + "Z",
+        "context_summary": {
+            "hedgeye_quad":    None,   # quad info is now metadata, not in prompt
+            "vix_bucket":      None,
+            "risk_range_low":  rr_lo,
+            "risk_range_high": rr_hi,
+            "mfr_range_low":   mfr_lo,
+            "mfr_range_high":  mfr_hi,
+            "mfr_hurst":       hurst,
+            "yahoo_price":     price,
+            "mfr_zone":        zone,
+            # SG keys preserved for downstream template compatibility
+            "spotgamma_call_wall": None,
+            "spotgamma_put_wall":  None,
+        },
+        # Prompt-cache telemetry kept at zero — notifier doesn't cache.
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens":     0,
+        "input_tokens":                0,
+        "output_tokens":               0,
+        "prompt_context_full": {
+            "model":      NOTIFIER_MODEL,
+            "system":     _NOTIFIER_PROMPT,
+            "user":       user_msg,
+            "raw_output": line,
+            "decided_at": datetime.utcnow().isoformat() + "Z",
+        },
+    }
+    return decision
+
+
 def decide(
     ticker: str,
     *,
@@ -1191,19 +1368,30 @@ def decide(
     signal_conviction: Optional[str] = None,
     account_value_usd: Optional[float] = None,
 ) -> Optional[dict]:
-    """Call the decision engine for `ticker`. Returns the validated decision
-    dict, or None on fatal error (e.g. missing Anthropic key).
+    """Notifier-mode entry point (rollback architecture, 2026-05-24).
 
-    Args:
-        ticker: stock/ETF symbol.
-        signal_origin: 'rta' / 'risk_range' / 'proactive_scan' / 'manual' —
-            stamped on the resulting decision for audit.
-        signal_conviction: if the classifier already tagged a conviction tier
-            (from a Hedgeye email), pass it; the prompt presents it as a
-            user-provided input that Claude can corroborate or override.
-        account_value_usd: target account's total value, for bps sizing math.
-            If None, defaults to the Individual account via portfolio.account_value.
-    """
+    Delegates to `decide_notifier`. The heavyweight legacy path
+    (`_decide_legacy` below — Sonnet 4.5, 3-block cached prompt, full
+    doctrine + SG + corpus context) is preserved unreachable for future
+    restore."""
+    return decide_notifier(
+        ticker,
+        signal_origin=signal_origin,
+        signal_conviction=signal_conviction,
+        account_value_usd=account_value_usd,
+    )
+
+
+def _decide_legacy(
+    ticker: str,
+    *,
+    signal_origin: str = "proactive_scan",
+    signal_conviction: Optional[str] = None,
+    account_value_usd: Optional[float] = None,
+) -> Optional[dict]:
+    """Legacy heavyweight decision engine — Sonnet 4.5, 3-block cached prompt,
+    full doctrine + SG (now stubbed) + corpus context. Preserved for restore.
+    NOT called in the live path as of 2026-05-24."""
     # Diagnostic: log env state at function entry, before any other imports.
     _early_key = os.environ.get("ANTHROPIC_API_KEY", "")
     log.info(
