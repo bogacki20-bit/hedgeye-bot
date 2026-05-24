@@ -61,16 +61,41 @@ def _resolve_yf_symbol(ticker: str) -> Optional[str]:
 def fetch_raw(ticker: str) -> Optional[dict]:
     """Fetch today's OHLCV + prev close for `ticker`.
 
-    Routes through PRICE_FEED env flag — 'yfinance' (default) or 'polygon'.
+    Routes through PRICE_FEED env flag — 'yfinance' (default), 'ibkr', or
+    'polygon'. IBKR routes via tools.price_feed_ibkr against the ibeam
+    gateway; polygon via tools.price_feed_polygon; both fall through to
+    yfinance on ANY error (gateway unreachable, conid resolution fail,
+    HTTP 5xx, empty snapshot, missing API key) so the bot can never
+    panic on a market-data outage.
+
     Returns a flat dict with: yf_symbol, snapshot_date, price, open, high,
     low, close, prev_close, daily_change, daily_change_pct, volume,
     full_payload.
 
-    Returns None on 404, malformed data, or if the feed is unavailable.
+    Returns None on 404, malformed data, or if every feed is unavailable.
     Never raises.
     """
     feed = (os.environ.get("PRICE_FEED") or "yfinance").lower().strip()
-    if feed == "polygon":
+    if feed == "ibkr":
+        try:
+            from tools.price_feed_ibkr import get_quote as _ibkr_quote
+        except ImportError as e:
+            log.warning("tools.price_feed_ibkr unavailable, falling back "
+                        "to yfinance: %s", e)
+        else:
+            try:
+                q = _ibkr_quote(ticker)
+            except Exception as e:
+                # Defensive — price_feed_ibkr swallows its own errors and
+                # returns None, but if anything escapes we still fall back.
+                log.warning("ibkr feed raised for %s (falling back to yfinance): %s",
+                            ticker, e)
+                q = None
+            if q is not None:
+                return q
+            log.info("price_feed degraded: ibkr returned no quote for %s; "
+                     "falling back to yfinance", ticker)
+    elif feed == "polygon":
         try:
             from tools.price_feed_polygon import get_quote
         except ImportError as e:

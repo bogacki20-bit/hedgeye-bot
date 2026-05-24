@@ -1,0 +1,18 @@
+# deploy/ibkr-gateway/railway.toml
+# Railway service config for the IBKR market-data gateway. This is a SECOND
+# service deployed alongside the bot; the bot talks to it on the Railway
+# private network. See README.md in this directory for setup steps.
+
+[build]
+# Build from the public voyz/ibeam image — no local Dockerfile.
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+# Internal port — ibeam exposes the Client Portal API on 5000. Do NOT
+# create a public domain for this service; the bot reaches it via
+# ibkr-gateway.railway.internal:5000.
+healthcheckPath = "/v1/api/iserver/auth/status"
+healthcheckTimeout = 30
