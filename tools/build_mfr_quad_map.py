@@ -348,6 +348,24 @@ def _price_monitor_universe() -> list[str]:
         return []
 
 
+def _watchlist_universe() -> list[str]:
+    """Operator's MFR account watchlist via mfr_client.list_watchlist().
+
+    Added 2026-05-24 to close the loop on the fan-out fix (commit b89be88):
+    tickers the operator drops into his MFR account should auto-classify
+    on the next quad-map rebuild instead of needing manual entry.
+
+    Returns the sorted distinct ticker list. Empty list on API error /
+    missing MFR_API_TOKEN.
+    """
+    try:
+        import mfr_client
+        return mfr_client.list_watchlist()
+    except Exception as e:
+        log.warning("MFR watchlist universe fetch failed (continuing without): %s", e)
+        return []
+
+
 def _db_universe() -> list[str]:
     """UNION of hedgeye_* product tables, recent window. Empty list on DB error."""
     url = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
@@ -408,8 +426,10 @@ def _better(new_src: str, existing_src: str) -> bool:
 
 # ─────────────────────────── Build ──────────────────────────────────────────
 
-def build(include_db: bool = False, infer_with_claude: bool = False) -> dict:
+def build(include_db: bool = False, infer_with_claude: bool = False,
+          include_watchlist: bool = False) -> dict:
     existing = _load_existing()
+    pre_tickers = set((existing.get("tickers") or {}).keys())
     tickers_out: dict = dict(existing.get("tickers") or {})
     meta_out:    dict = dict(existing.get("meta")    or {})
 
@@ -428,12 +448,15 @@ def build(include_db: bool = False, infer_with_claude: bool = False) -> dict:
             tickers_out[tu] = entry
             meta_out[tu] = {"source": "seed=doctrine"}
 
-    # 2. Build the working universe: doctrine + price_monitor + (optional) DB.
+    # 2. Build the working universe: doctrine + price_monitor + heuristic
+    #    map + (optional) DB recent UNION + (optional) MFR account watchlist.
     universe: set[str] = set(doc_sides.keys())
     universe.update(t.upper() for t in _price_monitor_universe())
     universe.update(TICKER_SECTOR.keys())
     if include_db:
         universe.update(_db_universe())
+    if include_watchlist:
+        universe.update(_watchlist_universe())
 
     # 3. Heuristic pass on anything still pending.
     pending: list[str] = []
@@ -481,6 +504,8 @@ def build(include_db: bool = False, infer_with_claude: bool = False) -> dict:
         encoding="utf-8",
     )
 
+    post_tickers = set(out["tickers"].keys())
+    added = sorted(post_tickers - pre_tickers)
     return {
         "total":     len(out["tickers"]),
         "doctrine":  sum(1 for v in meta_out.values() if v.get("source") == "seed=doctrine"),
@@ -488,6 +513,7 @@ def build(include_db: bool = False, infer_with_claude: bool = False) -> dict:
         "claude":    sum(1 for v in meta_out.values() if v.get("source") == "inferred=claude"),
         "pending":   sum(1 for v in meta_out.values() if v.get("source") == "inferred=pending"),
         "operator":  sum(1 for v in meta_out.values() if v.get("source") == "operator"),
+        "added":     added,
     }
 
 
@@ -592,17 +618,37 @@ def _cli(argv=None) -> int:
                     help="Also union the universe with the recent hedgeye_* "
                          "product tables from Railway Postgres "
                          "(requires DATABASE_PUBLIC_URL / DATABASE_URL).")
+    ap.add_argument("--include-watchlist", action="store_true",
+                    help="Also union the universe with the operator's MFR "
+                         "account watchlist via mfr_client.list_watchlist() "
+                         "(requires MFR_API_TOKEN). Picks up tickers the "
+                         "operator added through the MFR UI.")
     ap.add_argument("--infer-with-claude", action="store_true",
                     help="Run a Haiku-4.5 batched classification pass over "
                          "tickers still tagged inferred=pending after the "
                          "deterministic seed + heuristic pass.")
+    ap.add_argument("--merge", action="store_true",
+                    help="No-op alias: merge semantics are the DEFAULT "
+                         "behavior — every rebuild loads the existing yaml "
+                         "and only overwrites entries with a strictly "
+                         "higher-confidence source (operator > doctrine > "
+                         "claude > heuristic > pending). Operator-curated "
+                         "entries (meta source=operator) are always "
+                         "preserved.")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    summary = build(include_db=a.include_db, infer_with_claude=a.infer_with_claude)
+    summary = build(include_db=a.include_db,
+                    infer_with_claude=a.infer_with_claude,
+                    include_watchlist=a.include_watchlist)
+    added = summary.pop("added", [])
     print("mfr_quad_map.yaml built:")
     for k, v in summary.items():
         print(f"  {k:9} = {v}")
+    if added:
+        print(f"  new      = {len(added)} ticker(s): {', '.join(added)}")
+    else:
+        print("  new      = 0 (no new tickers vs prior yaml)")
     return 0
 
 

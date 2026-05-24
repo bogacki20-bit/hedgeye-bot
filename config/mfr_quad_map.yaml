@@ -3,7 +3,7 @@
 # (meta source=operator) win over rebuilds.
 #
 # Sides per Quad: long | short | neutral.
-# Generated 2026-05-24. Tickers: 298.
+# Generated 2026-05-24. Tickers: 363.
 
 tickers:
   AAAU:
@@ -66,6 +66,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Financials
+  AMAT:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Semiconductors
   AMD:
     quad_1: long
     quad_2: long
@@ -204,6 +210,12 @@ tickers:
     quad_3: neutral
     quad_4: long
     sector: FixedIncome-IGCredit
+  BNDX:
+    quad_1: neutral
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: Fixed Income-Bonds
   BNO:
     quad_1: neutral
     quad_2: long
@@ -276,6 +288,12 @@ tickers:
     quad_3: long
     quad_4: long
     sector: Equity-Staples
+  CAT:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
   CAVA:
     quad_1: long
     quad_2: long
@@ -360,6 +378,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Tech
+  COP:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
   COPPER:
     quad_1: long
     quad_2: long
@@ -402,6 +426,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Tech
+  CSX:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
   CVX:
     quad_1: neutral
     quad_2: long
@@ -420,6 +450,12 @@ tickers:
     quad_3: neutral
     quad_4: neutral
     sector: FX-CNY
+  CZR:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
   DAR:
     quad_1: short
     quad_2: short
@@ -456,6 +492,12 @@ tickers:
     quad_3: short
     quad_4: neutral
     sector: Equity-Tech
+  DGX:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Healthcare
   DIA:
     quad_1: long
     quad_2: long
@@ -474,6 +516,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Tech
+  DVN:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
   DXY:
     quad_1: short
     quad_2: short
@@ -498,6 +546,24 @@ tickers:
     quad_2: neutral
     quad_3: neutral
     sector: FixedIncome-EMDebt
+  EMR:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
+  EMXC:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: long
+    sector: Equity-EM-Defensive
+  ENB:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: neutral
+    sector: Equity-Energy-MLPs
   EPHE:
     quad_1: long
     quad_2: long
@@ -528,6 +594,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: FX-EUR
+  EWA:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-EM-Australia
   EWC:
     quad_1: long
     quad_2: long
@@ -546,6 +618,12 @@ tickers:
     quad_3: neutral
     quad_4: short
     sector: Equity-EM-HongKong
+  EWJ:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Developed-Japan
   EWN:
     quad_1: neutral
     quad_2: long
@@ -564,18 +642,60 @@ tickers:
     quad_3: neutral
     quad_4: short
     sector: Equity-EM-France
+  EWS:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-EM-Singapore
+  EWU:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Developed-UK
   EWW:
     quad_1: long
     quad_2: long
     quad_3: short
     quad_4: short
     sector: Equity-Broad
+  EWY:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-EM-Korea
+  EWZ:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-EM-Brazil
   EXP:
     quad_1: neutral
     quad_2: long
     quad_3: neutral
     quad_4: short
     sector: Equity-Materials
+  EZA:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-EM-South Africa
+  FANG:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  FCFS:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Financials
   FDRXX:
     quad_1: short
     quad_2: short
@@ -594,6 +714,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Discretionary
+  FSLY:
+    quad_1: long
+    quad_2: short
+    quad_3: short
+    quad_4: short
+    sector: Equity-Tech
   FWONK:
     quad_1: long
     quad_2: neutral
@@ -630,6 +756,12 @@ tickers:
     quad_3: long
     quad_4: long
     sector: FX-CHF
+  FXI:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-EM-China
   FXM:
     quad_1: long
     quad_2: long
@@ -660,6 +792,18 @@ tickers:
     quad_4: short
     quad_3: neutral
     sector: Crypto
+  GDX:
+    quad_1: short
+    quad_2: neutral
+    quad_3: long
+    quad_4: neutral
+    sector: Commodity-Gold-Miners
+  GEL:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
   GII:
     quad_1: long
     quad_2: long
@@ -696,6 +840,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Tech
+  GRMN:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
   GRNY:
     quad_1: neutral
     quad_2: neutral
@@ -714,6 +864,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Discretionary
+  HEFA:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Developed-EM
   HLT:
     quad_1: long
     quad_2: long
@@ -774,6 +930,18 @@ tickers:
     quad_3: neutral
     quad_4: long
     sector: FixedIncome-TreasuryBelly
+  IFRA:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Infrastructure
+  IGOV:
+    quad_1: neutral
+    quad_2: short
+    quad_3: neutral
+    quad_4: long
+    sector: Fixed Income-Bonds
   IGV:
     quad_1: long
     quad_2: neutral
@@ -786,6 +954,12 @@ tickers:
     quad_3: short
     quad_4: long
     sector: Equity-Healthcare
+  ILF:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-EM-Latin America
   ILMN:
     quad_1: neutral
     quad_2: neutral
@@ -864,6 +1038,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Industrial
+  JBS:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Materials
   JNK:
     quad_1: long
     quad_2: long
@@ -906,6 +1086,12 @@ tickers:
     quad_3: long
     quad_4: long
     sector: Equity-Healthcare
+  LMT:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Discretionary-Defense
   LOTMY:
     quad_1: neutral
     quad_2: neutral
@@ -918,6 +1104,12 @@ tickers:
     quad_1: neutral
     quad_3: neutral
     sector: FixedIncome-IGCredit
+  LRCX:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Semiconductors
   LYB:
     quad_1: short
     quad_2: long
@@ -942,6 +1134,12 @@ tickers:
     quad_3: neutral
     quad_4: neutral
     sector: Unknown
+  MAR:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary-Travel
   MARA:
     quad_1: long
     quad_2: neutral
@@ -966,6 +1164,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Discretionary
+  MLPX:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: neutral
+    sector: Equity-Energy-MLPs
   MNST:
     quad_1: short
     quad_2: short
@@ -978,6 +1182,12 @@ tickers:
     quad_3: neutral
     quad_4: short
     sector: Equity-Materials
+  MRVL:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Semiconductors
   MS:
     quad_1: long
     quad_2: long
@@ -1026,6 +1236,12 @@ tickers:
     quad_4: long
     quad_1: neutral
     sector: FixedIncome-Munis
+  MUSA:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Developed-Misc
   NATGAS:
     quad_1: neutral
     quad_2: long
@@ -1050,6 +1266,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Comm
+  NFRA:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Infrastructure
   NIKK:
     quad_1: long
     quad_2: long
@@ -1128,6 +1350,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Industrials
+  OUT:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
   OXY:
     quad_1: neutral
     quad_2: long
@@ -1146,6 +1374,18 @@ tickers:
     quad_3: long
     quad_4: neutral
     sector: Commodity-Silver
+  PAM:
+    quad_1: neutral
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Metals
+  PAVE:
+    quad_1: neutral
+    quad_2: long
+    quad_3: neutral
+    quad_4: neutral
+    sector: Equity-Infrastructure
   PBR:
     quad_1: neutral
     quad_2: long
@@ -1158,6 +1398,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Industrials
+  PDBC:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Commodity-Multi
   PEB:
     quad_1: neutral
     quad_2: neutral
@@ -1194,6 +1440,12 @@ tickers:
     quad_3: long
     quad_4: long
     sector: Equity-Staples
+  POET:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
   PR:
     quad_1: neutral
     quad_2: long
@@ -1302,6 +1554,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Discretionary
+  RSI:
+    quad_1: neutral
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Industrials
   RSP:
     quad_1: long
     quad_2: long
@@ -1332,6 +1590,18 @@ tickers:
     quad_3: short
     quad_4: long
     sector: Equity-Dividend
+  SFD:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  SHEL:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
   SHY:
     quad_1: short
     quad_2: neutral
@@ -1428,6 +1698,12 @@ tickers:
     quad_3: long
     quad_4: neutral
     sector: FixedIncome-TIPS
+  SWBI:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
   SXT:
     quad_1: neutral
     quad_2: long
@@ -1464,6 +1740,12 @@ tickers:
     quad_4: short
     quad_2: neutral
     sector: FixedIncome-TIPS
+  TJX:
+    quad_1: long
+    quad_2: neutral
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
   TKO:
     quad_1: long
     quad_2: neutral
@@ -1494,6 +1776,12 @@ tickers:
     quad_3: neutral
     quad_4: neutral
     sector: Unknown
+  TRP:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: neutral
+    sector: Equity-Energy-MLPs
   TSLA:
     quad_1: long
     quad_2: long
@@ -1518,6 +1806,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Industrials
+  TTE:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
   TTWO:
     quad_1: long
     quad_2: neutral
@@ -1554,6 +1848,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Consumer
+  ULS:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
   UNG:
     quad_2: long
     quad_3: long
@@ -1566,6 +1866,12 @@ tickers:
     quad_3: neutral
     quad_4: long
     sector: Equity-Healthcare
+  URA:
+    quad_1: short
+    quad_2: long
+    quad_3: neutral
+    quad_4: short
+    sector: Equity-Uranium
   URI:
     quad_1: neutral
     quad_2: long
@@ -1584,6 +1890,12 @@ tickers:
     quad_3: long
     quad_4: long
     sector: FX-JPY
+  USMV:
+    quad_1: neutral
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Low Volatility
   USO:
     quad_1: long
     quad_2: long
@@ -1620,6 +1932,18 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Financials
+  VG:
+    quad_1: neutral
+    quad_2: neutral
+    quad_3: neutral
+    quad_4: neutral
+    sector: Unknown
+  VGK:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Developed International
   VGT:
     quad_1: long
     quad_2: long
@@ -1650,6 +1974,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Broad
+  VT:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: neutral
+    sector: Equity-Global
   VXF:
     quad_1: long
     quad_2: long
@@ -1662,6 +1992,12 @@ tickers:
     quad_3: neutral
     quad_4: long
     sector: Equity-Dividend
+  VYMI:
+    quad_1: short
+    quad_2: long
+    quad_3: neutral
+    quad_4: long
+    sector: Equity-Dividend High Yield
   WEAT:
     quad_1: neutral
     quad_2: long
@@ -1674,6 +2010,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Financials
+  WMT:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Equity-Staples
   WRBY:
     quad_1: neutral
     quad_2: neutral
@@ -1758,6 +2100,12 @@ tickers:
     quad_3: short
     quad_4: short
     sector: Equity-Discretionary
+  XME:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Materials
   XOM:
     quad_1: neutral
     quad_2: long
@@ -1788,12 +2136,54 @@ tickers:
     quad_3: neutral
     quad_4: neutral
     sector: Unknown
+  YPF:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Equity-Energy
+  YUM:
+    quad_1: long
+    quad_2: long
+    quad_3: short
+    quad_4: short
+    sector: Equity-Discretionary
   ZROZ:
     quad_1: short
     quad_2: short
     quad_3: neutral
     quad_4: long
     sector: FixedIncome-LongDuration
+  ^GVZ:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Index-Volatility
+  ^MOVE:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Index-Bond Volatility
+  ^OVX:
+    quad_1: short
+    quad_2: long
+    quad_3: long
+    quad_4: short
+    sector: Index-Oil Volatility
+  ^RVX:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Index-Russell Volatility
+  ^VXN:
+    quad_1: short
+    quad_2: short
+    quad_3: long
+    quad_4: long
+    sector: Index-Tech Volatility
 meta:
   AAAU:
     source: seed=heuristic
@@ -1825,6 +2215,9 @@ meta:
   ALLY:
     source: seed=heuristic
     sector_inferred: Equity-Financials
+  AMAT:
+    source: inferred=claude
+    sector_inferred: Equity-Semiconductors
   AMD:
     source: seed=heuristic
     sector_inferred: Equity-Tech
@@ -1892,6 +2285,9 @@ meta:
   BND:
     source: seed=heuristic
     sector_inferred: FixedIncome-IGCredit
+  BNDX:
+    source: inferred=claude
+    sector_inferred: Fixed Income-Bonds
   BNO:
     source: seed=heuristic
     sector_inferred: Commodity-Oil
@@ -1928,6 +2324,9 @@ meta:
   CASY:
     source: seed=heuristic
     sector_inferred: Equity-Staples
+  CAT:
+    source: inferred=claude
+    sector_inferred: Equity-Industrials
   CAVA:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
@@ -1970,6 +2369,9 @@ meta:
   COMPQ:
     source: seed=heuristic
     sector_inferred: Equity-Tech
+  COP:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
   COPPER:
     source: seed=heuristic
     sector_inferred: Commodity-Copper
@@ -1990,6 +2392,9 @@ meta:
   CRWV:
     source: seed=heuristic
     sector_inferred: Equity-Tech
+  CSX:
+    source: inferred=claude
+    sector_inferred: Equity-Industrials
   CVX:
     source: seed=heuristic
     sector_inferred: Equity-Energy
@@ -1998,6 +2403,9 @@ meta:
   CYB:
     source: seed=heuristic
     sector_inferred: FX-CNY
+  CZR:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
   DAR:
     source: seed=heuristic
     sector_inferred: Equity-Staples
@@ -2015,6 +2423,9 @@ meta:
   DESK:
     source: inferred=claude
     sector_inferred: Equity-Tech
+  DGX:
+    source: inferred=claude
+    sector_inferred: Equity-Healthcare
   DIA:
     source: seed=heuristic
     sector_inferred: Equity-Broad
@@ -2024,6 +2435,9 @@ meta:
   DRAM:
     source: seed=heuristic
     sector_inferred: Equity-Tech
+  DVN:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
   DXY:
     source: seed=heuristic
     sector_inferred: FX-USD
@@ -2034,6 +2448,15 @@ meta:
     source: seed=doctrine
   EMLC:
     source: seed=doctrine
+  EMR:
+    source: inferred=claude
+    sector_inferred: Equity-Industrials
+  EMXC:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Defensive
+  ENB:
+    source: inferred=claude
+    sector_inferred: Equity-Energy-MLPs
   EPHE:
     source: seed=heuristic
     sector_inferred: Equity-Broad
@@ -2048,6 +2471,9 @@ meta:
   EUR/USD:
     source: seed=heuristic
     sector_inferred: FX-EUR
+  EWA:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Australia
   EWC:
     source: seed=heuristic
     sector_inferred: Equity-Broad
@@ -2057,6 +2483,9 @@ meta:
   EWH:
     source: inferred=claude
     sector_inferred: Equity-EM-HongKong
+  EWJ:
+    source: inferred=claude
+    sector_inferred: Equity-Developed-Japan
   EWN:
     source: inferred=claude
     sector_inferred: Equity-EM-Belgium
@@ -2066,12 +2495,33 @@ meta:
   EWQ:
     source: inferred=claude
     sector_inferred: Equity-EM-France
+  EWS:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Singapore
+  EWU:
+    source: inferred=claude
+    sector_inferred: Equity-Developed-UK
   EWW:
     source: seed=heuristic
     sector_inferred: Equity-Broad
+  EWY:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Korea
+  EWZ:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Brazil
   EXP:
     source: seed=heuristic
     sector_inferred: Equity-Materials
+  EZA:
+    source: inferred=claude
+    sector_inferred: Equity-EM-South Africa
+  FANG:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
+  FCFS:
+    source: inferred=claude
+    sector_inferred: Equity-Financials
   FDRXX:
     source: seed=heuristic
     sector_inferred: FixedIncome-TreasuryBelly
@@ -2081,6 +2531,9 @@ meta:
   FIVE:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
+  FSLY:
+    source: inferred=claude
+    sector_inferred: Equity-Tech
   FWONK:
     source: seed=heuristic
     sector_inferred: Equity-Comm
@@ -2095,6 +2548,9 @@ meta:
   FXF:
     source: seed=heuristic
     sector_inferred: FX-CHF
+  FXI:
+    source: inferred=claude
+    sector_inferred: Equity-EM-China
   FXM:
     source: seed=heuristic
     sector_inferred: FX-MXN
@@ -2109,6 +2565,12 @@ meta:
     sector_inferred: FX-GBP
   GBTC:
     source: seed=doctrine
+  GDX:
+    source: inferred=claude
+    sector_inferred: Commodity-Gold-Miners
+  GEL:
+    source: inferred=claude
+    sector_inferred: Unknown
   GII:
     source: seed=heuristic
     sector_inferred: Equity-Industrials
@@ -2126,6 +2588,9 @@ meta:
   GOOGL:
     source: seed=heuristic
     sector_inferred: Equity-Tech
+  GRMN:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
   GRNY:
     source: inferred=claude
     sector_inferred: Unknown
@@ -2135,6 +2600,9 @@ meta:
   GTBIF:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
+  HEFA:
+    source: inferred=claude
+    sector_inferred: Equity-Developed-EM
   HLT:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
@@ -2163,12 +2631,21 @@ meta:
   IEI:
     source: seed=heuristic
     sector_inferred: FixedIncome-TreasuryBelly
+  IFRA:
+    source: inferred=claude
+    sector_inferred: Equity-Infrastructure
+  IGOV:
+    source: inferred=claude
+    sector_inferred: Fixed Income-Bonds
   IGV:
     source: inferred=claude
     sector_inferred: Equity-Tech
   IHF:
     source: inferred=claude
     sector_inferred: Equity-Healthcare
+  ILF:
+    source: inferred=claude
+    sector_inferred: Equity-EM-Latin America
   ILMN:
     source: seed=heuristic
     sector_inferred: Equity-Healthcare
@@ -2205,6 +2682,9 @@ meta:
   JBHT:
     source: inferred=claude
     sector_inferred: Equity-Industrial
+  JBS:
+    source: inferred=claude
+    sector_inferred: Equity-Materials
   JNK:
     source: seed=heuristic
     sector_inferred: FixedIncome-HYCredit
@@ -2226,11 +2706,17 @@ meta:
   LLY:
     source: seed=heuristic
     sector_inferred: Equity-Healthcare
+  LMT:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary-Defense
   LOTMY:
     source: inferred=claude
     sector_inferred: Unknown
   LQD:
     source: seed=doctrine
+  LRCX:
+    source: inferred=claude
+    sector_inferred: Equity-Semiconductors
   LYB:
     source: inferred=claude
     sector_inferred: Equity-Materials
@@ -2243,6 +2729,9 @@ meta:
   MAGS:
     source: inferred=claude
     sector_inferred: Unknown
+  MAR:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary-Travel
   MARA:
     source: inferred=claude
     sector_inferred: Equity-Tech
@@ -2254,12 +2743,18 @@ meta:
   MGM:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
+  MLPX:
+    source: inferred=claude
+    sector_inferred: Equity-Energy-MLPs
   MNST:
     source: seed=heuristic
     sector_inferred: Equity-Staples
   MP:
     source: seed=heuristic
     sector_inferred: Equity-Materials
+  MRVL:
+    source: inferred=claude
+    sector_inferred: Equity-Semiconductors
   MS:
     source: seed=heuristic
     sector_inferred: Equity-Financials
@@ -2282,6 +2777,9 @@ meta:
     source: seed=doctrine
   MUB:
     source: seed=doctrine
+  MUSA:
+    source: inferred=claude
+    sector_inferred: Equity-Developed-Misc
   NATGAS:
     source: seed=heuristic
     sector_inferred: Commodity-NatGas
@@ -2294,6 +2792,9 @@ meta:
   NFLX:
     source: seed=heuristic
     sector_inferred: Equity-Comm
+  NFRA:
+    source: inferred=claude
+    sector_inferred: Equity-Infrastructure
   NIKK:
     source: seed=heuristic
     sector_inferred: Equity-Broad
@@ -2333,6 +2834,9 @@ meta:
   OSK:
     source: seed=heuristic
     sector_inferred: Equity-Industrials
+  OUT:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
   OXY:
     source: seed=heuristic
     sector_inferred: Equity-Energy
@@ -2342,12 +2846,21 @@ meta:
   PALL:
     source: seed=heuristic
     sector_inferred: Commodity-Silver
+  PAM:
+    source: inferred=claude
+    sector_inferred: Commodity-Metals
+  PAVE:
+    source: inferred=claude
+    sector_inferred: Equity-Infrastructure
   PBR:
     source: seed=heuristic
     sector_inferred: Equity-Energy
   PCAR:
     source: seed=heuristic
     sector_inferred: Equity-Industrials
+  PDBC:
+    source: inferred=claude
+    sector_inferred: Commodity-Multi
   PEB:
     source: seed=heuristic
     sector_inferred: Equity-REITs
@@ -2365,6 +2878,9 @@ meta:
   PM:
     source: seed=heuristic
     sector_inferred: Equity-Staples
+  POET:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
   PR:
     source: seed=heuristic
     sector_inferred: Equity-Energy
@@ -2417,6 +2933,9 @@ meta:
   ROST:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
+  RSI:
+    source: inferred=claude
+    sector_inferred: Equity-Industrials
   RSP:
     source: seed=heuristic
     sector_inferred: Equity-Broad
@@ -2431,6 +2950,12 @@ meta:
     sector_inferred: Equity-Discretionary
   SDY:
     source: seed=doctrine
+  SFD:
+    source: inferred=claude
+    sector_inferred: Unknown
+  SHEL:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
   SHY:
     source: seed=doctrine
   SILVER:
@@ -2476,6 +3001,9 @@ meta:
   STIP:
     source: seed=heuristic
     sector_inferred: FixedIncome-TIPS
+  SWBI:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
   SXT:
     source: seed=heuristic
     sector_inferred: Equity-Materials
@@ -2493,6 +3021,9 @@ meta:
     sector_inferred: FixedIncome-TIPS
   TIP:
     source: seed=doctrine
+  TJX:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
   TKO:
     source: seed=heuristic
     sector_inferred: Equity-Comm
@@ -2507,6 +3038,9 @@ meta:
   TPYP:
     source: inferred=claude
     sector_inferred: Unknown
+  TRP:
+    source: inferred=claude
+    sector_inferred: Equity-Energy-MLPs
   TSLA:
     source: seed=heuristic
     sector_inferred: Equity-Discretionary
@@ -2519,6 +3053,9 @@ meta:
   TT:
     source: seed=heuristic
     sector_inferred: Equity-Industrials
+  TTE:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
   TTWO:
     source: seed=heuristic
     sector_inferred: Equity-Comm
@@ -2537,11 +3074,17 @@ meta:
   UFO:
     source: inferred=claude
     sector_inferred: Equity-Consumer
+  ULS:
+    source: inferred=claude
+    sector_inferred: Unknown
   UNG:
     source: seed=doctrine
   UNH:
     source: inferred=claude
     sector_inferred: Equity-Healthcare
+  URA:
+    source: inferred=claude
+    sector_inferred: Equity-Uranium
   URI:
     source: inferred=claude
     sector_inferred: Equity-Industrial
@@ -2551,6 +3094,9 @@ meta:
   USD/YEN:
     source: seed=heuristic
     sector_inferred: FX-JPY
+  USMV:
+    source: inferred=claude
+    sector_inferred: Equity-Low Volatility
   USO:
     source: seed=doctrine
   UST10Y:
@@ -2567,6 +3113,12 @@ meta:
   V:
     source: seed=heuristic
     sector_inferred: Equity-Financials
+  VG:
+    source: inferred=claude
+    sector_inferred: Unknown
+  VGK:
+    source: inferred=claude
+    sector_inferred: Equity-Developed International
   VGT:
     source: seed=heuristic
     sector_inferred: Equity-Tech
@@ -2582,18 +3134,27 @@ meta:
   VOO:
     source: seed=heuristic
     sector_inferred: Equity-Broad
+  VT:
+    source: inferred=claude
+    sector_inferred: Equity-Global
   VXF:
     source: seed=heuristic
     sector_inferred: Equity-SmallCap
   VYM:
     source: seed=heuristic
     sector_inferred: Equity-Dividend
+  VYMI:
+    source: inferred=claude
+    sector_inferred: Equity-Dividend High Yield
   WEAT:
     source: inferred=claude
     sector_inferred: Commodity-Agriculture
   WFC:
     source: seed=heuristic
     sector_inferred: Equity-Financials
+  WMT:
+    source: inferred=claude
+    sector_inferred: Equity-Staples
   WRBY:
     source: inferred=claude
     sector_inferred: Unknown
@@ -2625,6 +3186,9 @@ meta:
     source: seed=doctrine
   XLY:
     source: seed=doctrine
+  XME:
+    source: inferred=claude
+    sector_inferred: Equity-Materials
   XOM:
     source: seed=heuristic
     sector_inferred: Equity-Energy
@@ -2640,6 +3204,27 @@ meta:
   YCS:
     source: inferred=claude
     sector_inferred: Unknown
+  YPF:
+    source: inferred=claude
+    sector_inferred: Equity-Energy
+  YUM:
+    source: inferred=claude
+    sector_inferred: Equity-Discretionary
   ZROZ:
     source: seed=heuristic
     sector_inferred: FixedIncome-LongDuration
+  ^GVZ:
+    source: inferred=claude
+    sector_inferred: Index-Volatility
+  ^MOVE:
+    source: inferred=claude
+    sector_inferred: Index-Bond Volatility
+  ^OVX:
+    source: inferred=claude
+    sector_inferred: Index-Oil Volatility
+  ^RVX:
+    source: inferred=claude
+    sector_inferred: Index-Russell Volatility
+  ^VXN:
+    source: inferred=claude
+    sector_inferred: Index-Tech Volatility
