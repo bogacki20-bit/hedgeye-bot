@@ -15,9 +15,11 @@ restartPolicyMaxRetries = 5
 # create a public domain for this service; the bot reaches it via
 # ibkr-gateway.railway.internal:5000.
 healthcheckPath = "/v1/api/iserver/auth/status"
-# ibeam first boot legitimately takes ~60-90s: container start → IB Gateway
-# JVM up → headless login → TOTP code-gen → IBKR session handshake →
-# /v1/api/iserver/auth/status flips to authenticated:true. The previous 30s
-# (and Railway's ~53s default) killed the container before auth completed.
-# 300s = 5 min headroom for first boot + TOTP retries + slow handshakes.
-healthcheckTimeout = 300
+# ibeam first boot is dominated by IB Gateway JVM cold-boot inside the
+# container (~280s observed in diagnostic logs) BEFORE login even starts.
+# Then login + TOTP code-gen + IBKR session handshake adds another minute
+# or two. 900s = 15 min: ~5 min Gateway cold-boot + ~5 min auth flow +
+# ~5 min safety buffer. Subsequent restarts are faster (image cached).
+# If we ever need to make this faster, point the healthcheck at ibeam's
+# port 5001 health endpoint (up immediately, before IB auth).
+healthcheckTimeout = 900
