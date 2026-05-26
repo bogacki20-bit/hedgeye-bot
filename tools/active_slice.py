@@ -60,25 +60,21 @@ _OPERATOR_WATCHLIST_PATH = _REPO / "config" / "operator_watchlist.yaml"
 
 Side = Literal["long", "short"]
 
-# Polling-universe inclusion window. 21 days: keeps recently-removed
-# tickers in scope for follow-up alerts (operator can still get pinged on
-# a ticker Keith dropped two weeks ago if it does something unusual). The
-# 21-day inclusion is DISTINCT from source-flag tagging — flags reflect
-# only the most-recent publication (see SOURCE_STALENESS_DAYS).
-POLLING_LOOKBACK_DAYS = 21
-
-# Per-source staleness thresholds for the source FLAGS (what the alert
-# label reads). 2026-05-26 retune: bug surfaced where a ticker that was
-# in ETF Pro Short 2 weeks ago but is no longer in the latest publication
-# still got the etf_pro_short flag (via the 21-day lookback). Now the
-# flag only fires if the ticker is in the *most recent* publication AND
-# that publication is younger than the threshold below. If the most
-# recent publication is older than the threshold, the ticker carries a
-# `stale_<source>` flag instead so the operator sees explicit "I don't
-# have fresh data on this" signaling rather than silently-stale tags.
+# Per-source staleness thresholds. 2026-05-26 v2 (post-clarification):
+# the polling universe is the STRICT UNION of CURRENT publications only —
+# tickers no longer in Keith's most-recent publication drop out of the
+# polling stream on the same cycle. Operator's words: "things that are
+# taken off signal strength should be removed from alert", "the bot's
+# polling universe should mirror Keith's CURRENT opinions, not accumulate
+# stale ones".
+#
+# A publication counts as CURRENT when its latest snapshot date is
+# within these thresholds. If older, the bucket gets the `stale_*`
+# flag — kept in source_breakdown for diagnostics but EXCLUDED from
+# polling_universe (see _POLLING_INCLUDED_KEYS).
 #
 # Thresholds:
-#   etf_pro              -> 7 days (publishes Mon, plus a slack week)
+#   etf_pro              -> 7 days (Hedgeye publishes ETF Pro Mon, +1wk slack)
 #   signal_strength      -> 3 days (daily; 3d covers a long weekend)
 #   portfolio_solutions  -> 3 days (daily)
 #   investing_ideas      -> 3 days (daily)
@@ -98,6 +94,22 @@ _CACHE_TTL_SECONDS = 300
 
 _cache: dict = {"data": None, "expires_at": 0.0}
 _cache_lock = threading.Lock()
+
+# Buckets that contribute to polling_universe (strict-current membership,
+# operator clarification 2026-05-26 v2). `stale_*` buckets exist in
+# source_breakdown for diagnostics only — they do NOT add tickers to the
+# polling stream. Result: when Keith drops a ticker from a product, it
+# falls out of the bot's polling on the same cycle the parser runs
+# (modulo the 5-min TTL cache).
+_POLLING_INCLUDED_KEYS = frozenset({
+    "quad_long", "quad_short",          # reference (no staleness concept)
+    "etf_pro_long", "etf_pro_short",    # latest weekly publication, fresh
+    "signal_strength",                  # latest daily snapshot, fresh
+    "portfolio_solutions",              # latest daily snapshot, fresh
+    "investing_ideas",                  # latest daily snapshot, fresh
+    "risk_range",                       # last 3 days
+    "operator",                         # operator override yaml
+})
 
 
 def _load_map() -> dict:
@@ -231,30 +243,33 @@ def _dedup_sort(lst: list[str]) -> list[str]:
 
 
 def _fetch_db_sources() -> dict[str, list[str]]:
-    """Pull source-flag buckets and the broader follow-up bucket.
+    """Pull source-flag buckets, latest-publication-only.
 
     Returns keys (sorted, deduped ticker lists):
       etf_pro_long, etf_pro_short          ← latest weekly publication, fresh
       stale_etf_pro                        ← latest weekly publication, BUT stale
+                                             (>SOURCE_STALENESS_DAYS['etf_pro']
+                                              days old; NOT in polling_universe)
       signal_strength                      ← latest snapshot, fresh
       stale_signal_strength                ← latest snapshot, but stale
+                                             (NOT in polling_universe)
       portfolio_solutions                  ← latest snapshot, fresh
       stale_portfolio_solutions            ← latest snapshot, but stale
+                                             (NOT in polling_universe)
       investing_ideas                      ← latest snapshot, fresh
       stale_investing_ideas                ← latest snapshot, but stale
+                                             (NOT in polling_universe)
       risk_range                           ← any ticker with an RR in the
                                              staleness window (RR is daily +
                                              always-on; no "snapshot" concept)
-      stale_risk_range                     ← rows older than the threshold
-                                             but still inside the 21-day
-                                             inclusion window
-      follow_up                            ← tickers that appeared in any
-                                             product within the 21-day
-                                             inclusion window but are NOT
-                                             in the most-recent publication.
-                                             Polled but UNTAGGED — kept in
-                                             scope for follow-up alerts on
-                                             recently-removed names.
+      stale_risk_range                     ← intentionally always empty under
+                                             strict-current policy; kept as a
+                                             stable key so source_flags_for
+                                             callers don't have to None-check
+
+    No `follow_up` bucket — operator clarification 2026-05-26 v2 dropped
+    the 21-day catch-all. Polling universe = strict union of current
+    publications + Quad + operator.
 
     Empty everywhere on connect failure (returns the empty dict shape so
     callers don't have to None-check)."""
@@ -270,26 +285,19 @@ def _fetch_db_sources() -> dict[str, list[str]]:
         "stale_investing_ideas":     [],
         "risk_range":                [],
         "stale_risk_range":          [],
-        "follow_up":                 [],
     }
     conn = _pg_connect()
     if conn is None:
         return out
 
-    window = f"{int(POLLING_LOOKBACK_DAYS)} days"
-    today_tickers_in_latest: set[str] = set()
-    inclusion_window_tickers: set[str] = set()
-
     try:
         with conn:
             with conn.cursor() as cur:
-                # ─── ETF Pro ─────────────────────────────────────────────
-                # Latest week_of and its age in days.
+                # ─── ETF Pro: latest weekly publication only ────────────
                 cur.execute("""
                     SELECT MAX(week_of), CURRENT_DATE - MAX(week_of)
                       FROM hedgeye_etf_pro_ranges
-                     WHERE week_of >= CURRENT_DATE - interval %s
-                """, (window,))
+                """)
                 row = cur.fetchone()
                 latest_week, age_days = (row or (None, None))
                 if latest_week is not None:
@@ -314,27 +322,16 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                     is_stale = (age_days is not None
                                 and age_days > SOURCE_STALENESS_DAYS["etf_pro"])
                     if is_stale:
+                        # Stale → diagnostic bucket only, NOT in polling.
                         out["stale_etf_pro"] = _dedup_sort(longs + shorts)
                         log.info("active_slice: ETF Pro latest week_of=%s is "
-                                 "%dd old (>%dd threshold); tagging as stale",
+                                 "%dd old (>%dd threshold); marked stale, "
+                                 "EXCLUDED from polling_universe",
                                  latest_week, int(age_days),
                                  SOURCE_STALENESS_DAYS["etf_pro"])
                     else:
                         out["etf_pro_long"]  = _dedup_sort(longs)
                         out["etf_pro_short"] = _dedup_sort(shorts)
-                    today_tickers_in_latest.update(out["etf_pro_long"])
-                    today_tickers_in_latest.update(out["etf_pro_short"])
-                    today_tickers_in_latest.update(out["stale_etf_pro"])
-
-                # Inclusion window — all tickers seen in any ETF Pro week
-                # within the 21-day window. Used for follow_up below.
-                cur.execute("""
-                    SELECT DISTINCT ticker FROM hedgeye_etf_pro_ranges
-                     WHERE week_of >= CURRENT_DATE - interval %s
-                """, (window,))
-                inclusion_window_tickers.update(
-                    (r[0] or "").strip().upper() for r in cur.fetchall()
-                )
 
                 # ─── Helper for daily-snapshot products ──────────────────
                 def _latest_snapshot(table: str, date_col: str,
@@ -344,8 +341,7 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                         SELECT MAX({date_col}),
                                CURRENT_DATE - MAX({date_col})
                           FROM {table}
-                         WHERE {date_col} >= CURRENT_DATE - interval %s
-                    """, (window,))
+                    """)
                     row = cur.fetchone()
                     latest, age = (row or (None, None))
                     if latest is None:
@@ -359,11 +355,11 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                     if is_stale:
                         out[stale_key] = tickers
                         log.info("active_slice: %s latest %s=%s is %dd old "
-                                 "(>%dd threshold); tagging as stale",
+                                 "(>%dd threshold); marked stale, EXCLUDED "
+                                 "from polling_universe",
                                  table, date_col, latest, int(age), stale_days)
                     else:
                         out[fresh_key] = tickers
-                    today_tickers_in_latest.update(tickers)
 
                 _latest_snapshot("hedgeye_signal_strength",     "snapshot_date",
                                  "signal_strength", "stale_signal_strength",
@@ -380,29 +376,7 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                 except Exception:
                     pass
 
-                # Inclusion windows for SS/PS/II (drives follow_up).
-                for table, date_col in (
-                    ("hedgeye_signal_strength",     "snapshot_date"),
-                    ("hedgeye_portfolio_solutions", "snapshot_date"),
-                    ("hedgeye_investing_ideas",     "snapshot_date"),
-                ):
-                    try:
-                        cur.execute(
-                            f"SELECT DISTINCT ticker FROM {table} "
-                            f"WHERE {date_col} >= CURRENT_DATE - interval %s",
-                            (window,),
-                        )
-                        inclusion_window_tickers.update(
-                            (r[0] or "").strip().upper() for r in cur.fetchall()
-                        )
-                    except Exception:
-                        # Table missing on this env — skip.
-                        pass
-
-                # ─── Risk Range ─────────────────────────────────────────
-                # RR is daily + always-on; treat tickers with a row in the
-                # last `risk_range` stale-days as fresh, older-but-within-
-                # 21d as stale_risk_range.
+                # ─── Risk Range: last N days (no "publication" — daily) ─
                 stale_rr = SOURCE_STALENESS_DAYS["risk_range"]
                 cur.execute(
                     "SELECT DISTINCT ticker FROM hedgeye_risk_ranges "
@@ -411,25 +385,7 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                 )
                 out["risk_range"] = _dedup_sort([r[0] for r in cur.fetchall()
                                                   if r[0]])
-                today_tickers_in_latest.update(out["risk_range"])
-
-                cur.execute(
-                    "SELECT DISTINCT ticker FROM hedgeye_risk_ranges "
-                    "WHERE signal_date BETWEEN "
-                    "      CURRENT_DATE - interval %s "
-                    "  AND CURRENT_DATE - interval %s - interval '1 day'",
-                    (window, f"{stale_rr} days"),
-                )
-                stale_rr_tickers = _dedup_sort([r[0] for r in cur.fetchall()
-                                                  if r[0]])
-                # Drop any ticker that's already fresh — only truly-stale RRs
-                # carry the stale_risk_range flag.
-                fresh_rr = set(out["risk_range"])
-                out["stale_risk_range"] = [t for t in stale_rr_tickers
-                                           if t not in fresh_rr]
-                today_tickers_in_latest.update(out["stale_risk_range"])
-                inclusion_window_tickers.update(out["risk_range"])
-                inclusion_window_tickers.update(out["stale_risk_range"])
+                # stale_risk_range stays [] under strict-current policy.
 
     except Exception as e:
         log.warning("active_slice: DB universe fetch failed (%s); "
@@ -439,15 +395,6 @@ def _fetch_db_sources() -> dict[str, list[str]]:
             conn.close()
         except Exception:
             pass
-
-    # follow_up — tickers in the 21-day inclusion window of any product
-    # but NOT in any "latest publication" bucket. These get polled (so we
-    # keep watching recently-dropped names) but carry no source flag.
-    follow_up = (
-        {_normalize_ticker_safely(t) for t in inclusion_window_tickers}
-        - {_normalize_ticker_safely(t) for t in today_tickers_in_latest}
-    )
-    out["follow_up"] = sorted(t for t in follow_up if t)
 
     return out
 
@@ -482,22 +429,31 @@ def _compute_breakdown() -> dict[str, list[str]]:
 
 def source_breakdown() -> dict[str, list[str]]:
     """Cached {source_label: [tickers]} mapping. Refreshes every
-    _CACHE_TTL_SECONDS. Source labels (2026-05-26 retune):
+    _CACHE_TTL_SECONDS.
 
+    Strict-current policy (2026-05-26 v2): polling_universe is the union
+    of the FRESH buckets + Quad + operator. `stale_*` buckets are
+    visible here for diagnostics ("what publication just went stale?")
+    but they do NOT contribute to polling_universe — when Keith removes
+    a ticker from a product, it drops out of the polling stream on the
+    next cycle. The delta-alert system explicitly tells the operator
+    when this happens.
+
+    Buckets contributing to polling_universe:
         quad_long, quad_short          — from config/mfr_quad_map.yaml
         etf_pro_long, etf_pro_short    — latest weekly publication (fresh)
         signal_strength                — latest snapshot (fresh)
         portfolio_solutions            — latest snapshot (fresh)
         investing_ideas                — latest snapshot (fresh)
         risk_range                     — last 3 days
+        operator                       — config/operator_watchlist.yaml
+
+    Diagnostic-only buckets (NOT in polling_universe):
         stale_etf_pro                  — latest publication is >7 days old
         stale_signal_strength          — latest snapshot is >3 days old
         stale_portfolio_solutions      — latest snapshot is >3 days old
         stale_investing_ideas          — latest snapshot is >3 days old
-        stale_risk_range               — last seen 3-21 days ago
-        follow_up                      — in 21-day inclusion but NOT in any
-                                         latest publication; polled, no flag
-        operator                       — config/operator_watchlist.yaml
+        stale_risk_range               — kept for shape compatibility; empty
     """
     now = time.monotonic()
     with _cache_lock:
@@ -510,12 +466,22 @@ def source_breakdown() -> dict[str, list[str]]:
 
 
 def polling_universe() -> list[str]:
-    """Sorted union of every source the scanner should poll. ~120-200
-    tickers under normal operating conditions."""
+    """Sorted union of CURRENT (fresh) source buckets + Quad + operator.
+
+    Strict-current membership (operator clarification 2026-05-26 v2):
+    when Keith removes a ticker from a publication, it drops out of the
+    polling stream on the next refresh cycle. `stale_*` buckets are
+    visible in source_breakdown() for diagnostics but do NOT contribute
+    here.
+
+    The delta-alert system (tools.event_driven_alerts) tells the operator
+    explicitly when a ticker is removed from a publication — that's the
+    audit trail for why a ticker dropped from the polling stream.
+    """
     bd = source_breakdown()
     uni: set[str] = set()
-    for tickers in bd.values():
-        uni.update(tickers)
+    for key in _POLLING_INCLUDED_KEYS:
+        uni.update(bd.get(key, []))
     return sorted(uni)
 
 
