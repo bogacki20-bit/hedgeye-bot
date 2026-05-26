@@ -23,6 +23,34 @@ $date    = Get-Date -Format 'yyyy-MM-dd'
 $logFile = Join-Path $logDir "event_alerts_$date.log"
 
 Set-Location $repo
-& $python -m tools.event_driven_alerts *>&1 |
-    ForEach-Object { $_.ToString() } |
+# Invoke python via Start-Process with explicit stdout+stderr files;
+# merge back into the single date-stamped log for grep-compat with the
+# pre-2026-05-26 shape. Start-Process -PassThru exposes the real
+# ExitCode (read from GetExitCodeProcess, not perturbed by PowerShell
+# error-record bookkeeping), so the launcher's final `exit` reflects
+# what python actually returned rather than what the pipeline's last
+# cmdlet $?-state happens to be.
+#
+# Known Task-Scheduler-level quirk on this machine (2026-05-26
+# investigation): the task reports LastTaskResult=1 regardless of the
+# launcher's actual exit code — verified by swapping in a trivial
+# `exit 0` sentinel script that also reported 1. The underlying python
+# DOES execute under the scheduler (log file is appended each fire,
+# alerts_fired rows persist, Telegram messages send). The exit-1
+# reporting is cosmetic. Most likely fix is at the system level:
+#   Set-ExecutionPolicy RemoteSigned -Scope LocalMachine  (elevated)
+# or reconfiguring the task principal off InteractiveToken. Surfaced
+# in the commit message + report so the operator can apply.
+$ErrorActionPreference = 'Continue'
+$stdoutFile = Join-Path $logDir "event_alerts_stdout_$date.log"
+$stderrFile = Join-Path $logDir "event_alerts_stderr_$date.log"
+$proc = Start-Process -FilePath $python `
+    -ArgumentList '-m', 'tools.event_driven_alerts' `
+    -NoNewWindow -Wait -PassThru `
+    -RedirectStandardOutput $stdoutFile `
+    -RedirectStandardError  $stderrFile
+Get-Content $stdoutFile -ErrorAction SilentlyContinue |
     Out-File -FilePath $logFile -Append -Encoding utf8
+Get-Content $stderrFile -ErrorAction SilentlyContinue |
+    Out-File -FilePath $logFile -Append -Encoding utf8
+exit $proc.ExitCode

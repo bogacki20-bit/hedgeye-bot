@@ -1194,6 +1194,45 @@ def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
 
 NOTIFIER_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-haiku-4-5-20251001")
 
+
+def _compute_source_label(flags: list[str]) -> str:
+    """Deterministic [SourceLabel] prefix derived from source_flags.
+
+    Mirrors the cascade documented in the notifier prompt, but enforced
+    in Python so Haiku can't confabulate the label. The 2026-05-26 XME
+    bug: Haiku tagged XME as `[ETF Pro Short]` purely because the prompt
+    example for top_edge+SELL happened to use ETF Pro Short — even though
+    `source_flags_for("XME")` correctly returned only `quad_aligned` /
+    `quad_short`. Python now strips whatever bracket Haiku emits and
+    prepends this one instead.
+
+    Returns "" when no flag matches (omit prefix entirely)."""
+    # Order matters — first match wins. Fresh product flags rank above
+    # stale variants. Within products, ETF Pro short ranks first because
+    # it's the rarer / more actionable signal.
+    cascade = [
+        ("etf_pro_short",             "[ETF Pro Short]"),
+        ("etf_pro_long",              "[ETF Pro Long]"),
+        ("portfolio_solutions",       "[Portfolio Solutions]"),
+        ("signal_strength",           "[Signal Strength]"),
+        ("investing_ideas",           "[Investing Ideas]"),
+        # Stale variants — surface the staleness explicitly so the
+        # operator knows the data is older than the freshness threshold.
+        ("stale_etf_pro",             "[ETF Pro (stale)]"),
+        ("stale_portfolio_solutions", "[Portfolio Solutions (stale)]"),
+        ("stale_signal_strength",     "[Signal Strength (stale)]"),
+        ("stale_investing_ideas",     "[Investing Ideas (stale)]"),
+        ("quad_aligned",              "[Quad]"),
+        ("risk_range",                "[Risk Range]"),
+        ("stale_risk_range",          "[Risk Range (stale)]"),
+        ("operator",                  "[Operator]"),
+    ]
+    fset = set(flags or [])
+    for key, label in cascade:
+        if key in fset:
+            return label
+    return ""
+
 _NOTIFIER_PROMPT = """You are a terse trading notifier. The user message
 gives you a deterministic `Zone:` label computed by Python from the
 Hedgeye Risk Range and the live price. Your action MUST be derived
@@ -1215,36 +1254,48 @@ the ticker is Quad-aligned via `Quad aligned`. Use that for the
 override the Zone-derived action.
 
 Output EXACTLY one line, this shape:
-  [SourceLabel] ACTION TICKER — price <X> (<Y>% of RR <low>-<high>), MFR <trend>, <wall info if present> — <one-line action context>
+  ACTION TICKER — price <X> (<RangePosition>), MFR <trend>, <wall info if present> — <one-line action context>
 
-The [SourceLabel] prefix:
-  - When Source flags include 'etf_pro_short' → "[ETF Pro Short]"
-  - When Source flags include 'etf_pro_long'  → "[ETF Pro Long]"
-  - Else when 'portfolio_solutions'           → "[Portfolio Solutions]"
-  - Else when 'signal_strength'               → "[Signal Strength]"
-  - Else when 'quad_aligned'                  → "[Quad]"
-  - Else when 'risk_range'                    → "[Risk Range]"
-  - Else when 'operator'                      → "[Operator]"
-  - Source flags empty / unknown → omit the prefix entirely.
+NOTE on the source label: Python rewrites the leading "[SourceLabel] "
+on your output — you can omit it, or emit a placeholder like "[X]" and
+Python will strip+replace it. Don't waste tokens trying to pick the
+right source label from the Source flags; that decision is made
+deterministically in Python from the flags list, NOT from the
+action/zone pattern. (Verified bug 2026-05-26: Haiku tagged ticker XME
+as "[ETF Pro Short]" purely because the prompt's top_edge example used
+that label — even though XME's flags didn't include etf_pro_short.)
+
+The <RangePosition> segment is whatever the user message's
+`Range position:` line shows — copy it VERBATIM, including any
+"⚠️ RR/MFR divergence" suffix. Possible shapes:
+  - "37% of RR $260-$273 / 51% of MFR $258-$275"        (both sources)
+  - "37% of RR $260-$273 / 65% of MFR $258-$275 ⚠️ RR/MFR divergence"
+  - "78% of RR $176-$182"                               (RR only)
+  - "14% of MFR $53.13-$55.57"                          (MFR only — AMLP-style)
+You will NEVER see this message without a `Range position:` line at an
+edge/breakout zone; Python suppresses unknown-zone tickers upstream.
 
 Rules:
-  - Use the exact `Range position` percentage from the user message; do NOT
-    say "bottom third", "middle third", or "top third".
+  - Use the EXACT `Range position` line from the user message; do NOT
+    say "bottom third", "middle third", or "top third", and do NOT
+    compute your own percentages.
   - Include the wall fragment (e.g. "call wall $185") only when MFR walls
     are provided; omit the segment otherwise.
   - Do NOT include any dollar amount, bps, or position-sizing recommendation
     anywhere in the output. The operator handles sizing themselves.
   - The action context phrase should be tight (≤ 8 words) and consistent
     with the Zone: "bottom-edge scale-in", "top-edge fade",
-    "range break below", "range break above", "mid-range, no edge yet".
+    "range break below", "range break above". When the Range position
+    line carries the divergence flag, you may add ", RR/MFR disagree"
+    to the action context.
 
 Examples (Zone shown in [brackets] for illustration — your output never
-includes that):
-  [bottom_edge] [ETF Pro Long] BUY XLK — price 176.80 (12% of RR 176.00-182.00), MFR bullish trend, call wall $185 — bottom-edge scale-in
-  [top_edge]    [ETF Pro Short] SELL XLF — price 39.60 (88% of RR 36.50-40.00), MFR neutral trend — top-edge fade
-  [mid_range]   [Portfolio Solutions] WATCH OIH — price 251.00 (50% of RR 244.00-258.00), MFR bullish trend — mid-range, no edge yet
-  [above_range] [Risk Range] SELL TLT — price 96.20 (>100% of RR 90.00-95.80), MFR bearish trend — range break above
-  [below_range] [Quad] BUY GLD — price 226.50 (<0% of RR 228.00-238.00), MFR bullish trend — range break below, contrarian add
+includes that; Python prepends the source label after you respond):
+  [bottom_edge] BUY XLK — price 176.80 (12% of RR $176-$182 / 18% of MFR $175.5-$183), MFR bullish trend, call wall $185 — bottom-edge scale-in
+  [bottom_edge] BUY AMLP — price 53.47 (14% of MFR $53.13-$55.57), MFR bullish trend, call wall $55, put wall $50 — bottom-edge scale-in
+  [top_edge]    SELL XLF — price 39.60 (88% of RR $36.50-$40.00 / 62% of MFR $37-$41 ⚠️ RR/MFR divergence), MFR neutral trend — top-edge fade, RR/MFR disagree
+  [above_range] SELL TLT — price 96.20 (>100% of RR $90-$95.80), MFR bearish trend — range break above
+  [below_range] BUY GLD — price 226.50 (<0% of RR $228-$238 / 5% of MFR $225-$240), MFR bullish trend — range break below, contrarian add
 """
 
 
@@ -1431,6 +1482,9 @@ def decide_notifier(
             "decided_at":        datetime.utcnow().isoformat() + "Z",
             "source_flags":      source_flags,
             "quad_aligned":      quad_aligned,
+            "pct_rr":            pct_rr,
+            "pct_mfr":           pct_mfr,
+            "rr_mfr_divergence": divergence,
             "context_summary": {
                 "hedgeye_quad":     None,
                 "vix_bucket":       None,
@@ -1496,10 +1550,9 @@ def decide_notifier(
 
     # Parse the leading verb. Accept BUY/SELL/WATCH/SKIP. Edge-only-trigger
     # retune (2026-05-25): top_edge and above_range produce SELL, so the
-    # parser admits SELL in addition to BUY. The polling-universe expansion
-    # (2026-05-25) added an optional "[SourceLabel] " prefix to the
-    # output shape — strip the bracketed token before reading the verb so
-    # "[ETF Pro Short] SELL XLF ..." still parses as action=SELL.
+    # parser admits SELL in addition to BUY. We strip any [bracket] Haiku
+    # emits — both to read the verb cleanly AND so we can replace the
+    # label with the deterministic one computed below.
     payload = (line or "").lstrip()
     if payload.startswith("["):
         rb = payload.find("]")
@@ -1522,6 +1575,22 @@ def decide_notifier(
         log.info("notifier: mid_range zone but Haiku said %s for %s; "
                  "downgrading to WATCH per edge-only policy", action, ticker)
         action = "WATCH"
+
+    # Deterministic source label (2026-05-26 fix for the XME bug). Haiku
+    # was confabulating the [SourceLabel] off the action/zone pattern
+    # instead of off the actual source_flags list — XME got tagged
+    # "[ETF Pro Short]" purely because the prompt's top_edge example
+    # happened to use it, even though XME has zero ETF Pro data. Strip
+    # whatever bracket Haiku emitted and prepend the Python-computed one.
+    deterministic_label = _compute_source_label(source_flags)
+    if deterministic_label:
+        final_line = f"{deterministic_label} {payload}"
+    else:
+        final_line = payload
+    if final_line != line.lstrip():
+        log.info("notifier: replaced Haiku label with deterministic '%s' for "
+                 "%s (flags=%s)", deterministic_label or "(none)",
+                 ticker, source_flags)
 
     # Resolve account value for downstream sizing math.
     if account_value_usd is None:
@@ -1559,7 +1628,7 @@ def decide_notifier(
         "bps":               bps,
         "recommended_dollars": dollars,
         "confidence":        0.5,     # not used in actionability gate; placeholder
-        "reasoning":         line,
+        "reasoning":         final_line,
         "evidence":          [],
         "decided_at":        datetime.utcnow().isoformat() + "Z",
         # Polling-universe source membership (2026-05-25). Top-level mirror
@@ -1567,6 +1636,10 @@ def decide_notifier(
         # consumers (alert formatter, persister, future approval UI).
         "source_flags":      source_flags,
         "quad_aligned":      quad_aligned,
+        # Dual-range percentages + divergence flag (2026-05-26).
+        "pct_rr":            pct_rr,
+        "pct_mfr":           pct_mfr,
+        "rr_mfr_divergence": divergence,
         "context_summary": {
             "hedgeye_quad":    None,   # quad info is now metadata, not in prompt
             "vix_bucket":      None,
@@ -1578,6 +1651,14 @@ def decide_notifier(
             "yahoo_price":     price,
             "mfr_zone":        zone,
             "range_position_pct": range_position_pct,
+            # Dual-range percentages (2026-05-26). pct_rr is the % against
+            # the Hedgeye Risk Range; pct_mfr against the MFR range. Either
+            # can be None when the source has no published bounds.
+            # `rr_mfr_divergence` is True when both exist and disagree by
+            # >20pp — a useful operator-side audit signal.
+            "pct_rr":          pct_rr,
+            "pct_mfr":         pct_mfr,
+            "rr_mfr_divergence": divergence,
             # MFR gamma walls (migration 028) — None on tickers w/o options.
             "mfr_call_wall":   call_wall,
             "mfr_put_wall":    put_wall,
@@ -1600,6 +1681,9 @@ def decide_notifier(
             "model":      NOTIFIER_MODEL,
             "system":     _NOTIFIER_PROMPT,
             "user":       user_msg,
+            # raw_output is Haiku's verbatim response (preserved for
+            # ML training); reasoning above is the post-processed line
+            # with the deterministic [SourceLabel] applied.
             "raw_output": line,
             "decided_at": datetime.utcnow().isoformat() + "Z",
         },

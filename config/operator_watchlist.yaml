@@ -1,0 +1,11 @@
+# Operator's manual watchlist additions — tickers polled regardless of
+# Quad / Hedgeye-product membership. Add tickers here when you want eyes on
+# something the framework doesn't currently surface (e.g. MSFD, METD, a
+# single-name idea outside Risk Range, etc.). Loaded by
+# tools.active_slice.polling_universe() and unioned with the Quad slice +
+# ETF Pro + Signal Strength + Portfolio Solutions + Risk Range universes.
+#
+# Format: plain ticker symbols, uppercase. Whitespace and case are
+# normalized on load. Empty list is fine — this stub is what the scanner
+# sees out of the box.
+tickers: []

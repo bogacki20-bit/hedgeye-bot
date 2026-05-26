@@ -81,9 +81,13 @@ while ($true) {
         }
     }
 
-    # Active universe: monthly ∩ quarterly Quad slice from config/mfr_quad_map.yaml
-    # (notifier rollback, 2026-05-24). 16 workers is the tested sweet spot.
-    & $python $script --source active_slice --workers 16 --throttle 0 *>&1 |
+    # Polling universe: full union of Quad slice + ETF Pro long/short + Signal
+    # Strength + Portfolio Solutions + Risk Range + operator overrides.
+    # Restored 2026-05-25 after the 2026-05-24 rollback inadvertently dropped
+    # the ETF Pro / SS / PS coverage and left the bot polling only ~39
+    # Quad-aligned tickers. 16 workers is the tested sweet spot; the polling
+    # universe is typically ~120-200 tickers so a cycle takes ~1-2 min.
+    & $python $script --source polling_universe --workers 16 --throttle 0 *>&1 |
         ForEach-Object { $_.ToString() } |
         Out-File -FilePath $logFile -Append -Encoding utf8
 

@@ -172,15 +172,50 @@ def is_extended_hours(now: datetime | None = None) -> bool:
 
 # ─────────────────────────── Range-zone math ───────────────────────────
 
+# Edge band width as a fraction of the (high - low) span. Default 15%:
+# tickers within the bottom 15% or top 15% of the range trigger an alert;
+# the interior 70% is mid_range and produces no alert. Tune via
+# RR_EDGE_PERCENT (env, int percent in [1, 49]) — 10 is sniper-only,
+# 20 starts leaking into noise.
+_DEFAULT_EDGE_PERCENT = 15
+
+
+def _edge_fraction() -> float:
+    """Read the live edge band width from the environment. Clamped to a
+    sane range so a misconfigured env doesn't disable alerts entirely
+    (50% would mean "everything is an edge")."""
+    import os
+    raw = os.environ.get("RR_EDGE_PERCENT")
+    if not raw:
+        return _DEFAULT_EDGE_PERCENT / 100.0
+    try:
+        pct = float(raw)
+    except ValueError:
+        log.warning("RR_EDGE_PERCENT=%r not numeric; using default %d%%",
+                    raw, _DEFAULT_EDGE_PERCENT)
+        return _DEFAULT_EDGE_PERCENT / 100.0
+    if pct < 1 or pct >= 50:
+        log.warning("RR_EDGE_PERCENT=%s outside [1,49]; using default %d%%",
+                    pct, _DEFAULT_EDGE_PERCENT)
+        return _DEFAULT_EDGE_PERCENT / 100.0
+    return pct / 100.0
+
+
 def compute_zone(price: float, low: float, high: float) -> str:
     """
-    Returns 'bottom_third', 'middle_third', 'top_third', 'below_range', or 'above_range'.
+    Edge-only zone classification (2026-05-25 retune — operator: "alerts
+    should only fire when at bottom or top of range"). Returns one of:
 
-    Range thirds match Kristian's Hedgeye-style sizing rule:
-      bottom_third = scale-in zone
-      middle_third = hold
-      top_third    = trim
-    Below/above range = boundary breach (more urgent).
+      'below_range'  — price < low (breakout below; capitulation/trend break)
+      'bottom_edge'  — price within bottom RR_EDGE_PERCENT of the range
+      'mid_range'    — interior; NO alert fires
+      'top_edge'     — price within top RR_EDGE_PERCENT of the range
+      'above_range'  — price > high (breakout above)
+      'unknown'      — missing or inverted inputs
+
+    The middle band (~70% of the range under the default 15% edges) is
+    deliberately quiet — that's where most market hours sit and was the
+    source of the previous "bottom_third / top_third" noise.
     """
     if low is None or high is None or low >= high:
         return "unknown"
@@ -190,28 +225,29 @@ def compute_zone(price: float, low: float, high: float) -> str:
         return "above_range"
     span = high - low
     rel = (price - low) / span
-    if rel < 0.333:
-        return "bottom_third"
-    if rel > 0.667:
-        return "top_third"
-    return "middle_third"
+    edge = _edge_fraction()
+    if rel <= edge:
+        return "bottom_edge"
+    if rel >= 1.0 - edge:
+        return "top_edge"
+    return "mid_range"
 
 
 def boundaries_for_alert(zone: str) -> str | None:
     """
-    Given a zone, returns the alert boundary label (matches alerts_fired.boundary
-    column values) or None if no alert.
+    Map a zone to its alerts_fired.boundary label, or None when no alert
+    should fire. As of 2026-05-25 we alert only on:
+      - breakouts (below_range / above_range) — operator wants to see
+        every range break
+      - edges (bottom_edge / top_edge) — the trade-setup zones
 
-    We alert on:
-      - boundary breaches (below_range / above_range)  → range_low / range_high
-      - zone entry into actionable thirds                → top_third / bottom_third
-    Middle third = no alert (would be noise).
+    mid_range and unknown produce no alert.
     """
     return {
         "below_range":  "range_low",
         "above_range":  "range_high",
-        "bottom_third": "bottom_third",
-        "top_third":    "top_third",
+        "bottom_edge":  "bottom_edge",
+        "top_edge":     "top_edge",
     }.get(zone)
 
 
@@ -259,30 +295,30 @@ def fetch_prices(yf_symbols: list[str]) -> dict[str, float]:
 ZONE_LABELS = {
     "below_range":  ("⚠️", "RANGE BREAK (BELOW)"),
     "above_range":  ("⚠️", "RANGE BREAK (ABOVE)"),
-    "bottom_third": ("🟢", "BUY ZONE — bottom third"),
-    "top_third":    ("🔴", "TRIM ZONE — top third"),
+    "bottom_edge":  ("🟢", "BUY ZONE — bottom edge"),
+    "top_edge":     ("🔴", "TRIM ZONE — top edge"),
 }
 
 
 def _framework_alignment(trend: str | None, zone: str) -> str:
     """Compute the alignment label for a (trend, zone) pair.
 
-    Pre-fix the template hardcoded 'framework-aligned' on every bottom_third
-    and top_third alert regardless of the actual trend; alerts on tickers
+    Pre-fix the template hardcoded 'framework-aligned' on every bottom-edge
+    and top-edge alert regardless of the actual trend; alerts on tickers
     with NEUTRAL or BEARISH trends still said 'framework-aligned' (a lie).
 
     Returns one of: 'aligned' / 'counter' / 'neutral' / 'stale'.
-        bottom_third (buy zone): bullish=aligned, bearish=counter, neutral=neutral
-        top_third    (trim zone): bearish=aligned, bullish=counter, neutral=neutral
+        bottom_edge (buy zone): bullish=aligned, bearish=counter, neutral=neutral
+        top_edge    (trim zone): bearish=aligned, bullish=counter, neutral=neutral
         anything else: neutral
     """
     t = (trend or "").strip().lower()
     if t in ("bullish", "up"):
-        if zone == "bottom_third": return "aligned"
-        if zone == "top_third":    return "counter"
+        if zone == "bottom_edge": return "aligned"
+        if zone == "top_edge":    return "counter"
     elif t in ("bearish", "down"):
-        if zone == "bottom_third": return "counter"
-        if zone == "top_third":    return "aligned"
+        if zone == "bottom_edge": return "counter"
+        if zone == "top_edge":    return "aligned"
     elif t in ("neutral", ""):
         return "neutral"
     return "neutral"
@@ -512,9 +548,9 @@ def compose_recommendation(
     range you buy" (Risk Range Signal Deep Dive). Sizing uses bps per
     framework_quotes_compiled.md Ch3 Lessons 2 + 4 (100 bps starter, 50 bps
     adds, $1K real-world ceiling):
-        bottom_third  -> ADD  at ADD_BPS_LOW (50 bps of account, $1K cap)
+        bottom_edge   -> ADD  at ADD_BPS_LOW (50 bps of account, $1K cap)
         below_range   -> BUY  at STARTER_BPS (100 bps starter, broken range)
-        top_third     -> TRIM (50% of position)
+        top_edge      -> TRIM (50% of position)
         above_range   -> WATCH (range break above — let it ride or trim?)
 
     The caller passes Style B parameters; this is just the alert-time hint.
@@ -574,11 +610,12 @@ def compose_recommendation(
     # IV/RV vol-premium tag — only on a >15% absolute premium/discount.
     vol_suffix = _vol_suffix(ticker)
 
-    if zone == "bottom_third":
-        _align = _framework_alignment(trend, "bottom_third")
+    if zone == "bottom_edge":
+        _align = _framework_alignment(trend, "bottom_edge")
+        edge_pct = int(round(_edge_fraction() * 100))
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom third of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                     f"bottom {edge_pct}% of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -597,11 +634,12 @@ def compose_recommendation(
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
         }
-    if zone == "top_third":
-        _align = _framework_alignment(trend, "top_third")
+    if zone == "top_edge":
+        _align = _framework_alignment(trend, "top_edge")
+        edge_pct = int(round(_edge_fraction() * 100))
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top third of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                     f"(top {edge_pct}% of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
