@@ -6,8 +6,9 @@ is_stale. When a Hedgeye email surfaces a ticker, this module captures
 that day's OHLCV + prev-close into yahoo_snapshots so the bot has a
 point-in-time price record aligned with the MFR + SpotGamma fetches.
 
-As of 2026-05-24 the underlying fetch routes through the PRICE_FEED env
-flag — 'yfinance' (default) or 'polygon' (uses tools.price_feed_polygon).
+As of 2026-05-25 the underlying fetch routes through the PRICE_FEED env
+flag — 'yfinance' (default), 'alpaca' (tools.price_feed_alpaca),
+'ibkr' (tools.price_feed_ibkr), or 'polygon' (tools.price_feed_polygon).
 The yahoo_snapshots table name stays the same regardless of feed for
 schema stability.
 
@@ -61,12 +62,13 @@ def _resolve_yf_symbol(ticker: str) -> Optional[str]:
 def fetch_raw(ticker: str) -> Optional[dict]:
     """Fetch today's OHLCV + prev close for `ticker`.
 
-    Routes through PRICE_FEED env flag — 'yfinance' (default), 'ibkr', or
-    'polygon'. IBKR routes via tools.price_feed_ibkr against the ibeam
-    gateway; polygon via tools.price_feed_polygon; both fall through to
-    yfinance on ANY error (gateway unreachable, conid resolution fail,
-    HTTP 5xx, empty snapshot, missing API key) so the bot can never
-    panic on a market-data outage.
+    Routes through PRICE_FEED env flag — 'yfinance' (default), 'alpaca',
+    'ibkr', or 'polygon'. Alpaca routes via tools.price_feed_alpaca
+    against the alpaca-py SDK; IBKR via tools.price_feed_ibkr against the
+    ibeam gateway; polygon via tools.price_feed_polygon. All three fall
+    through to yfinance on ANY error (gateway unreachable, conid
+    resolution fail, HTTP 5xx, empty snapshot, missing API key) so the
+    bot can never panic on a market-data outage.
 
     Returns a flat dict with: yf_symbol, snapshot_date, price, open, high,
     low, close, prev_close, daily_change, daily_change_pct, volume,
@@ -94,6 +96,25 @@ def fetch_raw(ticker: str) -> Optional[dict]:
             if q is not None:
                 return q
             log.info("price_feed degraded: ibkr returned no quote for %s; "
+                     "falling back to yfinance", ticker)
+    elif feed == "alpaca":
+        try:
+            from tools.price_feed_alpaca import get_quote as _alpaca_quote
+        except ImportError as e:
+            log.warning("tools.price_feed_alpaca unavailable, falling back "
+                        "to yfinance: %s", e)
+        else:
+            try:
+                q = _alpaca_quote(ticker)
+            except Exception as e:
+                # Defensive — price_feed_alpaca swallows its own errors and
+                # returns None, but if anything escapes we still fall back.
+                log.warning("alpaca feed raised for %s (falling back to yfinance): %s",
+                            ticker, e)
+                q = None
+            if q is not None:
+                return q
+            log.info("price_feed degraded: alpaca returned no quote for %s; "
                      "falling back to yfinance", ticker)
     elif feed == "polygon":
         try:

@@ -1194,25 +1194,57 @@ def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
 
 NOTIFIER_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-haiku-4-5-20251001")
 
-_NOTIFIER_PROMPT = """You are a terse trading notifier. Given a ticker plus
-the Hedgeye Risk Range and MyFractalRange data, classify the setup as one of
-three actions:
+_NOTIFIER_PROMPT = """You are a terse trading notifier. The user message
+gives you a deterministic `Zone:` label computed by Python from the
+Hedgeye Risk Range and the live price. Your action MUST be derived
+strictly from the Zone — do not second-guess the boundaries:
 
-  BUY   — price near or below RR low / MFR low, trend supportive, scale-in zone
-  WATCH — price mid-range or ambiguous; warrants attention but no fill yet
-  SKIP  — no edge here; ignore this cycle
+  Zone = below_range  → ACTION = BUY   (range break below — contrarian add)
+  Zone = bottom_edge  → ACTION = BUY   (scale-in zone, bottom of range)
+  Zone = mid_range    → ACTION = WATCH (operator does not want a fire here)
+  Zone = top_edge     → ACTION = SELL  (trim / fade, top of range)
+  Zone = above_range  → ACTION = SELL  (range break above)
+  Zone = unknown      → ACTION = SKIP
 
-The ticker has ALREADY passed the Quad-alignment filter (it is in the active
-slice for both the monthly and quarterly Quads). You do not need to second-
-guess the regime call.
+The polling universe is broader than the Quad-aligned slice — it includes
+ETF Pro, Signal Strength, Portfolio Solutions, Risk Range and any
+operator overrides regardless of Quad. The user message tells you which
+Hedgeye source(s) surfaced the ticker via `Source flags`, and whether
+the ticker is Quad-aligned via `Quad aligned`. Use that for the
+[SourceLabel] prefix and the action context, but do NOT use it to
+override the Zone-derived action.
 
 Output EXACTLY one line, this shape:
-  ACTION TICKER — brief reason (≤ 80 chars)
+  [SourceLabel] ACTION TICKER — price <X> (<Y>% of RR <low>-<high>), MFR <trend>, <wall info if present> — <one-line action context>
 
-Examples:
-  BUY OIH — price 282 sits near RR low 280, MFR trend bullish, scale-in setup
-  WATCH XLE — mid-range, no breakout signal yet
-  SKIP TLT — trend bearish, range break above, fading
+The [SourceLabel] prefix:
+  - When Source flags include 'etf_pro_short' → "[ETF Pro Short]"
+  - When Source flags include 'etf_pro_long'  → "[ETF Pro Long]"
+  - Else when 'portfolio_solutions'           → "[Portfolio Solutions]"
+  - Else when 'signal_strength'               → "[Signal Strength]"
+  - Else when 'quad_aligned'                  → "[Quad]"
+  - Else when 'risk_range'                    → "[Risk Range]"
+  - Else when 'operator'                      → "[Operator]"
+  - Source flags empty / unknown → omit the prefix entirely.
+
+Rules:
+  - Use the exact `Range position` percentage from the user message; do NOT
+    say "bottom third", "middle third", or "top third".
+  - Include the wall fragment (e.g. "call wall $185") only when MFR walls
+    are provided; omit the segment otherwise.
+  - Do NOT include any dollar amount, bps, or position-sizing recommendation
+    anywhere in the output. The operator handles sizing themselves.
+  - The action context phrase should be tight (≤ 8 words) and consistent
+    with the Zone: "bottom-edge scale-in", "top-edge fade",
+    "range break below", "range break above", "mid-range, no edge yet".
+
+Examples (Zone shown in [brackets] for illustration — your output never
+includes that):
+  [bottom_edge] [ETF Pro Long] BUY XLK — price 176.80 (12% of RR 176.00-182.00), MFR bullish trend, call wall $185 — bottom-edge scale-in
+  [top_edge]    [ETF Pro Short] SELL XLF — price 39.60 (88% of RR 36.50-40.00), MFR neutral trend — top-edge fade
+  [mid_range]   [Portfolio Solutions] WATCH OIH — price 251.00 (50% of RR 244.00-258.00), MFR bullish trend — mid-range, no edge yet
+  [above_range] [Risk Range] SELL TLT — price 96.20 (>100% of RR 90.00-95.80), MFR bearish trend — range break above
+  [below_range] [Quad] BUY GLD — price 226.50 (<0% of RR 228.00-238.00), MFR bullish trend — range break below, contrarian add
 """
 
 
@@ -1266,15 +1298,57 @@ def decide_notifier(
     put_wall   = mfr.get("put_wall_mfr")
     zero_gamma = mfr.get("zero_gamma")
 
-    # Compute the deterministic zone tag — fold into the prompt so the model
-    # doesn't have to do range math.
+    # Deterministic zone — the FIRING GATE under edge-only triggers
+    # (2026-05-25). Computed against the Hedgeye Risk Range, not MFR,
+    # because the operator trades against RR and asked alerts to fire
+    # only at the bottom/top edges of THAT range. Falls back to MFR if
+    # RR isn't published for the ticker (rare; happens on the first day
+    # a ticker appears in the inventory). `compute_zone` reads the
+    # RR_EDGE_PERCENT env var to decide the edge band width.
     zone = "unknown"
     try:
-        if price is not None and mfr_lo is not None and mfr_hi is not None:
-            from price_monitor import compute_zone
+        from price_monitor import compute_zone
+        if price is not None and rr_lo is not None and rr_hi is not None:
+            zone = compute_zone(float(price), float(rr_lo), float(rr_hi))
+        elif price is not None and mfr_lo is not None and mfr_hi is not None:
             zone = compute_zone(float(price), float(mfr_lo), float(mfr_hi))
     except Exception:
         pass
+
+    # Dual range-position percentages: one against the Hedgeye Risk Range
+    # and one against the MFR range. Side-by-side surfacing in the alert
+    # body so the operator can spot disagreement between the two sources
+    # (2026-05-26 retune — AMLP bug: RR has no rows for AMLP ever, but
+    # MFR has clean bounds; the original "RR-only %" path emitted
+    # "unable to calculate % without RR bounds" and Haiku improvised).
+    #
+    # `range_position_pct` is kept as the legacy primary % field for
+    # backward-compat downstream — RR if present, MFR fallback otherwise.
+    pct_rr: Optional[float] = None
+    pct_mfr: Optional[float] = None
+    try:
+        if (price is not None and rr_lo is not None and rr_hi is not None
+                and float(rr_hi) > float(rr_lo)):
+            pct_rr = ((float(price) - float(rr_lo))
+                      / (float(rr_hi) - float(rr_lo))) * 100.0
+    except Exception:
+        pct_rr = None
+    try:
+        if (price is not None and mfr_lo is not None and mfr_hi is not None
+                and float(mfr_hi) > float(mfr_lo)):
+            pct_mfr = ((float(price) - float(mfr_lo))
+                       / (float(mfr_hi) - float(mfr_lo))) * 100.0
+    except Exception:
+        pct_mfr = None
+    range_position_pct: Optional[float] = pct_rr if pct_rr is not None else pct_mfr
+
+    # Divergence: >20pp gap between RR-% and MFR-% means the two sources
+    # disagree on where the price sits in the range. Useful operator
+    # signal — usually means the ranges themselves have drifted apart
+    # (RR is older / a different framework call). Only meaningful when
+    # BOTH percentages exist.
+    divergence = (pct_rr is not None and pct_mfr is not None
+                  and abs(pct_rr - pct_mfr) > 20.0)
 
     # Optional wall line — only emit when at least one wall value exists.
     # Keeps the prompt clean for tickers without options coverage.
@@ -1286,13 +1360,121 @@ def decide_notifier(
     if wall_bits:
         wall_line = "MFR walls: " + " / ".join(wall_bits) + "\n"
 
+    # Side-by-side range position line. Examples:
+    #   Range position: 37% of RR $260-$273 / 51% of MFR $258-$275
+    #   Range position: 14% of MFR $53.13-$55.57          (RR missing — AMLP case)
+    #   Range position: 78% of RR $176-$182                (MFR missing)
+    #   Range position: 37% of RR $260-$273 / 65% of MFR $258-$275 ⚠️ RR/MFR divergence
+    #   (omitted entirely when neither source has bounds — caller will then
+    #    hit the mid_range/unknown short-circuit and suppress the alert)
+    range_pos_parts: list[str] = []
+    if pct_rr is not None:
+        range_pos_parts.append(f"{pct_rr:.0f}% of RR ${rr_lo}-${rr_hi}")
+    if pct_mfr is not None:
+        range_pos_parts.append(f"{pct_mfr:.0f}% of MFR ${mfr_lo}-${mfr_hi}")
+    range_pos_line = ""
+    if range_pos_parts:
+        divergence_tag = " ⚠️ RR/MFR divergence" if divergence else ""
+        range_pos_line = ("Range position: " + " / ".join(range_pos_parts)
+                          + divergence_tag + "\n")
+
+    # Source flags — which Hedgeye product surfaced this ticker. Surfaced
+    # into the prompt as context (which source-prefix to emit, whether the
+    # ticker is Quad-aligned). Best-effort; an empty list just suppresses
+    # the [SourceLabel] prefix in the output line.
+    source_flags: list[str] = []
+    try:
+        from tools.active_slice import source_flags_for
+        source_flags = source_flags_for(ticker)
+    except Exception as e:
+        log.debug("notifier: source_flags lookup failed for %s: %s", ticker, e)
+    quad_aligned = "quad_aligned" in source_flags
+    source_flags_line = (
+        f"Source flags: {', '.join(source_flags) if source_flags else '(none)'}\n"
+        f"Quad aligned: {quad_aligned}\n"
+    )
+
+    # Cost short-circuit: under the edge-only firing policy (2026-05-25),
+    # mid_range and unknown tickers never produce a tradable alert. Skip
+    # the Haiku API call entirely for these — saves the bulk of the
+    # per-cycle token spend since ~70% of the polling universe sits in
+    # mid_range at any moment. Returns the same decision shape with
+    # action='WATCH', conviction='Monitor' so the scanner's dedup +
+    # persistence pipeline still sees a uniform record.
+    if zone in ("mid_range", "unknown"):
+        if account_value_usd is None:
+            try:
+                from portfolio import account_value, hedgeye_target_account
+                acct = hedgeye_target_account("Long")
+                account_value_usd = float(account_value(acct) or 0)
+            except Exception:
+                account_value_usd = 50_000.0
+        if range_pos_parts:
+            reason = ("mid_range — " + " / ".join(range_pos_parts)
+                      + "; no edge, no Haiku call")
+        else:
+            reason = (f"zone={zone}; no RR or MFR bounds available, "
+                      "alert suppressed (no Haiku call)")
+        return {
+            "ticker":            ticker.upper(),
+            "signal_origin":     signal_origin,
+            "signal_conviction": signal_conviction,
+            "account_value_usd": account_value_usd,
+            "conviction":        "Monitor",
+            "direction":         "long",
+            "action":            "WATCH",
+            "bps":               None,
+            "recommended_dollars": None,
+            "confidence":        0.0,
+            "reasoning":         f"WATCH {ticker.upper()} — {reason}",
+            "evidence":          [],
+            "decided_at":        datetime.utcnow().isoformat() + "Z",
+            "source_flags":      source_flags,
+            "quad_aligned":      quad_aligned,
+            "context_summary": {
+                "hedgeye_quad":     None,
+                "vix_bucket":       None,
+                "risk_range_low":   rr_lo,
+                "risk_range_high":  rr_hi,
+                "mfr_range_low":    mfr_lo,
+                "mfr_range_high":   mfr_hi,
+                "mfr_hurst":        hurst,
+                "yahoo_price":      price,
+                "mfr_zone":         zone,
+                "range_position_pct": range_position_pct,
+                "pct_rr":           pct_rr,
+                "pct_mfr":          pct_mfr,
+                "rr_mfr_divergence": divergence,
+                "mfr_call_wall":    call_wall,
+                "mfr_put_wall":     put_wall,
+                "mfr_zero_gamma":   zero_gamma,
+                "spotgamma_call_wall": None,
+                "spotgamma_put_wall":  None,
+                "source_flags":     source_flags,
+                "quad_aligned":     quad_aligned,
+            },
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens":     0,
+            "input_tokens":                0,
+            "output_tokens":               0,
+            "prompt_context_full": {
+                "model":      NOTIFIER_MODEL,
+                "system":     "[skipped — mid_range/unknown short-circuit]",
+                "user":       "[skipped — mid_range/unknown short-circuit]",
+                "raw_output": reason,
+                "decided_at": datetime.utcnow().isoformat() + "Z",
+            },
+        }
+
     user_msg = (
         f"Ticker: {ticker.upper()}\n"
         f"Price: {price}\n"
         f"Hedgeye Risk Range: low={rr_lo}, high={rr_hi}\n"
-        f"MFR: range={mfr_lo}-{mfr_hi}, trend={trend}, hurst={hurst}\n"
-        f"MFR zone: {zone}\n"
+        + range_pos_line
+        + f"Zone: {zone}\n"
+        + f"MFR: range={mfr_lo}-{mfr_hi}, trend={trend}, hurst={hurst}\n"
         + wall_line
+        + source_flags_line
         + f"Signal origin: {signal_origin}"
         + (f"\nHedgeye-tagged conviction: {signal_conviction}"
            if signal_conviction else "")
@@ -1312,12 +1494,33 @@ def decide_notifier(
         log.error("notifier API call failed for %s: %s", ticker, e)
         return None
 
-    # Parse the leading verb. Accept BUY/WATCH/SKIP only.
-    head = (line.split(None, 1)[0] if line else "").upper()
-    action_map = {"BUY": "BUY", "WATCH": "WATCH", "SKIP": "WATCH"}
+    # Parse the leading verb. Accept BUY/SELL/WATCH/SKIP. Edge-only-trigger
+    # retune (2026-05-25): top_edge and above_range produce SELL, so the
+    # parser admits SELL in addition to BUY. The polling-universe expansion
+    # (2026-05-25) added an optional "[SourceLabel] " prefix to the
+    # output shape — strip the bracketed token before reading the verb so
+    # "[ETF Pro Short] SELL XLF ..." still parses as action=SELL.
+    payload = (line or "").lstrip()
+    if payload.startswith("["):
+        rb = payload.find("]")
+        if rb != -1:
+            payload = payload[rb + 1:].lstrip()
+    head = (payload.split(None, 1)[0] if payload else "").upper()
+    action_map = {"BUY": "BUY", "SELL": "SELL",
+                  "TRIM": "SELL",  # accept TRIM as an alias for SELL
+                  "WATCH": "WATCH", "SKIP": "WATCH"}
     action = action_map.get(head)
     if action is None:
         log.warning("notifier returned non-conforming line for %s: %s", ticker, line)
+        action = "WATCH"
+
+    # Safety net: if Haiku ignored the deterministic Zone instruction and
+    # emitted BUY/SELL on mid_range, downgrade to WATCH so the firing gate
+    # in proactive_scanner doesn't page the operator. (mid_range producing
+    # an alert is exactly the noise the edge-only retune is meant to kill.)
+    if zone == "mid_range" and action in ("BUY", "SELL"):
+        log.info("notifier: mid_range zone but Haiku said %s for %s; "
+                 "downgrading to WATCH per edge-only policy", action, ticker)
         action = "WATCH"
 
     # Resolve account value for downstream sizing math.
@@ -1329,10 +1532,10 @@ def decide_notifier(
         except Exception:
             account_value_usd = 50_000.0
 
-    # Sizing: BUY → 50 bps adder by default (notifier doesn't escalate to
-    # 100bps starters automatically; operator promotes via reply). WATCH/SKIP
-    # → null bps, null dollars.
-    bps: Optional[int] = 50 if action == "BUY" else None
+    # Sizing: BUY/SELL → 50 bps adder by default (notifier doesn't escalate
+    # to 100 bps starters automatically; operator promotes via reply).
+    # WATCH/SKIP → null bps, null dollars.
+    bps: Optional[int] = 50 if action in ("BUY", "SELL") else None
     dollars: Optional[float] = None
     if bps:
         try:
@@ -1341,13 +1544,17 @@ def decide_notifier(
         except Exception:
             dollars = None
 
+    # Conviction: BUY/SELL both promote to "Adding" so they pass the
+    # scanner's ACTIONABLE_CONVICTIONS gate and reach the operator's
+    # phone. WATCH/SKIP stay in "Monitor" — observed but never alerted.
+    # Direction follows the verb: BUY=long, SELL=short.
     decision: dict = {
         "ticker":            ticker.upper(),
         "signal_origin":     signal_origin,
         "signal_conviction": signal_conviction,
         "account_value_usd": account_value_usd,
-        "conviction":        "Adding" if action == "BUY" else "Monitor",
-        "direction":         "long",   # notifier defaults to long-side scale-in
+        "conviction":        "Adding" if action in ("BUY", "SELL") else "Monitor",
+        "direction":         "short" if action == "SELL" else "long",
         "action":            action,
         "bps":               bps,
         "recommended_dollars": dollars,
@@ -1355,6 +1562,11 @@ def decide_notifier(
         "reasoning":         line,
         "evidence":          [],
         "decided_at":        datetime.utcnow().isoformat() + "Z",
+        # Polling-universe source membership (2026-05-25). Top-level mirror
+        # of context_summary.source_flags / quad_aligned for downstream
+        # consumers (alert formatter, persister, future approval UI).
+        "source_flags":      source_flags,
+        "quad_aligned":      quad_aligned,
         "context_summary": {
             "hedgeye_quad":    None,   # quad info is now metadata, not in prompt
             "vix_bucket":      None,
@@ -1365,6 +1577,7 @@ def decide_notifier(
             "mfr_hurst":       hurst,
             "yahoo_price":     price,
             "mfr_zone":        zone,
+            "range_position_pct": range_position_pct,
             # MFR gamma walls (migration 028) — None on tickers w/o options.
             "mfr_call_wall":   call_wall,
             "mfr_put_wall":    put_wall,
@@ -1372,6 +1585,11 @@ def decide_notifier(
             # SG keys preserved for downstream template compatibility
             "spotgamma_call_wall": None,
             "spotgamma_put_wall":  None,
+            # Polling-universe source membership (2026-05-25 expansion).
+            # Empty list means the ticker isn't currently in any tracked
+            # Hedgeye-product universe (operator override or explicit CLI list).
+            "source_flags":   source_flags,
+            "quad_aligned":   quad_aligned,
         },
         # Prompt-cache telemetry kept at zero — notifier doesn't cache.
         "cache_creation_input_tokens": 0,
@@ -1587,7 +1805,7 @@ def _cli() -> None:
                     help="Run an offline assert: build the prompt with AMLP-like "
                          "MFR inputs (price=54.04, low=52.4960, high=55.1590, "
                          "trend_signal=bullish) and confirm the deterministic "
-                         "zone line says middle_third + NOT a breach. No DB, no API.")
+                         "zone line says mid_range + NOT a breach. No DB, no API.")
     args = ap.parse_args()
 
     if args.smoke_zone:
@@ -1632,10 +1850,13 @@ def _cli() -> None:
             (L for L in msg.splitlines() if L.startswith("Recent trend:")),
             "",
         )
-        ok_zone   = "middle_third" in zone_line
+        # Edge-only retune (2026-05-25): AMLP price=54.04 in range
+        # [52.50, 55.16] is ~58% through the range — interior to the
+        # default 15% edges → mid_range (formerly middle_third).
+        ok_zone   = "mid_range" in zone_line
         ok_breach = "NOT a breach" in zone_line
         ok_trend  = "bullish" in trend_line
-        assert ok_zone,   f"smoke: expected 'middle_third' in zone line, got: {zone_line!r}"
+        assert ok_zone,   f"smoke: expected 'mid_range' in zone line, got: {zone_line!r}"
         assert ok_breach, f"smoke: expected 'NOT a breach' in zone line, got: {zone_line!r}"
         assert ok_trend,  f"smoke: expected 'bullish' in trend line, got: {trend_line!r}"
 

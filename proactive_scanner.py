@@ -68,17 +68,27 @@ def _resolve_watchlist(explicit: Optional[list[str]],
     """Return the deduped list of tickers this scan should evaluate.
 
     Resolution order:
-      explicit > source=active_slice (monthly ∩ quarterly Quad from
-      config/mfr_quad_map.yaml — production default 2026-05-24) >
-      source=hedgeye_active (Hedgeye product feed union) >
-      source=quad / --quad-filtered (doctrine Quad universe) >
+      explicit > source=polling_universe (full union — production default
+      2026-05-25, see tools.active_slice.polling_universe) >
+      source=active_slice (monthly ∩ quarterly Quad from
+      config/mfr_quad_map.yaml — the previous default, still selectable for
+      Quad-only runs) > source=hedgeye_active (Hedgeye product feed union)
+      > source=quad / --quad-filtered (doctrine Quad universe) >
       tools.list_monitored_tickers (with --priority) > ticker_inventory view.
 
     `source`:
+      'polling_universe' — superset the scanner should iterate over. Union
+        of: Quad slice (long+short), ETF Pro long+short, Signal Strength,
+        Portfolio Solutions, Risk Range, operator overrides. This is the
+        "every Hedgeye product Keith publishes against gets monitored"
+        universe — ~120-200 tickers under normal operating conditions.
+        Each ticker's source membership flows through to decision_engine
+        via tools.active_slice.source_flags_for().
+      'active_slice' — Quad-filtered subset (intersection of monthly and
+        quarterly Quads). Useful for Quad-only test runs; the polling
+        universe already includes it.
       'hedgeye_active' — tickers Keith is ACTIVELY surfacing through Hedgeye
-        products (RR+SS+PS+ETF Pro+II) in the last `lookback_days`. This is
-        the operational expression of his Quad view and the production
-        default for the scheduled scanner.
+        products (RR+SS+PS+ETF Pro+II) in the last `lookback_days`.
       'quad' — Hedgeye favored longs+shorts for the active Quad (the slide-
         derived framework reference; also reached via legacy --quad-filtered).
       'monitored' — the legacy ticker_inventory view, sliced by `priority`.
@@ -91,6 +101,32 @@ def _resolve_watchlist(explicit: Optional[list[str]],
     """
     if explicit:
         return sorted({t.upper().strip() for t in explicit if t and t.strip()})
+
+    if source == "polling_universe":
+        try:
+            from tools.active_slice import polling_universe, source_breakdown
+            uni = polling_universe()
+            if uni:
+                bd = source_breakdown()
+                # Per-source counts so daily logs make it obvious whether a
+                # parser stopped writing (e.g. SS=0 means the Monday SS
+                # email never parsed). The union count is what the
+                # operator cares about; the breakdown is the diagnostic.
+                summary = ", ".join(f"{k}={len(v)}" for k, v in sorted(bd.items()))
+                log.info("scanner: polling_universe = %d tickers (%s)",
+                         len(uni), summary)
+                if max_tickers and len(uni) > max_tickers:
+                    uni = uni[:max_tickers]
+                return uni
+            log.warning("scanner: polling_universe empty — every source "
+                        "returned 0 tickers. Check DB connectivity and "
+                        "parser freshness; falling back to active_slice.")
+        except Exception as e:
+            log.warning("scanner: polling_universe resolver failed (%s); "
+                        "falling back to active_slice", e)
+        # Fall through to active_slice — keeps the scanner running on the
+        # Quad-only slice rather than scanning nothing when the DB blips.
+        source = "active_slice"
 
     if source == "active_slice":
         try:
@@ -230,18 +266,22 @@ def _persist_recommendation(decision: dict) -> None:
 
 def _format_alert(decision: dict) -> tuple[str, str]:
     """Returns (title, body) Telegram-friendly — 1-line notifier format
-    (rollback architecture, 2026-05-24). The notifier's `reasoning` field is
-    already a fully-formed single line; the body is that line plus a compact
-    sizing tag when bps is populated."""
+    (sizing-stripped, 2026-05-25). The notifier's `reasoning` field is
+    already a fully-formed single line (price + range-position % + MFR
+    trend + optional wall + one-line action context); the body is that
+    line verbatim.
+
+    Sizing decisions ($X / N bps) are explicitly NOT appended here — the
+    operator handles position sizing themselves. The decision dict still
+    carries `bps` and `recommended_dollars` for backend metrics, but they
+    never appear in the outbound Telegram body.
+    """
     ticker  = decision.get("ticker", "?")
     action  = decision.get("action", "WATCH")
-    bps     = decision.get("bps")
-    dollars = decision.get("recommended_dollars")
     reasoning = (decision.get("reasoning") or "").strip()
 
     title = f"{action} {ticker}"
-    size_tag = f" — ${dollars:.0f} ({bps} bps)" if dollars and bps else ""
-    body = reasoning + size_tag if reasoning else f"{action} {ticker}{size_tag}"
+    body = reasoning if reasoning else f"{action} {ticker}"
     return title, body[:1024]
 
 
@@ -330,6 +370,10 @@ def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
         "dollars":    decision.get("recommended_dollars"),
         "confidence": decision.get("confidence"),
         "quad_alignment": _quad_alignment(ticker, decision.get("direction")),
+        # Polling-universe source membership surfaced by decision_engine
+        # (2026-05-25). Empty list when no source resolver was available.
+        "source_flags":   decision.get("source_flags") or [],
+        "quad_aligned":   bool(decision.get("quad_aligned")),
     }
 
     conviction = decision.get("conviction") or ""
@@ -458,16 +502,20 @@ def _cli() -> int:
                     help="ThreadPool workers for the per-ticker loop. 8 is "
                          "safe for the Anthropic API; default 1 = serial.")
     ap.add_argument("--source",
-                    choices=("active_slice", "hedgeye_active", "quad", "monitored"),
-                    default="active_slice",
-                    help="Universe source. 'active_slice' (default) = the "
-                         "intersection of the monthly and quarterly Quads "
-                         "from config/mfr_quad_map.yaml, resolved via "
-                         "tools.active_slice. 'hedgeye_active' = tickers "
-                         "Keith is actively surfacing through Hedgeye "
-                         "products in the last --lookback-days (legacy). "
-                         "'quad' = doctrine Quad universe. 'monitored' = "
-                         "legacy inventory view sliced by --priority.")
+                    choices=("polling_universe", "active_slice",
+                             "hedgeye_active", "quad", "monitored"),
+                    default="polling_universe",
+                    help="Universe source. 'polling_universe' (default) = "
+                         "the full union the bot is supposed to monitor: "
+                         "Quad slice + ETF Pro long/short + Signal Strength "
+                         "+ Portfolio Solutions + Risk Range + operator "
+                         "overrides. 'active_slice' = Quad-only slice (the "
+                         "previous default; still useful for Quad-only "
+                         "runs). 'hedgeye_active' = tickers Keith is "
+                         "actively surfacing through Hedgeye products in "
+                         "the last --lookback-days (legacy). 'quad' = "
+                         "doctrine Quad universe. 'monitored' = legacy "
+                         "inventory view sliced by --priority.")
     ap.add_argument("--lookback-days", type=int, default=7,
                     help="Lookback window for --source hedgeye_active "
                          "(default: 7).")
