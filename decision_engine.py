@@ -1233,24 +1233,117 @@ def _compute_source_label(flags: list[str]) -> str:
             return label
     return ""
 
+
+# ─────────────────── Trend + Momentum gate (2026-05-26 v3) ───────────────────
+
+def _normalize_mfr_signal(s: str | None) -> str:
+    """Reduce MFR signal strings to one of {'bullish','bearish','neutral'}.
+
+    MFR vocabulary observed in mfr_snapshots:
+      trend_signal    -> trendBullish / trendBearish / trendNeutral
+      momentum_signal -> momentumBullish / momentumBearish / momentumNeutral
+                         / momentumNeutralDanger
+    `momentumNeutralDanger` is a warning state — momentum is neutral but
+    teetering toward bearish. Treat it as neutral for the gate (not a
+    positive confirmation).
+    """
+    if not s:
+        return "neutral"
+    low = str(s).lower()
+    if "bullish" in low:
+        return "bullish"
+    if "bearish" in low:
+        return "bearish"
+    return "neutral"
+
+
+def _trend_momentum_gate(zone: str, trend_dir: str,
+                         momentum_dir: str) -> tuple[str, str]:
+    """Map (zone, trend, momentum) to (action_verb, context_phrase).
+
+    Operator framework, 2026-05-26 v3:
+
+      below_range / above_range — trend regime, no momentum gate:
+        below → SELL  trend breakdown
+        above → BUY   trend continuation
+
+      bottom_edge — buying only when trend AND momentum confirm; WATCH or
+                    AVOID otherwise so the bot doesn't catch falling knives:
+        bullish + positive momentum → BUY    clean mean revert
+        bullish + non-positive      → WATCH  momentum not confirming
+        bearish + any               → AVOID  broken trend, don't buy dip
+        neutral + any               → WATCH  no trend confirmation
+
+      top_edge — trimming only when momentum is failing; HOLD continuation
+                 when trend AND momentum both still up:
+        bullish + positive momentum → HOLD   continuation likely
+        bullish + non-positive      → SELL   momentum failing at resistance
+        neutral + any               → SELL   mean revert
+        bearish + any               → SELL   full mean revert + trend
+
+      mid_range / unknown — never reached here (upstream short-circuit).
+    """
+    trend_dir = (trend_dir or "neutral").lower()
+    momentum_dir = (momentum_dir or "neutral").lower()
+
+    if zone == "below_range":
+        return ("SELL", "trend breakdown — avoid longs, consider shorts")
+    if zone == "above_range":
+        return ("BUY",  "trend continuation — add to longs")
+    if zone == "bottom_edge":
+        if trend_dir == "bullish" and momentum_dir == "bullish":
+            return ("BUY",   "bottom-edge scale-in — bullish trend + positive momentum")
+        if trend_dir == "bullish":
+            return ("WATCH", "bottom-edge but momentum not confirming — "
+                             "wait for momentum to turn")
+        if trend_dir == "bearish":
+            return ("AVOID", "bottom-edge in bearish trend — likely breakdown, "
+                             "don't catch the knife")
+        # trend neutral
+        return ("WATCH", "bottom-edge but trend neutral — "
+                         "wait for trend confirmation")
+    if zone == "top_edge":
+        if trend_dir == "bullish" and momentum_dir == "bullish":
+            return ("HOLD", "top-edge but trend + momentum supportive — "
+                            "continuation likely, not a trim")
+        if trend_dir == "bullish":
+            return ("SELL", "top-edge trim — momentum failing at resistance")
+        if trend_dir == "bearish":
+            return ("SELL", "top-edge trim — mean revert with trend confirming")
+        return ("SELL", "top-edge trim — mean revert")
+    # mid_range / unknown / any other (shouldn't happen at this layer)
+    return ("WATCH", "")
+
+
 _NOTIFIER_PROMPT = """You are a terse trading notifier. The user message
-gives you a deterministic `Zone:` label computed by Python from the
-Hedgeye Risk Range and the live price. Your action MUST be derived
-strictly from the Zone — do not second-guess the boundaries.
+gives you a deterministic `Zone:` label, an `MFR trend` direction, and an
+`MFR momentum` direction — all computed by Python. Your ACTION is derived
+strictly from the (Zone, Trend, Momentum) triple per the gate below.
 
-Keith McCullough's framework (Hedgeye Risk Range) has TWO distinct
-regimes depending on whether price is INSIDE or OUTSIDE the range:
+Keith McCullough's framework (Hedgeye Risk Range) has TWO regimes
+depending on whether price is INSIDE or OUTSIDE the range, AND an
+INSIDE-RANGE gate that checks trend+momentum so the bot doesn't blindly
+buy bottoms / sell tops without confirmation:
 
-  INSIDE-RANGE = mean revert toward the midpoint
-    Zone = bottom_edge  → ACTION = BUY   (mean revert up off the floor)
-    Zone = top_edge     → ACTION = SELL  (mean revert down off the ceiling)
-    Zone = mid_range    → ACTION = WATCH (no edge, no fire)
-
-  OUTSIDE-RANGE = trend continuation, NOT mean revert
+  OUTSIDE-RANGE — trend signal dominates, momentum gate not applied
     Zone = below_range  → ACTION = SELL  (trend BREAKDOWN — exit longs,
                                           consider shorts; NOT a buy-the-dip)
     Zone = above_range  → ACTION = BUY   (trend CONTINUATION — add to longs,
                                           NOT a fade)
+
+  INSIDE-RANGE bottom_edge — buy only when trend AND momentum confirm
+    bullish + positive momentum → ACTION = BUY    (clean mean revert)
+    bullish + not-positive      → ACTION = WATCH  (momentum not confirming)
+    neutral trend               → ACTION = WATCH  (no trend confirmation)
+    bearish trend               → ACTION = AVOID  (broken trend, don't catch knife)
+
+  INSIDE-RANGE top_edge — trim only when momentum is failing
+    bullish + positive momentum → ACTION = HOLD   (continuation likely)
+    bullish + not-positive      → ACTION = SELL   (momentum failing)
+    neutral trend               → ACTION = SELL   (mean revert)
+    bearish trend               → ACTION = SELL   (mean revert + trend)
+
+  Zone = mid_range / unknown → never sent to you (suppressed upstream)
 
     Zone = unknown      → ACTION = SKIP
 
@@ -1297,25 +1390,31 @@ Rules:
     are provided; omit the segment otherwise.
   - Do NOT include any dollar amount, bps, or position-sizing recommendation
     anywhere in the output. The operator handles sizing themselves.
-  - The action context phrase should be tight (≤ 10 words) and convey
-    whether the call is mean-reverting (in-range) or trend-following
-    (out-of-range). Approved phrasings:
-      bottom_edge  → "bottom-edge scale-in"
-      top_edge     → "top-edge trim"
-      below_range  → "trend breakdown — avoid longs, consider shorts"
-      above_range  → "trend continuation — add to longs"
-    When the Range position line carries the divergence flag, you may
-    append ", RR/MFR disagree" to the context.
+  - The action context phrase should be tight (≤ 14 words) and convey
+    exactly WHY the gate produced this verb. Approved phrasings:
+      bottom_edge BUY    → "bottom-edge scale-in — bullish trend + positive momentum"
+      bottom_edge WATCH  → "bottom-edge but momentum not confirming — wait for momentum to turn"
+      bottom_edge WATCH  → "bottom-edge but trend neutral — wait for trend confirmation"
+      bottom_edge AVOID  → "bottom-edge in bearish trend — likely breakdown, don't catch the knife"
+      top_edge HOLD      → "top-edge but trend + momentum supportive — continuation likely, not a trim"
+      top_edge SELL      → "top-edge trim — momentum failing at resistance"
+      top_edge SELL      → "top-edge trim — mean revert" (neutral trend case)
+      below_range SELL   → "trend breakdown — avoid longs, consider shorts"
+      above_range BUY    → "trend continuation — add to longs"
+    When the Range position line carries the divergence flag, append
+    ", RR/MFR disagree" to the context.
   - Never use the words "contrarian", "fade", or "let it run" in the
     output. Breakouts and breakdowns are trend signals, not fade setups.
 
-Examples (Zone shown in [brackets] for illustration — your output never
-includes that; Python prepends the source label after you respond):
-  [bottom_edge] BUY XLK — price 176.80 (12% of RR $176-$182 / 18% of MFR $175.5-$183), MFR bullish trend, call wall $185 — bottom-edge scale-in
-  [bottom_edge] BUY AMLP — price 53.47 (14% of MFR $53.13-$55.57), MFR bullish trend, call wall $55, put wall $50 — bottom-edge scale-in
-  [top_edge]    SELL HYG — price 80.11 (86% of RR $79.46-$80.22 / 85% of MFR $79.28-$80.25), MFR neutral trend, call wall $81 — top-edge trim
-  [above_range] BUY CAD/USD — price 0.7340 (>100% of RR $0.7250-$0.7320), MFR bullish trend — trend continuation — add to longs
-  [below_range] SELL TSN — price 51.20 (<0% of MFR $54.50-$58.00), MFR bearish trend — trend breakdown — avoid longs, consider shorts
+Examples (Zone+gate shown in [brackets] for illustration — your output
+never includes that; Python prepends the source label after you respond):
+  [bottom_edge bullish/positive] BUY NVDA — price 207.50 (5% of RR $206-$236 / 5% of MFR $205.63-$243.49), MFR bullish trend + positive momentum — bottom-edge scale-in — bullish trend + positive momentum
+  [bottom_edge bullish/negative] WATCH BITCOIN — price 72500 (3% of MFR $72365-$76744), MFR bullish trend but bearish momentum — bottom-edge but momentum not confirming — wait for momentum to turn
+  [bottom_edge bearish] AVOID HD — price 305.10 (4% of RR $304-$320), MFR bearish trend — bottom-edge in bearish trend — likely breakdown, don't catch the knife
+  [top_edge    bullish/positive] HOLD NVDA — price 240.00 (90% of MFR $205.63-$243.49), MFR bullish trend + positive momentum, call wall $245 — top-edge but trend + momentum supportive — continuation likely, not a trim
+  [top_edge    bullish/negative] SELL HYG — price 80.42 (93% of MFR $79.28-$80.49), MFR bullish trend but neutral-danger momentum, call wall $81 — top-edge trim — momentum failing at resistance
+  [above_range bullish]          BUY CAD/USD — price 0.7340 (>100% of RR $0.7250-$0.7320), MFR bullish trend — trend continuation — add to longs
+  [below_range bullish]          SELL TSN — price 62.67 (-73% of MFR $64.44-$66.87), MFR bullish trend but range breakdown — trend breakdown — avoid longs, consider shorts
 """
 
 
@@ -1362,6 +1461,7 @@ def decide_notifier(
     mfr_lo = mfr.get("range_low")
     mfr_hi = mfr.get("range_high")
     trend  = mfr.get("trend_signal")
+    momentum = mfr.get("momentum_signal")
     hurst  = mfr.get("hurst")
     # MFR gamma walls (migration 028). Populated on ~55% of rows — US
     # equities with listed options. None on commodities/FX/VIX/thin tickers.
@@ -1540,13 +1640,21 @@ def decide_notifier(
             },
         }
 
+    # Normalize trend + momentum for the gate. Pythonist Python computes
+    # the (zone, trend, momentum) → action mapping deterministically;
+    # Haiku's job is only the narrative wording.
+    trend_dir    = _normalize_mfr_signal(trend)
+    momentum_dir = _normalize_mfr_signal(momentum)
+
     user_msg = (
         f"Ticker: {ticker.upper()}\n"
         f"Price: {price}\n"
         f"Hedgeye Risk Range: low={rr_lo}, high={rr_hi}\n"
         + range_pos_line
         + f"Zone: {zone}\n"
-        + f"MFR: range={mfr_lo}-{mfr_hi}, trend={trend}, hurst={hurst}\n"
+        + f"MFR: range={mfr_lo}-{mfr_hi}, hurst={hurst}\n"
+        + f"MFR trend: {trend_dir}\n"
+        + f"MFR momentum: {momentum_dir}\n"
         + wall_line
         + source_flags_line
         + f"Signal origin: {signal_origin}"
@@ -1568,90 +1676,79 @@ def decide_notifier(
         log.error("notifier API call failed for %s: %s", ticker, e)
         return None
 
-    # Parse the leading verb. Accept BUY/SELL/WATCH/SKIP. Edge-only-trigger
-    # retune (2026-05-25): top_edge produces SELL (mean-revert trim) and
-    # above_range produces BUY (trend continuation, post-2026-05-26 fix
-    # — was incorrectly SELL/"fade" before that). below_range produces
-    # SELL (trend breakdown — was incorrectly BUY/"contrarian add"). The
-    # parser admits SELL in addition to BUY. We strip any [bracket] Haiku
-    # emits — both to read the verb cleanly AND so we can replace the
-    # label with the deterministic one computed below.
+    # Parse the leading verb. Accept BUY/SELL/HOLD/WATCH/AVOID/SKIP. The
+    # trend+momentum gate (2026-05-26 v3) introduces HOLD and AVOID for
+    # the in-range edge cases where directional conviction doesn't hold:
+    #   bottom_edge bearish     → AVOID
+    #   bottom_edge bullish/neg → WATCH
+    #   top_edge bullish/pos    → HOLD
+    # SKIP maps to WATCH for back-compat with older Haiku replies.
+    # TRIM maps to SELL (legacy alias).
     payload = (line or "").lstrip()
     if payload.startswith("["):
         rb = payload.find("]")
         if rb != -1:
             payload = payload[rb + 1:].lstrip()
     head = (payload.split(None, 1)[0] if payload else "").upper()
-    action_map = {"BUY": "BUY", "SELL": "SELL",
-                  "TRIM": "SELL",  # accept TRIM as an alias for SELL
-                  "WATCH": "WATCH", "SKIP": "WATCH"}
+    action_map = {"BUY":   "BUY",
+                  "SELL":  "SELL",
+                  "TRIM":  "SELL",     # legacy alias
+                  "HOLD":  "HOLD",
+                  "WATCH": "WATCH",
+                  "AVOID": "AVOID",
+                  "SKIP":  "WATCH"}
     action = action_map.get(head)
     if action is None:
         log.warning("notifier returned non-conforming line for %s: %s", ticker, line)
         action = "WATCH"
 
-    # Safety net: enforce the zone→action mapping in Python so a
-    # prompt-following slip by Haiku can't fire the wrong direction.
-    # This is critical post-2026-05-26 because the OLD prompt
-    # ("contrarian add" / "fade strength") may still be in Haiku's
-    # training and may leak through despite the new instructions.
-    #
-    # Authoritative mapping (Keith McCullough trend-following framework):
-    #   bottom_edge  → BUY   (mean revert up off the floor, in-range)
-    #   top_edge     → SELL  (mean revert down off the ceiling, in-range)
-    #   below_range  → SELL  (trend BREAKDOWN — NOT contrarian add)
-    #   above_range  → BUY   (trend CONTINUATION — NOT fade)
-    #   mid_range    → WATCH (no edge, suppressed upstream anyway)
-    #   unknown      → WATCH (no range data, suppressed upstream anyway)
-    _ZONE_TO_ACTION = {
-        "bottom_edge": "BUY",
-        "top_edge":    "SELL",
-        "below_range": "SELL",
-        "above_range": "BUY",
-        "mid_range":   "WATCH",
-        "unknown":     "WATCH",
-    }
-    expected = _ZONE_TO_ACTION.get(zone)
-    if expected is not None and action != expected:
-        log.info("notifier: zone=%s expected action=%s but Haiku said %s "
-                 "for %s; forcing %s and regenerating body per framework",
-                 zone, expected, action, ticker, expected)
-        # Regenerate the body deterministically from Python state. We
-        # can't trust Haiku's text once it's gone off the rails (it'll
-        # still say "contrarian add" / "fade strength" even though the
-        # verb is flipped), and we'd rather emit a slightly tighter
-        # Python-templated line than a self-contradictory one. Haiku's
+    # Safety net: enforce the deterministic (zone, trend, momentum) → action
+    # mapping in Python so a prompt-following slip by Haiku can't fire the
+    # wrong direction. The OLD prompts ("contrarian add" / "fade strength" /
+    # naive "BUY at bottom regardless of momentum") may still be in Haiku's
+    # training data and leak through despite the new instructions.
+    expected_action, gated_ctx = _trend_momentum_gate(zone, trend_dir, momentum_dir)
+    if action != expected_action:
+        log.info("notifier: gate(zone=%s, trend=%s, momentum=%s) expected "
+                 "action=%s but Haiku said %s for %s; forcing %s and "
+                 "regenerating body",
+                 zone, trend_dir, momentum_dir, expected_action,
+                 action, ticker, expected_action)
+        # Regenerate the body deterministically from Python state. Haiku's
         # original output is preserved in prompt_context_full for audit.
-        _CTX = {
-            "bottom_edge": "bottom-edge scale-in",
-            "top_edge":    "top-edge trim",
-            "below_range": "trend breakdown — avoid longs, consider shorts",
-            "above_range": "trend continuation — add to longs",
-        }
-        ctx_phrase = _CTX.get(zone, "")
         range_str = " / ".join(range_pos_parts) if range_pos_parts else ""
         if divergence:
             range_str += " ⚠️ RR/MFR divergence"
-        trend_str = (trend or "").replace("trend", "").strip().lower() or "neutral"
-        # Reuse the same wall summary the prompt sent — strip the leading
-        # "MFR walls: " label and trailing newline.
+
+        # Trend+momentum narrative tag: "bullish trend + positive momentum"
+        # vs "bullish trend but bearish momentum" etc. Plain-English so the
+        # alert body reads naturally.
+        if trend_dir == momentum_dir:
+            tm_str = f"MFR {trend_dir} trend + {momentum_dir} momentum"
+        elif trend_dir == "neutral" or momentum_dir == "neutral":
+            tm_str = (f"MFR {trend_dir} trend, "
+                      f"{momentum_dir} momentum")
+        else:
+            tm_str = (f"MFR {trend_dir} trend but "
+                      f"{momentum_dir} momentum")
+
         wall_str = wall_line.replace("MFR walls: ", "").strip()
 
-        bits = [f"{expected} {ticker.upper()} — price {price}"]
+        bits = [f"{expected_action} {ticker.upper()} — price {price}"]
         if range_str:
             bits[-1] += f" ({range_str})"
-        bits.append(f"MFR {trend_str} trend")
+        bits.append(tm_str)
         if wall_str:
             bits.append(wall_str)
-        if ctx_phrase:
-            bits.append(ctx_phrase)
+        if gated_ctx:
+            bits.append(gated_ctx)
         # Join with ", " for the middle clauses and " — " before the
-        # trailing action context, matching the in-prompt example shape.
+        # trailing action context.
         if len(bits) > 1:
             payload = ", ".join(bits[:-1]) + " — " + bits[-1]
         else:
             payload = bits[0]
-        action = expected
+        action = expected_action
 
     # Deterministic source label (2026-05-26 fix for the XME bug). Haiku
     # was confabulating the [SourceLabel] off the action/zone pattern
@@ -1678,9 +1775,8 @@ def decide_notifier(
         except Exception:
             account_value_usd = 50_000.0
 
-    # Sizing: BUY/SELL → 50 bps adder by default (notifier doesn't escalate
-    # to 100 bps starters automatically; operator promotes via reply).
-    # WATCH/SKIP → null bps, null dollars.
+    # Sizing: only BUY/SELL get a sized adder. HOLD/WATCH/AVOID are
+    # informational — operator handles direction/sizing on those.
     bps: Optional[int] = 50 if action in ("BUY", "SELL") else None
     dollars: Optional[float] = None
     if bps:
@@ -1690,16 +1786,23 @@ def decide_notifier(
         except Exception:
             dollars = None
 
-    # Conviction: BUY/SELL both promote to "Adding" so they pass the
-    # scanner's ACTIONABLE_CONVICTIONS gate and reach the operator's
-    # phone. WATCH/SKIP stay in "Monitor" — observed but never alerted.
-    # Direction follows the verb: BUY=long, SELL=short.
+    # Conviction: any action at an edge or breakout zone is informational
+    # enough to reach the operator's phone (2026-05-26 v3 — gate added
+    # WATCH/HOLD/AVOID as fire-worthy at edges so the operator sees the
+    # "you'd want to buy here but momentum disagrees" caveats). mid_range
+    # / unknown were already short-circuited upstream with conviction=
+    # Monitor; we never reach here for those.
     decision: dict = {
         "ticker":            ticker.upper(),
         "signal_origin":     signal_origin,
         "signal_conviction": signal_conviction,
         "account_value_usd": account_value_usd,
-        "conviction":        "Adding" if action in ("BUY", "SELL") else "Monitor",
+        "conviction":        "Adding",
+        # Direction reflects the natural bias of the call:
+        #   SELL  → short (or trim long)
+        #   AVOID → long  (bias was long, but suppressed)
+        #   HOLD  → long  (holding an existing long)
+        #   BUY/WATCH → long (entry bias)
         "direction":         "short" if action == "SELL" else "long",
         "action":            action,
         "bps":               bps,
