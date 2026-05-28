@@ -158,17 +158,36 @@ def upsert_ranks(ranks: list[dict], snapshot_date: date, message_id: str | None)
         with conn.cursor() as cur:
             for r in ranks:
                 try:
+                    # Quad regime + rank_change_1w / rank_change_1m
+                    # computed at insert time so ML doesn't need a separate
+                    # backfill pass per snapshot. (Migration 030 backfills
+                    # everything BEFORE this code went live; from here on
+                    # every new insert is fully stamped.)
+                    mq, qq = _quad_for_date(snapshot_date)
+                    rc1w = _rank_change_for(
+                        cur, r["ticker"], snapshot_date, days=7
+                    )
+                    rc1m = _rank_change_for(
+                        cur, r["ticker"], snapshot_date, days=30
+                    )
                     cur.execute(
                         """
                         INSERT INTO hedgeye_portfolio_solutions
-                            (snapshot_date, rank, ticker, source_email_id, parsed_at)
-                        VALUES (%s, %s, %s, %s, NOW())
+                            (snapshot_date, rank, ticker, rank_change_1w,
+                             rank_change_1m, monthly_quad, quarterly_quad,
+                             source_email_id, parsed_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (snapshot_date, ticker) DO UPDATE
                             SET rank            = EXCLUDED.rank,
+                                rank_change_1w  = EXCLUDED.rank_change_1w,
+                                rank_change_1m  = EXCLUDED.rank_change_1m,
+                                monthly_quad    = EXCLUDED.monthly_quad,
+                                quarterly_quad  = EXCLUDED.quarterly_quad,
                                 source_email_id = EXCLUDED.source_email_id,
                                 parsed_at       = NOW()
                         """,
-                        (snapshot_date, r["rank"], r["ticker"], message_id),
+                        (snapshot_date, r["rank"], r["ticker"],
+                         rc1w, rc1m, mq, qq, message_id),
                     )
                     written += 1
                 except Exception as e:
@@ -178,8 +197,165 @@ def upsert_ranks(ranks: list[dict], snapshot_date: date, message_id: str | None)
     return {"written": written, "failed": failed}
 
 
+# ─────────────────────────── per-row helpers ───────────────────────────
+
+def _quad_for_date(d: date) -> tuple[Optional[str], Optional[str]]:
+    """(monthly_quad, quarterly_quad) effective as of `d`. Reads
+    quad_regime_history (the canonical log); falls back to the current
+    regime if no historical row covers d (e.g. d is in the future
+    relative to history)."""
+    try:
+        from tools.quad_regime import current_quad_regime
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT monthly_quad, quarterly_quad
+                      FROM quad_regime_history
+                     WHERE effective_at <= %s::timestamp + interval '23 hours 59 minutes'
+                     ORDER BY effective_at DESC LIMIT 1
+                    """,
+                    (d,),
+                )
+                row = cur.fetchone()
+        if row:
+            return (row[0], row[1])
+        cur_regime = current_quad_regime()
+        return (cur_regime.get("monthly_quad"),
+                cur_regime.get("quarterly_quad"))
+    except Exception as e:
+        log.debug("PS quad lookup failed for %s: %s", d, e)
+        return (None, None)
+
+
+def _rank_change_for(cur, ticker: str, snapshot_date: date,
+                     days: int) -> Optional[int]:
+    """previous_rank − current_rank, where previous is the most recent
+    snapshot at-or-before (snapshot_date − days). NULL when no prior
+    snapshot exists (fresh addition or parser gap). Single roundtrip
+    per (ticker, day, window) — runs once per rank during upsert."""
+    try:
+        cur.execute(
+            """
+            WITH prev AS (
+              SELECT rank
+                FROM hedgeye_portfolio_solutions
+               WHERE ticker = %s
+                 AND snapshot_date <= %s - (%s || ' days')::interval
+               ORDER BY snapshot_date DESC LIMIT 1
+            ),
+            cur AS (
+              SELECT rank
+                FROM hedgeye_portfolio_solutions
+               WHERE ticker = %s AND snapshot_date = %s
+            )
+            SELECT (SELECT rank FROM prev) - (SELECT rank FROM cur)
+            """,
+            (ticker, snapshot_date, str(days), ticker, snapshot_date),
+        )
+        row = cur.fetchone()
+        return row[0] if row and row[0] is not None else None
+    except Exception as e:
+        log.debug("rank_change lookup failed for %s/%s/%d: %s",
+                  ticker, snapshot_date, days, e)
+        return None
+
+
+def _write_ps_corpus_row(message_id: str, snapshot_date: date,
+                         subject: str, html_body: str,
+                         parsed: dict) -> None:
+    """Surface the PS publication into corpus_documents so ML / RAG can
+    query Keith's narrative reasoning alongside the structured tables.
+
+    Idempotent via the natural-key (source, source_date, source_ref).
+    Idempotency via INSERT … ON CONFLICT DO UPDATE so re-parses refresh
+    the metadata + full_text without dup'ing rows.
+    """
+    try:
+        import db_pg, json as _json
+        # Convert HTML → plain text using the same path the parser used.
+        full_text = _strip_html(html_body) if html_body else (subject or "")
+        # Structured metadata so ML can pivot on ticker / action lists
+        # without re-parsing full_text every query.
+        md = {
+            "tickers":  sorted({r["ticker"] for r in parsed.get("ranks", [])}
+                              | {a["ticker"] for a in parsed.get("actions", [])}),
+            "ranks":    [{"rank": r["rank"], "ticker": r["ticker"]}
+                         for r in parsed.get("ranks", [])],
+            "actions":  [{"ticker": a["ticker"], "action": a["action"],
+                          "bps": a.get("bps")}
+                         for a in parsed.get("actions", [])],
+            "subject":  subject,
+            "snapshot_date": str(snapshot_date),
+        }
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                # Probe schema for the natural-key column we'll dedup on.
+                # corpus_documents lacks a UNIQUE constraint on (source,
+                # source_date, source_ref) — use a manual dedup query.
+                cur.execute(
+                    """
+                    SELECT id FROM corpus_documents
+                     WHERE source = 'portfolio_solutions'
+                       AND source_date = %s
+                       AND COALESCE(source_ref, '') = %s
+                     LIMIT 1
+                    """,
+                    (snapshot_date, message_id or ""),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    cur.execute(
+                        """
+                        UPDATE corpus_documents
+                           SET title    = %s,
+                               full_text = %s,
+                               metadata = %s::jsonb,
+                               captured_at = NOW()
+                         WHERE id = %s
+                        """,
+                        (subject, full_text, _json.dumps(md), existing[0]),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO corpus_documents
+                            (source, source_date, source_ref, document_type,
+                             title, full_text, metadata, captured_at)
+                        VALUES ('portfolio_solutions', %s, %s,
+                                'portfolio_solutions_email',
+                                %s, %s, %s::jsonb, NOW())
+                        """,
+                        (snapshot_date, message_id or "",
+                         subject, full_text, _json.dumps(md)),
+                    )
+                conn.commit()
+    except Exception as e:
+        log.warning("PS corpus write failed (%s): %s", snapshot_date, e)
+
+
+def _refresh_keith_trades_view() -> None:
+    """Refresh the materialized view that joins
+    hedgeye_portfolio_actions × hedgeye_portfolio_solutions. Belt-and-
+    suspenders — the nightly event-alerts launcher also refreshes — so
+    operator's `SELECT * FROM keith_trades_with_context …` always sees
+    today's PS data after a parse."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("REFRESH MATERIALIZED VIEW keith_trades_with_context")
+            conn.commit()
+    except Exception as e:
+        log.debug("keith_trades_with_context refresh failed: %s", e)
+
+
+# ─────────────────────────── insert_actions ───────────────────────────
+
 def insert_actions(actions: list[dict], action_date: date, message_id: str | None) -> dict:
     import db_pg
+    mq, qq = _quad_for_date(action_date)
     written, failed = 0, 0
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
@@ -189,12 +365,13 @@ def insert_actions(actions: list[dict], action_date: date, message_id: str | Non
                         """
                         INSERT INTO hedgeye_portfolio_actions
                             (action_date, ticker, action, bps,
-                             commentary_raw, source_email_id, captured_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                             commentary_raw, monthly_quad, quarterly_quad,
+                             source_email_id, captured_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (source_email_id, ticker, action) DO NOTHING
                         """,
                         (action_date, a["ticker"], a["action"], a["bps"],
-                         a["commentary"], message_id),
+                         a["commentary"], mq, qq, message_id),
                     )
                     written += 1
                 except Exception as e:
@@ -294,6 +471,16 @@ def process_email(message_id: str, *, dry_run: bool = False,
                     {a["ticker"] for a in parsed["actions"]})
     summary["noted_in_inventory"] = note_in_inventory(tickers, message_id)
     stamp_email_parsed(message_id)
+    # Surface the narrative into corpus_documents for ML/RAG (2026-05-28).
+    # Parser's structured tables (hedgeye_portfolio_solutions,
+    # _portfolio_actions) carry the "what"; corpus_documents carries the
+    # "why" — Keith's commentary verbatim with action/rank metadata for
+    # query.
+    _write_ps_corpus_row(message_id, snapshot_date, subject, html_body, parsed)
+    # Refresh the materialized view so keith_trades_with_context reflects
+    # today's PS data immediately. Best-effort; the nightly event-alerts
+    # launcher also refreshes as a belt-and-suspenders.
+    _refresh_keith_trades_view()
     if tickers and fan_out:
         summary["fan_out"] = fan_out_refresh(tickers)
     elif tickers:

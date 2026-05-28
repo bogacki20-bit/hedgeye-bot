@@ -562,8 +562,47 @@ def record_alert(
                     ),
                 )
             row = cur.fetchone()
+            new_id = row[0] if row else None
+            # 2026-05-28: stamp Quad regime on the new row. Uses the
+            # canonical reader in tools.quad_regime which respects
+            # quad_regime_history first, then env vars. Best-effort —
+            # any failure leaves the alert intact with NULL regime
+            # rather than breaking the alert pipeline. Populates BOTH
+            # the legacy single `quad_regime` column (migration 009)
+            # and the new split monthly_quad / quarterly_quad columns
+            # (migration 030) so historical query surfaces continue
+            # working alongside the new ML query path.
+            if new_id is not None:
+                try:
+                    from tools.quad_regime import current_quad_regime
+                    r = current_quad_regime()
+                    mq = r.get("monthly_quad")
+                    qq = r.get("quarterly_quad")
+                    legacy = f"{qq} / {mq}" if (mq and qq) else (qq or mq)
+                    # Build the UPDATE based on which columns exist so a
+                    # pre-migration env doesn't break.
+                    sets, vals = [], []
+                    if _column_exists("alerts_fired", "quad_regime"):
+                        sets.append("quad_regime = %s");   vals.append(legacy)
+                    if _column_exists("alerts_fired", "monthly_quad"):
+                        sets.append("monthly_quad = %s");  vals.append(mq)
+                    if _column_exists("alerts_fired", "quarterly_quad"):
+                        sets.append("quarterly_quad = %s"); vals.append(qq)
+                    if sets:
+                        vals.append(new_id)
+                        cur.execute(
+                            f"UPDATE alerts_fired SET {', '.join(sets)} "
+                            f"WHERE id = %s",
+                            vals,
+                        )
+                except Exception as e:
+                    # Log but don't fail the alert.
+                    import logging
+                    logging.getLogger(__name__).debug(
+                        "alerts_fired quad stamp failed for id=%s: %s",
+                        new_id, e)
         conn.commit()
-        return row[0] if row else None
+        return new_id
 
 
 def find_alert_by_id(alert_id: int):

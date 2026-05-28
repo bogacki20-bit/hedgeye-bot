@@ -102,6 +102,31 @@ def ingest(csv_path: str | Path) -> dict:
                 run_date = _date(row.get("Run Date"))
                 settle_date = _date(row.get("Settlement Date"))
                 acct = (row.get("Account Number") or "").strip().strip('"')
+                # Quad regime stamping (2026-05-28): look up the regime
+                # effective on the trade's run_date so historical CSV
+                # ingests retroactively land in the right Quad slice.
+                # Falls through to NULLs if the helper / table isn't
+                # available (pre-migration env).
+                _mq = _qq = None
+                try:
+                    import db_pg
+                    with db_pg.get_conn() as _qc:
+                        with _qc.cursor() as _qcur:
+                            _qcur.execute(
+                                """
+                                SELECT monthly_quad, quarterly_quad
+                                  FROM quad_regime_history
+                                 WHERE effective_at <= %s::timestamp
+                                                      + interval '23 hours 59 minutes'
+                                 ORDER BY effective_at DESC LIMIT 1
+                                """,
+                                (run_date,),
+                            )
+                            _row = _qcur.fetchone()
+                            if _row:
+                                _mq, _qq = _row[0], _row[1]
+                except Exception:
+                    pass
                 try:
                     cur.execute(
                         """
@@ -109,12 +134,14 @@ def ingest(csv_path: str | Path) -> dict:
                             run_date, account_name, account_number,
                             action, raw_symbol, normalized_symbol,
                             qty, price, amount, commission, fees,
-                            type, source, raw_row, settlement_date
+                            type, source, raw_row, settlement_date,
+                            monthly_quad, quarterly_quad
                         ) VALUES (
                             %s, %s, %s,
                             %s, %s, %s,
                             %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s
+                            %s, %s, %s, %s,
+                            %s, %s
                         )
                         ON CONFLICT (run_date, account_number,
                                      COALESCE(raw_symbol, ''),
@@ -138,6 +165,7 @@ def ingest(csv_path: str | Path) -> dict:
                             "fidelity",
                             Json({k: v for k, v in row.items() if v not in (None, "")}),
                             settle_date,
+                            _mq, _qq,
                         ),
                     )
                     if cur.rowcount == 1:

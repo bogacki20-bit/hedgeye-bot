@@ -289,6 +289,31 @@ def run(dry_run: bool = False) -> int:
     # NOT calendar today, so re-running the detector tomorrow against the
     # SAME snapshots (e.g. ETF Pro weekly hasn't refreshed yet) suppresses
     # the duplicate telegram.
+    # Belt-and-suspenders: refresh the keith_trades_with_context
+    # materialized view at the start of every event-alerts run so the
+    # operator's ML query surface stays fresh even if the per-parse
+    # refresh in parser_portfolio_solutions ever drops a beat. Soft
+    # failure — the view may not exist yet on pre-migration envs.
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("REFRESH MATERIALIZED VIEW keith_trades_with_context")
+            conn.commit()
+    except Exception as e:
+        log.debug("keith_trades_with_context refresh skipped: %s", e)
+
+    # Sync Quad regime from env (operator's input path) — inserts a new
+    # quad_regime_history row only when the env vars differ from the
+    # latest history row. Idempotent on every run; gives the rest of the
+    # pipeline (record_alert below, parser writes elsewhere) a fresh
+    # canonical regime to stamp against.
+    try:
+        from tools.quad_regime import sync_quad_regime_from_env
+        sync_quad_regime_from_env(notes="event_driven_alerts startup")
+    except Exception as e:
+        log.debug("quad_regime sync skipped: %s", e)
+
     sent = 0
     suppressed = 0
     for d in deltas:
