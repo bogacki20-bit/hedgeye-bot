@@ -544,14 +544,23 @@ def compose_recommendation(
         hedgeye_context      — dict snapshot (today's quad, vix bucket, etc)
         spotgamma_context    — dict snapshot (call wall / put wall / hedge wall if known)
 
-    Logic mirrors Hedgeye U Ch2 framework: "top of range you sell, bottom of
-    range you buy" (Risk Range Signal Deep Dive). Sizing uses bps per
-    framework_quotes_compiled.md Ch3 Lessons 2 + 4 (100 bps starter, 50 bps
-    adds, $1K real-world ceiling):
-        bottom_edge   -> ADD  at ADD_BPS_LOW (50 bps of account, $1K cap)
-        below_range   -> BUY  at STARTER_BPS (100 bps starter, broken range)
-        top_edge      -> TRIM (50% of position)
-        above_range   -> WATCH (range break above — let it ride or trim?)
+    Logic mirrors Keith McCullough's Hedgeye Risk Range framework, which
+    has TWO distinct regimes split by whether price is INSIDE or OUTSIDE
+    the range (2026-05-26 retune — previous logic was contrarian on
+    breakouts, which fights the trend-following methodology):
+
+    INSIDE-RANGE = mean revert toward midpoint
+        bottom_edge   -> ADD   (mean revert up off the floor)
+                              at ADD_BPS_LOW (50 bps, $1K cap)
+        top_edge      -> TRIM  (mean revert down off the ceiling, 50% off)
+
+    OUTSIDE-RANGE = trend continuation, NOT mean revert
+        above_range   -> BUY   (trend CONTINUATION — add to longs;
+                                was "WATCH / trim or let it run", fixed
+                                2026-05-26 per operator framework correction)
+        below_range   -> SELL  (trend BREAKDOWN — exit longs, consider
+                                shorts; was "BUY contrarian add", fixed
+                                2026-05-26 per operator framework correction)
 
     The caller passes Style B parameters; this is just the alert-time hint.
     Final position-sizing math lives in recommender.py.
@@ -624,12 +633,15 @@ def compose_recommendation(
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "below_range":
+        # Trend breakdown — Keith framework: exit longs, consider shorts.
+        # NOT contrarian add (that fights trend-following methodology).
         return {
-            "text": (f"BUY ~${_starter_usd:.0f} {ticker} at {price:.2f} ({STARTER_BPS} bps starter, "
-                     f"broken below range, contrarian add).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
-            "suggested_action": "BUY",
-            "suggested_dollars": _starter_usd,
-            "suggested_bps": STARTER_BPS,
+            "text": (f"SELL {ticker} at {price:.2f} — trend breakdown "
+                     f"(broke below range — avoid longs, consider shorts)."
+                     f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+            "suggested_action": "SELL",
+            "suggested_dollars": None,
+            "suggested_bps": None,
             "framework_alignment": "neutral",
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
@@ -639,7 +651,9 @@ def compose_recommendation(
         edge_pct = int(round(_edge_fraction() * 100))
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top {edge_pct}% of range, fade strength, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                     f"(top {edge_pct}% of range, top-edge trim, "
+                     f"{_framework_phrase(_align)})."
+                     f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
             "suggested_bps": None,
@@ -648,12 +662,15 @@ def compose_recommendation(
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "above_range":
+        # Trend continuation — Keith framework: add to longs. NOT a fade.
         return {
-            "text": (f"WATCH {ticker} at {price:.2f} — broke above range. "
-                     f"Trim or let it run?{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
-            "suggested_action": "WATCH",
-            "suggested_dollars": None,
-            "suggested_bps": None,
+            "text": (f"BUY ~${_add_usd:.0f} {ticker} at {price:.2f} "
+                     f"({ADD_BPS_LOW} bps, trend continuation — "
+                     f"broke above range, add to longs)."
+                     f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+            "suggested_action": "BUY",
+            "suggested_dollars": _add_usd,
+            "suggested_bps": ADD_BPS_LOW,
             "framework_alignment": "neutral",
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,

@@ -1236,14 +1236,28 @@ def _compute_source_label(flags: list[str]) -> str:
 _NOTIFIER_PROMPT = """You are a terse trading notifier. The user message
 gives you a deterministic `Zone:` label computed by Python from the
 Hedgeye Risk Range and the live price. Your action MUST be derived
-strictly from the Zone — do not second-guess the boundaries:
+strictly from the Zone — do not second-guess the boundaries.
 
-  Zone = below_range  → ACTION = BUY   (range break below — contrarian add)
-  Zone = bottom_edge  → ACTION = BUY   (scale-in zone, bottom of range)
-  Zone = mid_range    → ACTION = WATCH (operator does not want a fire here)
-  Zone = top_edge     → ACTION = SELL  (trim / fade, top of range)
-  Zone = above_range  → ACTION = SELL  (range break above)
-  Zone = unknown      → ACTION = SKIP
+Keith McCullough's framework (Hedgeye Risk Range) has TWO distinct
+regimes depending on whether price is INSIDE or OUTSIDE the range:
+
+  INSIDE-RANGE = mean revert toward the midpoint
+    Zone = bottom_edge  → ACTION = BUY   (mean revert up off the floor)
+    Zone = top_edge     → ACTION = SELL  (mean revert down off the ceiling)
+    Zone = mid_range    → ACTION = WATCH (no edge, no fire)
+
+  OUTSIDE-RANGE = trend continuation, NOT mean revert
+    Zone = below_range  → ACTION = SELL  (trend BREAKDOWN — exit longs,
+                                          consider shorts; NOT a buy-the-dip)
+    Zone = above_range  → ACTION = BUY   (trend CONTINUATION — add to longs,
+                                          NOT a fade)
+
+    Zone = unknown      → ACTION = SKIP
+
+This is the critical framework rule. Breakouts and breakdowns mean the
+range has been INVALIDATED — momentum is taking over. Going CONTRARIAN
+to a breakout fights Keith's trend-following methodology. Never say
+"contrarian add" or "fade strength" on an out-of-range case.
 
 The polling universe is broader than the Quad-aligned slice — it includes
 ETF Pro, Signal Strength, Portfolio Solutions, Risk Range and any
@@ -1283,19 +1297,25 @@ Rules:
     are provided; omit the segment otherwise.
   - Do NOT include any dollar amount, bps, or position-sizing recommendation
     anywhere in the output. The operator handles sizing themselves.
-  - The action context phrase should be tight (≤ 8 words) and consistent
-    with the Zone: "bottom-edge scale-in", "top-edge fade",
-    "range break below", "range break above". When the Range position
-    line carries the divergence flag, you may add ", RR/MFR disagree"
-    to the action context.
+  - The action context phrase should be tight (≤ 10 words) and convey
+    whether the call is mean-reverting (in-range) or trend-following
+    (out-of-range). Approved phrasings:
+      bottom_edge  → "bottom-edge scale-in"
+      top_edge     → "top-edge trim"
+      below_range  → "trend breakdown — avoid longs, consider shorts"
+      above_range  → "trend continuation — add to longs"
+    When the Range position line carries the divergence flag, you may
+    append ", RR/MFR disagree" to the context.
+  - Never use the words "contrarian", "fade", or "let it run" in the
+    output. Breakouts and breakdowns are trend signals, not fade setups.
 
 Examples (Zone shown in [brackets] for illustration — your output never
 includes that; Python prepends the source label after you respond):
   [bottom_edge] BUY XLK — price 176.80 (12% of RR $176-$182 / 18% of MFR $175.5-$183), MFR bullish trend, call wall $185 — bottom-edge scale-in
   [bottom_edge] BUY AMLP — price 53.47 (14% of MFR $53.13-$55.57), MFR bullish trend, call wall $55, put wall $50 — bottom-edge scale-in
-  [top_edge]    SELL XLF — price 39.60 (88% of RR $36.50-$40.00 / 62% of MFR $37-$41 ⚠️ RR/MFR divergence), MFR neutral trend — top-edge fade, RR/MFR disagree
-  [above_range] SELL TLT — price 96.20 (>100% of RR $90-$95.80), MFR bearish trend — range break above
-  [below_range] BUY GLD — price 226.50 (<0% of RR $228-$238 / 5% of MFR $225-$240), MFR bullish trend — range break below, contrarian add
+  [top_edge]    SELL HYG — price 80.11 (86% of RR $79.46-$80.22 / 85% of MFR $79.28-$80.25), MFR neutral trend, call wall $81 — top-edge trim
+  [above_range] BUY CAD/USD — price 0.7340 (>100% of RR $0.7250-$0.7320), MFR bullish trend — trend continuation — add to longs
+  [below_range] SELL TSN — price 51.20 (<0% of MFR $54.50-$58.00), MFR bearish trend — trend breakdown — avoid longs, consider shorts
 """
 
 
@@ -1549,7 +1569,10 @@ def decide_notifier(
         return None
 
     # Parse the leading verb. Accept BUY/SELL/WATCH/SKIP. Edge-only-trigger
-    # retune (2026-05-25): top_edge and above_range produce SELL, so the
+    # retune (2026-05-25): top_edge produces SELL (mean-revert trim) and
+    # above_range produces BUY (trend continuation, post-2026-05-26 fix
+    # — was incorrectly SELL/"fade" before that). below_range produces
+    # SELL (trend breakdown — was incorrectly BUY/"contrarian add"). The
     # parser admits SELL in addition to BUY. We strip any [bracket] Haiku
     # emits — both to read the verb cleanly AND so we can replace the
     # label with the deterministic one computed below.
@@ -1567,14 +1590,68 @@ def decide_notifier(
         log.warning("notifier returned non-conforming line for %s: %s", ticker, line)
         action = "WATCH"
 
-    # Safety net: if Haiku ignored the deterministic Zone instruction and
-    # emitted BUY/SELL on mid_range, downgrade to WATCH so the firing gate
-    # in proactive_scanner doesn't page the operator. (mid_range producing
-    # an alert is exactly the noise the edge-only retune is meant to kill.)
-    if zone == "mid_range" and action in ("BUY", "SELL"):
-        log.info("notifier: mid_range zone but Haiku said %s for %s; "
-                 "downgrading to WATCH per edge-only policy", action, ticker)
-        action = "WATCH"
+    # Safety net: enforce the zone→action mapping in Python so a
+    # prompt-following slip by Haiku can't fire the wrong direction.
+    # This is critical post-2026-05-26 because the OLD prompt
+    # ("contrarian add" / "fade strength") may still be in Haiku's
+    # training and may leak through despite the new instructions.
+    #
+    # Authoritative mapping (Keith McCullough trend-following framework):
+    #   bottom_edge  → BUY   (mean revert up off the floor, in-range)
+    #   top_edge     → SELL  (mean revert down off the ceiling, in-range)
+    #   below_range  → SELL  (trend BREAKDOWN — NOT contrarian add)
+    #   above_range  → BUY   (trend CONTINUATION — NOT fade)
+    #   mid_range    → WATCH (no edge, suppressed upstream anyway)
+    #   unknown      → WATCH (no range data, suppressed upstream anyway)
+    _ZONE_TO_ACTION = {
+        "bottom_edge": "BUY",
+        "top_edge":    "SELL",
+        "below_range": "SELL",
+        "above_range": "BUY",
+        "mid_range":   "WATCH",
+        "unknown":     "WATCH",
+    }
+    expected = _ZONE_TO_ACTION.get(zone)
+    if expected is not None and action != expected:
+        log.info("notifier: zone=%s expected action=%s but Haiku said %s "
+                 "for %s; forcing %s and regenerating body per framework",
+                 zone, expected, action, ticker, expected)
+        # Regenerate the body deterministically from Python state. We
+        # can't trust Haiku's text once it's gone off the rails (it'll
+        # still say "contrarian add" / "fade strength" even though the
+        # verb is flipped), and we'd rather emit a slightly tighter
+        # Python-templated line than a self-contradictory one. Haiku's
+        # original output is preserved in prompt_context_full for audit.
+        _CTX = {
+            "bottom_edge": "bottom-edge scale-in",
+            "top_edge":    "top-edge trim",
+            "below_range": "trend breakdown — avoid longs, consider shorts",
+            "above_range": "trend continuation — add to longs",
+        }
+        ctx_phrase = _CTX.get(zone, "")
+        range_str = " / ".join(range_pos_parts) if range_pos_parts else ""
+        if divergence:
+            range_str += " ⚠️ RR/MFR divergence"
+        trend_str = (trend or "").replace("trend", "").strip().lower() or "neutral"
+        # Reuse the same wall summary the prompt sent — strip the leading
+        # "MFR walls: " label and trailing newline.
+        wall_str = wall_line.replace("MFR walls: ", "").strip()
+
+        bits = [f"{expected} {ticker.upper()} — price {price}"]
+        if range_str:
+            bits[-1] += f" ({range_str})"
+        bits.append(f"MFR {trend_str} trend")
+        if wall_str:
+            bits.append(wall_str)
+        if ctx_phrase:
+            bits.append(ctx_phrase)
+        # Join with ", " for the middle clauses and " — " before the
+        # trailing action context, matching the in-prompt example shape.
+        if len(bits) > 1:
+            payload = ", ".join(bits[:-1]) + " — " + bits[-1]
+        else:
+            payload = bits[0]
+        action = expected
 
     # Deterministic source label (2026-05-26 fix for the XME bug). Haiku
     # was confabulating the [SourceLabel] off the action/zone pattern
