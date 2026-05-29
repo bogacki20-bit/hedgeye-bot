@@ -405,13 +405,32 @@ def _compute_breakdown() -> dict[str, list[str]]:
     TTL cache."""
     breakdown: dict[str, list[str]] = {}
 
-    # Quad-aligned slice (intersection of monthly + quarterly Quad). Pulled
-    # for free since it's already a YAML lookup — no staleness concept.
-    try:
-        longs  = active_universe("long")
-        shorts = active_universe("short")
-    except Exception as e:
-        log.warning("active_slice: Quad slice unavailable (%s); falling back", e)
+    # Quad-aligned slice (intersection of monthly + quarterly Quad).
+    # 2026-05-29 retune (CASY false-COVER bug): when env vars are
+    # missing, tools.doctrine silently defaults to Quad 1 — under which
+    # CASY (and many others) is tagged quad_short, which then drove
+    # side=short and gated to COVER on a non-short ticker. The right
+    # behavior when the operator hasn't told us the active regime is:
+    # don't pretend to know. Skip Quad bucket population entirely —
+    # tickers only in fresh Hedgeye products (ETF Pro, SS, PS, II, RR)
+    # or the operator override list still get polled; tickers known
+    # only via the static Quad map go silent until the operator sets
+    # CURRENT_*_QUAD_OVERRIDE.
+    have_quad_env = bool(os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE")
+                          and os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE"))
+    if have_quad_env:
+        try:
+            longs  = active_universe("long")
+            shorts = active_universe("short")
+        except Exception as e:
+            log.warning("active_slice: Quad slice unavailable (%s); "
+                        "skipping quad bucket population", e)
+            longs, shorts = [], []
+    else:
+        log.warning("active_slice: CURRENT_MONTHLY_QUAD_OVERRIDE / "
+                    "CURRENT_QUARTERLY_QUAD_OVERRIDE not set — skipping "
+                    "quad_long/quad_short tagging. Set both env vars to "
+                    "include Quad-categorized tickers in polling.")
         longs, shorts = [], []
     breakdown["quad_long"]  = longs
     breakdown["quad_short"] = shorts
@@ -486,11 +505,20 @@ def polling_universe() -> list[str]:
 
 
 def source_flags_for(ticker: str) -> list[str]:
-    """Source labels a single ticker belongs to. Returns a sorted list of
-    keys from source_breakdown() the ticker appears in, plus a derived
-    'quad_aligned' flag when the ticker is in the Quad slice on either
-    side. Used by decision_engine to give Haiku context about WHY a
-    ticker is in the polling universe.
+    """Fresh-only source labels a single ticker belongs to.
+
+    Returns sorted list of buckets the ticker is in, EXCLUDING `stale_*`
+    buckets. Stale flags are diagnostic-only (visible in
+    `source_breakdown()` and via `stale_flags_for()`) but never drive
+    the [SourceLabel] cascade or `_ticker_side` resolution.
+
+    2026-05-29 policy retune (operator: CASY false-COVER bug). Before:
+    stale_investing_ideas was emitted alongside other flags, then the
+    label cascade rendered "[Investing Ideas (stale)]" and the
+    side-resolution heuristic was vulnerable to anything ending in
+    `_short`. After: stale buckets stay in source_breakdown for the
+    delta-alert/diagnostic surface but never leak into the action-verb
+    pipeline.
     """
     if not ticker:
         return []
@@ -498,11 +526,29 @@ def source_flags_for(ticker: str) -> list[str]:
     bd = source_breakdown()
     flags: list[str] = []
     for key, lst in bd.items():
+        if key.startswith("stale_"):
+            continue   # diagnostic-only; see stale_flags_for()
         if tk in lst:
             flags.append(key)
     if "quad_long" in flags or "quad_short" in flags:
         flags.append("quad_aligned")
     return sorted(set(flags))
+
+
+def stale_flags_for(ticker: str) -> list[str]:
+    """Stale-only buckets a ticker appears in.
+
+    Companion to `source_flags_for` that exposes the staleness diagnostic
+    without polluting the action-verb pipeline. Use this in audit or
+    operator-visibility surfaces ("which tickers are surviving on stale
+    data") — NOT to drive side resolution or alert labels.
+    """
+    if not ticker:
+        return []
+    tk = ticker.strip().upper()
+    bd = source_breakdown()
+    return sorted({k for k, lst in bd.items()
+                   if k.startswith("stale_") and tk in lst})
 
 
 def invalidate_cache() -> None:

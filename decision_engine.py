@@ -1210,22 +1210,20 @@ def _compute_source_label(flags: list[str]) -> str:
     # Order matters — first match wins. Fresh product flags rank above
     # stale variants. Within products, ETF Pro short ranks first because
     # it's the rarer / more actionable signal.
+    # 2026-05-29: stale_* entries removed. `source_flags_for()` no longer
+    # emits stale flags (they'd otherwise drive the cascade with stale
+    # data — operator-caught CASY false-COVER bug). Stale info still
+    # accessible via `tools.active_slice.stale_flags_for()` for
+    # diagnostic surfaces.
     cascade = [
-        ("etf_pro_short",             "[ETF Pro Short]"),
-        ("etf_pro_long",              "[ETF Pro Long]"),
-        ("portfolio_solutions",       "[Portfolio Solutions]"),
-        ("signal_strength",           "[Signal Strength]"),
-        ("investing_ideas",           "[Investing Ideas]"),
-        # Stale variants — surface the staleness explicitly so the
-        # operator knows the data is older than the freshness threshold.
-        ("stale_etf_pro",             "[ETF Pro (stale)]"),
-        ("stale_portfolio_solutions", "[Portfolio Solutions (stale)]"),
-        ("stale_signal_strength",     "[Signal Strength (stale)]"),
-        ("stale_investing_ideas",     "[Investing Ideas (stale)]"),
-        ("quad_aligned",              "[Quad]"),
-        ("risk_range",                "[Risk Range]"),
-        ("stale_risk_range",          "[Risk Range (stale)]"),
-        ("operator",                  "[Operator]"),
+        ("etf_pro_short",       "[ETF Pro Short]"),
+        ("etf_pro_long",        "[ETF Pro Long]"),
+        ("portfolio_solutions", "[Portfolio Solutions]"),
+        ("signal_strength",     "[Signal Strength]"),
+        ("investing_ideas",     "[Investing Ideas]"),
+        ("quad_aligned",        "[Quad]"),
+        ("risk_range",          "[Risk Range]"),
+        ("operator",            "[Operator]"),
     ]
     fset = set(flags or [])
     for key, label in cascade:
