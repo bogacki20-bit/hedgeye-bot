@@ -582,7 +582,15 @@ def _process_new_email(parsed: dict) -> None:
             source = "signal_strength"
         elif "etf pro" in subject_lower:
             source = "etf_pro"
-        elif "investing idea" in subject_lower:
+        elif ("investing idea" in subject_lower
+              or "top stock picks" in subject_lower
+              or "top 21 long ideas" in subject_lower):
+            # 2026-05-29: classifier missed every Top-21 Leaderboard email
+            # since 2026-05-12 because the subject only matched
+            # `"investing idea"`. Real subject is
+            # "Top Stock Picks | The Leaderboard: Top 21 Long Ideas".
+            # CASY was on every daily II leaderboard but the typed table
+            # stayed stale at 2026-05-12 — drove the false-COVER bug.
             source = "investing_ideas"
         elif "macro show" in subject_lower:
             source = "macro_show"

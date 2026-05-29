@@ -1256,31 +1256,60 @@ def _normalize_mfr_signal(s: str | None) -> str:
 
 
 def _ticker_side(source_flags: list[str]) -> str:
-    """Resolve ticker side from source_flags. 'short' wins when there's
-    any conflict — Keith's framework treats an explicit short
-    categorization as the dominant signal even when a Quad-map row
-    disagrees. 2026-05-28 retune (operator: 'the actions are opposite
-    for shorts vs longs at the same zone — bot has to know which side
-    it's on').
+    """Resolve ticker side from source_flags. 2026-05-29 retune
+    (operator: 'fresh sources ALWAYS win over stale sources; conflict
+    between fresh sources → WATCH').
 
-    Sides:
-        'short' — any *_short flag in source_flags (etf_pro_short,
-                  quad_short, or future signal_strength_short etc.)
-        'long'  — any *_long flag without a *_short counterpart
-        'undetermined' — only product-without-side flags (risk_range,
-                         signal_strength, portfolio_solutions,
-                         investing_ideas, operator) — default behaves
-                         as long for backwards-compat.
+    Priority (tier-by-tier; first tier with a signal wins):
+
+      Tier 1: ETF Pro EXPLICIT side (etf_pro_long / etf_pro_short)
+              — Keith's weekly publication carries explicit bias per
+              section header. If BOTH present (shouldn't happen on one
+              ticker, but defensive) → 'conflict' → gate returns WATCH.
+
+      Tier 2: Implicit-LONG Hedgeye products — portfolio_solutions
+              (Keith holds it = long), signal_strength (Best Idea Longs
+              dominate; we don't split sides in the typed table),
+              investing_ideas (Top-21 long-only leaderboard). Any one
+              of these wins over Quad map's static categorization
+              because they represent Keith's ACTIVE current view.
+
+      Tier 3: Quad map (quad_long / quad_short) — static categorization.
+              Only used when no Hedgeye product has spoken.
+
+      Fallback: 'undetermined' — defaults to long behavior downstream.
+
+    Stale flags are already stripped by tools.active_slice.source_flags_for
+    before reaching here, so anything we see is fresh.
     """
     if not source_flags:
         return "undetermined"
     fset = set(source_flags)
-    has_short = any(f.endswith("_short") for f in fset)
-    has_long  = any(f.endswith("_long")  for f in fset)
-    if has_short:
-        return "short"
-    if has_long:
+
+    # Tier 1 — ETF Pro explicit
+    etf_long  = "etf_pro_long"  in fset
+    etf_short = "etf_pro_short" in fset
+    if etf_long and etf_short:
+        return "conflict"
+    if etf_long:
         return "long"
+    if etf_short:
+        return "short"
+
+    # Tier 2 — implicit-long Hedgeye products
+    if fset & {"portfolio_solutions", "signal_strength", "investing_ideas"}:
+        return "long"
+
+    # Tier 3 — Quad map (lowest priority, static)
+    qlong  = "quad_long"  in fset
+    qshort = "quad_short" in fset
+    if qlong and qshort:
+        return "conflict"   # intersection rule should prevent this
+    if qshort:
+        return "short"
+    if qlong:
+        return "long"
+
     return "undetermined"
 
 
@@ -1320,8 +1349,17 @@ def _trend_momentum_gate(zone: str, side: str, trend_dir: str,
     trend_dir    = (trend_dir or "neutral").lower()
     momentum_dir = (momentum_dir or "neutral").lower()
     side = (side or "long").lower()
-    if side not in ("long", "short", "undetermined"):
+    if side not in ("long", "short", "undetermined", "conflict"):
         side = "long"
+
+    # 2026-05-29: conflict sentinel from _ticker_side. Fresh Hedgeye
+    # sources disagreed (e.g. SS Long + ETF Pro Short for the same
+    # ticker). Don't try to take a position — surface the conflict and
+    # let the operator decide.
+    if side == "conflict":
+        return ("WATCH",
+                "side conflict — Hedgeye sources disagree, "
+                "wait for resolution")
 
     # ─── SHORT-side framework ────────────────────────────────────
     if side == "short":
