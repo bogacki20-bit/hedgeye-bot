@@ -1328,9 +1328,29 @@ def _trend_momentum_gate(zone: str, side: str, trend_dir: str,
     # ─── SHORT-side framework ────────────────────────────────────
     if side == "short":
         if zone == "below_range":
+            # Marginal-breakdown gate (2026-05-28): when both trend AND
+            # momentum point UP, a price slip below range is more likely
+            # noise in a low-vol asset than a trend-following SHORT
+            # opportunity. Operator's BUXX-style case — bullish trend +
+            # bullish momentum + thin range → microscopic "breakdown" is
+            # actually a noise tick, treat as COVER (the short thesis is
+            # weakening, take profit) rather than ADD-SHORT.
+            if trend_dir == "bullish" and momentum_dir == "bullish":
+                return ("COVER",
+                        "marginal breakdown — trend + momentum bullish, "
+                        "short thesis weakening")
             return ("SHORT",
                     "trend continuation — add to short")
         if zone == "above_range":
+            # Above range = bad news for shorts. Marginal-breakout gate:
+            # if trend AND momentum are STILL bearish, the price slip
+            # above range may be noise — WATCH for confirmation rather
+            # than force-COVER. Anything else (mixed or bullish
+            # indicators) = real break = COVER.
+            if trend_dir == "bearish" and momentum_dir == "bearish":
+                return ("WATCH",
+                        "marginal breakout — trend + momentum still confirm "
+                        "short; wait for confirmation")
             return ("COVER",
                     "trend invalidated — short thesis broken, close short")
         if zone == "top_edge":
@@ -1361,10 +1381,30 @@ def _trend_momentum_gate(zone: str, side: str, trend_dir: str,
                     "bottom-edge — mean revert up, take profit on short")
         return ("WATCH", "")
 
-    # ─── LONG-side framework (current default, unchanged behavior) ──
+    # ─── LONG-side framework ──────────────────────────────────────
     if zone == "below_range":
+        # Marginal-breakdown gate (2026-05-28): for low-vol assets
+        # (BUXX-class — range width <1% of price), a few-cent slip below
+        # MFR's tight range is noise, not a real trend breakdown.
+        # When trend AND momentum are BOTH bullish, downgrade SELL to
+        # WATCH ("trend + momentum supportive — wait for confirmation").
+        # Bearish trend OR bearish momentum AT a breakdown = real break,
+        # SELL stands. Operator-caught BUXX case (price 20.20 vs MFR
+        # 20.255-20.299, 4.4-cent range, both indicators bullish).
+        if trend_dir == "bullish" and momentum_dir == "bullish":
+            return ("WATCH",
+                    "marginal breakdown — trend + momentum supportive, "
+                    "wait for confirmation")
         return ("SELL", "trend breakdown — avoid longs, consider shorts")
     if zone == "above_range":
+        # Marginal-breakout gate: if trend AND momentum both turned
+        # bearish despite price breaking up, the breakout may be a
+        # blow-off / noise — WATCH instead of forcing BUY. Anything else
+        # (mixed or bullish) = real continuation = BUY.
+        if trend_dir == "bearish" and momentum_dir == "bearish":
+            return ("WATCH",
+                    "marginal breakout — trend + momentum bearish, "
+                    "wait for confirmation")
         return ("BUY",  "trend continuation — add to longs")
     if zone == "bottom_edge":
         if trend_dir == "bullish" and momentum_dir == "bullish":
