@@ -1216,14 +1216,19 @@ def _compute_source_label(flags: list[str]) -> str:
     # accessible via `tools.active_slice.stale_flags_for()` for
     # diagnostic surfaces.
     cascade = [
-        ("etf_pro_short",       "[ETF Pro Short]"),
-        ("etf_pro_long",        "[ETF Pro Long]"),
-        ("portfolio_solutions", "[Portfolio Solutions]"),
-        ("signal_strength",     "[Signal Strength]"),
-        ("investing_ideas",     "[Investing Ideas]"),
-        ("quad_aligned",        "[Quad]"),
-        ("risk_range",          "[Risk Range]"),
-        ("operator",            "[Operator]"),
+        # Hedgeye explicit-side flags first (most specific / most actionable)
+        ("etf_pro_short",         "[ETF Pro Short]"),
+        ("etf_pro_long",          "[ETF Pro Long]"),
+        ("signal_strength_short", "[Signal Strength Short]"),
+        ("signal_strength_long",  "[Signal Strength Long]"),
+        # Implicit-side Hedgeye products
+        ("portfolio_solutions",   "[Portfolio Solutions]"),
+        ("signal_strength",       "[Signal Strength]"),
+        ("investing_ideas",       "[Investing Ideas]"),
+        # Reference categorization
+        ("quad_aligned",          "[Quad]"),
+        ("risk_range",            "[Risk Range]"),
+        ("operator",              "[Operator]"),
     ]
     fset = set(flags or [])
     for key, label in cascade:
@@ -1286,17 +1291,27 @@ def _ticker_side(source_flags: list[str]) -> str:
         return "undetermined"
     fset = set(source_flags)
 
-    # Tier 1 — ETF Pro explicit
-    etf_long  = "etf_pro_long"  in fset
-    etf_short = "etf_pro_short" in fset
-    if etf_long and etf_short:
+    # Tier 1 — Hedgeye explicit-side flags (ETF Pro + Keith's Signal
+    # Longs/Shorts). Both products carry per-ticker side text directly
+    # from the email body. SS-text-based 2026-05-29 retune — operator
+    # caught that SOFI/MA/AXP etc. were tagged as side-bearing shorts
+    # in hedgeye_keiths_signals but my code wasn't reading them.
+    long_flags  = {"etf_pro_long",  "signal_strength_long"}
+    short_flags = {"etf_pro_short", "signal_strength_short"}
+    has_long  = bool(fset & long_flags)
+    has_short = bool(fset & short_flags)
+    if has_long and has_short:
         return "conflict"
-    if etf_long:
+    if has_long:
         return "long"
-    if etf_short:
+    if has_short:
         return "short"
 
-    # Tier 2 — implicit-long Hedgeye products
+    # Tier 2 — implicit-long Hedgeye products (no explicit side per row).
+    # signal_strength (delta-based bucket) is here because the daily SS
+    # Stocks email's full list is image-only and we can't split sides
+    # without OCR — historically operator's framework treats it as a
+    # Best-Idea-Longs default.
     if fset & {"portfolio_solutions", "signal_strength", "investing_ideas"}:
         return "long"
 

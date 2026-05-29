@@ -76,14 +76,18 @@ Side = Literal["long", "short"]
 #
 # Thresholds:
 #   etf_pro              -> 7 days (Hedgeye publishes ETF Pro Mon, +1wk slack)
-#   signal_strength      -> 3 days (daily; 3d covers a long weekend)
+#   signal_strength      -> 3 days (daily Add/Remove deltas; long-weekend OK)
+#   signal_strength_ks   -> 7 days (Keith's Signal Longs/Shorts is a WEEKLY
+#                           Sunday/Monday publication — same threshold as
+#                           ETF Pro since both publish weekly)
 #   portfolio_solutions  -> 3 days (daily)
 #   investing_ideas      -> 3 days (daily)
 #   risk_range           -> 3 days (daily)
 SOURCE_STALENESS_DAYS = {
-    "etf_pro":             7,
-    "signal_strength":     3,
-    "portfolio_solutions": 3,
+    "etf_pro":              7,
+    "signal_strength":      3,
+    "signal_strength_ks":   7,
+    "portfolio_solutions":  3,
     "investing_ideas":     3,
     "risk_range":          3,
 }
@@ -105,7 +109,9 @@ _cache_lock = threading.Lock()
 _POLLING_INCLUDED_KEYS = frozenset({
     "quad_long", "quad_short",          # reference (no staleness concept)
     "etf_pro_long", "etf_pro_short",    # latest weekly publication, fresh
-    "signal_strength",                  # latest daily snapshot, fresh
+    "signal_strength",                  # daily Add/Remove deltas (accumulated 180d)
+    "signal_strength_long",             # Keith's Signal Longs (weekly text), fresh
+    "signal_strength_short",            # Keith's Signal Shorts (weekly text), fresh
     "portfolio_solutions",              # latest daily snapshot, fresh
     "investing_ideas",                  # latest daily snapshot, fresh
     "risk_range",                       # last 3 days
@@ -292,17 +298,21 @@ def _fetch_db_sources() -> dict[str, list[str]]:
     Empty everywhere on connect failure (returns the empty dict shape so
     callers don't have to None-check)."""
     out: dict[str, list[str]] = {
-        "etf_pro_long":              [],
-        "etf_pro_short":             [],
-        "stale_etf_pro":             [],
-        "signal_strength":           [],
-        "stale_signal_strength":     [],
-        "portfolio_solutions":       [],
-        "stale_portfolio_solutions": [],
-        "investing_ideas":           [],
-        "stale_investing_ideas":     [],
-        "risk_range":                [],
-        "stale_risk_range":          [],
+        "etf_pro_long":                 [],
+        "etf_pro_short":                [],
+        "stale_etf_pro":                [],
+        "signal_strength":              [],
+        "stale_signal_strength":        [],
+        "signal_strength_long":         [],
+        "signal_strength_short":        [],
+        "stale_signal_strength_long":   [],
+        "stale_signal_strength_short":  [],
+        "portfolio_solutions":          [],
+        "stale_portfolio_solutions":    [],
+        "investing_ideas":              [],
+        "stale_investing_ideas":        [],
+        "risk_range":                   [],
+        "stale_risk_range":             [],
     }
     conn = _pg_connect()
     if conn is None:
@@ -451,6 +461,58 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                 else:
                     # Fresh OR operator gave us a manual list — union.
                     out["signal_strength"] = _dedup_sort(ss_members + manual_ss)
+
+                # ─── Keith's Signal Longs/Shorts (weekly text product) ──
+                # hedgeye_keiths_signals carries the FULL text-parsed long/
+                # short list from the weekly "Keith's Signal Longs/Shorts"
+                # email. Unlike hedgeye_signal_strength (Add/Remove
+                # deltas with image-only full list), this product has
+                # explicit ticker text and explicit side per row — that's
+                # the data we want for side-aware verb resolution.
+                # 2026-05-29 — operator caught that this was wired into
+                # the typed table by parser_keiths_signals but never
+                # consumed by tools/active_slice. SOFI/MA/AXP etc. were
+                # invisible to side resolution despite being on Keith's
+                # current Short list.
+                cur.execute(
+                    "SELECT MAX(signal_date), "
+                    "       CURRENT_DATE - MAX(signal_date) AS age "
+                    "FROM hedgeye_keiths_signals"
+                )
+                ks_row = cur.fetchone()
+                ks_latest, ks_age = (ks_row or (None, None))
+                if ks_latest is not None:
+                    cur.execute(
+                        """
+                        SELECT ticker, LOWER(side) AS side
+                          FROM hedgeye_keiths_signals
+                         WHERE signal_date = %s
+                        """,
+                        (ks_latest,),
+                    )
+                    ks_longs:  list[str] = []
+                    ks_shorts: list[str] = []
+                    for t, side in cur.fetchall():
+                        if not t:
+                            continue
+                        tk = t.strip().upper()
+                        if side and "short" in side:
+                            ks_shorts.append(tk)
+                        elif side and "long" in side:
+                            ks_longs.append(tk)
+                    ks_is_stale = (ks_age is not None
+                                   and ks_age > SOURCE_STALENESS_DAYS["signal_strength_ks"])
+                    if ks_is_stale:
+                        out["stale_signal_strength_long"]  = _dedup_sort(ks_longs)
+                        out["stale_signal_strength_short"] = _dedup_sort(ks_shorts)
+                        log.info("active_slice: hedgeye_keiths_signals "
+                                 "latest=%s is %dd old (>%dd); marked stale, "
+                                 "EXCLUDED from polling_universe",
+                                 ks_latest, int(ks_age),
+                                 SOURCE_STALENESS_DAYS["signal_strength_ks"])
+                    else:
+                        out["signal_strength_long"]  = _dedup_sort(ks_longs)
+                        out["signal_strength_short"] = _dedup_sort(ks_shorts)
 
                 _latest_snapshot("hedgeye_portfolio_solutions", "snapshot_date",
                                  "portfolio_solutions", "stale_portfolio_solutions",
