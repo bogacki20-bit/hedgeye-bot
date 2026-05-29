@@ -361,9 +361,62 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                     else:
                         out[fresh_key] = tickers
 
-                _latest_snapshot("hedgeye_signal_strength",     "snapshot_date",
-                                 "signal_strength", "stale_signal_strength",
+                # ─── Signal Strength — accumulated membership ────────────
+                # hedgeye_signal_strength only carries Add/Remove DELTAS
+                # (the full ~85-stock list is image-only in the email,
+                # parser captures the "Added: X, Y / Removed: Z" text).
+                # Naive latest-snapshot returns just yesterday's 2-4
+                # deltas — operator-caught 2026-05-29: only DLTR/LOTMY/
+                # TTWO/WST in the SS bucket vs the real ~30+ tickers
+                # currently on Keith's SS list.
+                #
+                # Membership proxy: a ticker is "currently on SS" if its
+                # most-recent Add is more recent than its most-recent
+                # Remove (or it was never Removed). 180-day lookback
+                # covers Keith's full SS publication cadence; any longer-
+                # held ticker that disappeared from the deltas is still
+                # captured.
+                #
+                # Staleness gate still applies on the LATEST snapshot
+                # date (parser activity), so a 4-day parser outage moves
+                # the bucket to stale_* regardless of accumulated members.
+                cur.execute(
+                    "SELECT MAX(snapshot_date), "
+                    "       CURRENT_DATE - MAX(snapshot_date) AS age "
+                    "FROM hedgeye_signal_strength"
+                )
+                row = cur.fetchone()
+                ss_latest, ss_age = (row or (None, None))
+                if ss_latest is not None:
+                    cur.execute(
+                        """
+                        SELECT ticker
+                          FROM (
+                            SELECT ticker,
+                                   MAX(snapshot_date) FILTER (WHERE is_added_today)   AS last_added,
+                                   MAX(snapshot_date) FILTER (WHERE is_removed_today) AS last_removed
+                              FROM hedgeye_signal_strength
+                             WHERE snapshot_date >= CURRENT_DATE - interval '180 days'
+                             GROUP BY ticker
+                          ) ss
+                         WHERE last_added IS NOT NULL
+                           AND (last_removed IS NULL OR last_removed < last_added)
+                         ORDER BY ticker
+                        """
+                    )
+                    ss_members = _dedup_sort([r[0] for r in cur.fetchall() if r[0]])
+                    is_stale = (ss_age is not None
+                                and ss_age > SOURCE_STALENESS_DAYS["signal_strength"])
+                    if is_stale:
+                        out["stale_signal_strength"] = ss_members
+                        log.info("active_slice: hedgeye_signal_strength "
+                                 "latest=%s is %dd old (>%dd); marked stale, "
+                                 "EXCLUDED from polling_universe",
+                                 ss_latest, int(ss_age),
                                  SOURCE_STALENESS_DAYS["signal_strength"])
+                    else:
+                        out["signal_strength"] = ss_members
+
                 _latest_snapshot("hedgeye_portfolio_solutions", "snapshot_date",
                                  "portfolio_solutions", "stale_portfolio_solutions",
                                  SOURCE_STALENESS_DAYS["portfolio_solutions"])
