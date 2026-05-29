@@ -43,11 +43,14 @@ log = logging.getLogger(__name__)
 ACTIONABLE_CONVICTIONS = {"Best Idea", "Adding"}
 # 2026-05-26 v3 — trend+momentum gate added HOLD / WATCH / AVOID as
 # informational alerts that fire when the bot is at an edge but the
-# gate disagrees with a clean BUY/SELL. The conviction gate is what
-# distinguishes "edge alert" from "mid_range silent" — decide_notifier
-# sets conviction=Monitor for mid_range/unknown short-circuits and
-# Adding for everything that reaches an edge/breakout zone.
-ACTIONABLE_ACTIONS     = {"BUY", "SELL", "HOLD", "WATCH", "AVOID",
+# gate disagrees with a clean BUY/SELL. 2026-05-28 — side-aware verbs
+# add SHORT (initiate/add to short) and COVER (close short). The
+# conviction gate is what distinguishes "edge alert" from "mid_range
+# silent" — decide_notifier sets conviction=Monitor for mid_range/
+# unknown short-circuits and Adding for everything that reaches an
+# edge/breakout zone.
+ACTIONABLE_ACTIONS     = {"BUY", "SELL", "SHORT", "COVER",
+                          "HOLD", "WATCH", "AVOID",
                           "ADD", "TRIM"}
 DEFAULT_DEDUP_HOURS    = 4
 
