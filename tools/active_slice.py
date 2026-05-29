@@ -57,6 +57,7 @@ log = logging.getLogger(__name__)
 _REPO = Path(__file__).resolve().parent.parent
 _MAP_PATH = _REPO / "config" / "mfr_quad_map.yaml"
 _OPERATOR_WATCHLIST_PATH = _REPO / "config" / "operator_watchlist.yaml"
+_SS_FULL_LIST_PATH       = _REPO / "config" / "ss_full_list.yaml"
 
 Side = Literal["long", "short"]
 
@@ -171,19 +172,17 @@ def both_sides(monthly_quad: str | None = None,
 
 # ─────────────────────────── Polling universe ───────────────────────────
 
-def _load_operator_watchlist() -> list[str]:
-    """Read config/operator_watchlist.yaml — empty list if missing/malformed.
-
-    Operator-managed overrides. Anything in here gets polled regardless of
-    Quad alignment or Hedgeye-product membership."""
-    if not _OPERATOR_WATCHLIST_PATH.exists():
+def _load_yaml_tickers(path: Path, label: str) -> list[str]:
+    """Read `tickers:` list from a YAML file. Returns sorted dedup'd
+    uppercase list. Empty list on missing/malformed input."""
+    if not path.exists():
         return []
     try:
-        with open(_OPERATOR_WATCHLIST_PATH, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
         raw = data.get("tickers") or []
         if not isinstance(raw, list):
-            log.warning("operator_watchlist: 'tickers' not a list, ignoring")
+            log.warning("%s: 'tickers' not a list, ignoring", label)
             return []
         out: list[str] = []
         for t in raw:
@@ -191,8 +190,27 @@ def _load_operator_watchlist() -> list[str]:
                 out.append(t.strip().upper())
         return sorted(set(out))
     except Exception as e:
-        log.warning("operator_watchlist load failed: %s", e)
+        log.warning("%s load failed: %s", label, e)
         return []
+
+
+def _load_operator_watchlist() -> list[str]:
+    """Read config/operator_watchlist.yaml — empty list if missing/malformed.
+
+    Operator-managed overrides. Anything in here gets polled regardless of
+    Quad alignment or Hedgeye-product membership."""
+    return _load_yaml_tickers(_OPERATOR_WATCHLIST_PATH, "operator_watchlist")
+
+
+def _load_ss_full_list() -> list[str]:
+    """Read config/ss_full_list.yaml — empty list if missing/malformed.
+
+    Manual override for the full Signal Strength membership. The SS
+    email body only carries Add/Remove deltas (~5-20 tickers); the
+    full ~85-stock list lives in a PNG image and is invisible to the
+    text parser. Operator pastes the current SS list here so the bot
+    polls all of them, not just the deltas."""
+    return _load_yaml_tickers(_SS_FULL_LIST_PATH, "ss_full_list")
 
 
 def _pg_connect():
@@ -387,6 +405,7 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                 )
                 row = cur.fetchone()
                 ss_latest, ss_age = (row or (None, None))
+                ss_members: list[str] = []
                 if ss_latest is not None:
                     cur.execute(
                         """
@@ -405,17 +424,33 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                         """
                     )
                     ss_members = _dedup_sort([r[0] for r in cur.fetchall() if r[0]])
-                    is_stale = (ss_age is not None
-                                and ss_age > SOURCE_STALENESS_DAYS["signal_strength"])
-                    if is_stale:
-                        out["stale_signal_strength"] = ss_members
-                        log.info("active_slice: hedgeye_signal_strength "
-                                 "latest=%s is %dd old (>%dd); marked stale, "
-                                 "EXCLUDED from polling_universe",
-                                 ss_latest, int(ss_age),
-                                 SOURCE_STALENESS_DAYS["signal_strength"])
-                    else:
-                        out["signal_strength"] = ss_members
+
+                # Manual override — union the operator-maintained SS list
+                # so PNG-image-only members reach polling. 2026-05-29:
+                # the SS email body carries only Add/Remove deltas (the
+                # actual ~85-stock ranked list is a PNG, invisible to
+                # the parser). Operator pastes the full list into
+                # config/ss_full_list.yaml; we union it into the SS
+                # bucket regardless of staleness gate (a manual list
+                # is by definition fresh — operator just updated it).
+                manual_ss = _load_ss_full_list()
+                if manual_ss:
+                    log.info("active_slice: ss_full_list.yaml contributes "
+                             "%d tickers (manual override)", len(manual_ss))
+
+                is_stale = (ss_latest is not None
+                            and ss_age is not None
+                            and ss_age > SOURCE_STALENESS_DAYS["signal_strength"])
+                if is_stale and not manual_ss:
+                    out["stale_signal_strength"] = ss_members
+                    log.info("active_slice: hedgeye_signal_strength "
+                             "latest=%s is %dd old (>%dd); marked stale, "
+                             "EXCLUDED from polling_universe",
+                             ss_latest, int(ss_age),
+                             SOURCE_STALENESS_DAYS["signal_strength"])
+                else:
+                    # Fresh OR operator gave us a manual list — union.
+                    out["signal_strength"] = _dedup_sort(ss_members + manual_ss)
 
                 _latest_snapshot("hedgeye_portfolio_solutions", "snapshot_date",
                                  "portfolio_solutions", "stale_portfolio_solutions",

@@ -1,0 +1,24 @@
+# Manual override for the full Signal Strength membership list.
+#
+# Why this file exists: the SS email's body text only contains the
+# Added/Removed deltas — the full ~85-stock SS list is a PNG image
+# embedded in the email (verified 2026-05-29 — body is only ~1KB of
+# plain text). The parser correctly captures every ticker that's
+# textually present (the deltas) but cannot see the image content
+# without OCR.
+#
+# This file is unioned into the `signal_strength` source bucket by
+# tools.active_slice. Operator pastes the current SS list here
+# (copying from Keith's email image or the Hedgeye dashboard) and the
+# bot polls all of them.
+#
+# Format: one ticker per line under `tickers:`. Whitespace and case
+# are normalized on load. Empty list is fine — the bucket then falls
+# back to the accumulated-deltas-only membership.
+#
+# Sides (operator clarification 2026-05-29): SS has Best Idea Longs
+# AND Best Idea Shorts sections. Both go under `tickers:` for polling
+# membership; the bot treats them as implicit-long by default. If you
+# need explicit short-side handling for SS tickers, add them to
+# operator_watchlist.yaml with a side annotation (future enhancement).
+tickers: []
