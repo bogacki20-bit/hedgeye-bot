@@ -172,12 +172,17 @@ def is_extended_hours(now: datetime | None = None) -> bool:
 
 # ─────────────────────────── Range-zone math ───────────────────────────
 
-# Edge band width as a fraction of the (high - low) span. Default 15%:
-# tickers within the bottom 15% or top 15% of the range trigger an alert;
-# the interior 70% is mid_range and produces no alert. Tune via
-# RR_EDGE_PERCENT (env, int percent in [1, 49]) — 10 is sniper-only,
-# 20 starts leaking into noise.
-_DEFAULT_EDGE_PERCENT = 15
+# Edge band width as a fraction of the (high - low) span. Default 33%
+# (bottom-third / top-third — the operator's framework default):
+# tickers within the bottom 33% or top 33% of the range trigger an alert;
+# the interior middle-third (33%-67%) is mid_range and produces no alert.
+# 2026-06-03 revert from 15% — operator-reported the tighter edge band
+# was suppressing real setups (especially on tickers with wider ranges
+# where 15% missed legitimate edge-zone entries). Wider band gives more
+# alert volume; the trend+momentum gate + side-aware verbs + marginal-
+# breakdown gate still control which produce actionable verbs vs WATCH.
+# Tune via RR_EDGE_PERCENT (env, int percent in [1, 49]).
+_DEFAULT_EDGE_PERCENT = 33
 
 
 def _edge_fraction() -> float:
@@ -207,9 +212,9 @@ def compute_zone(price: float, low: float, high: float) -> str:
     should only fire when at bottom or top of range"). Returns one of:
 
       'below_range'  — price < low (breakout below; capitulation/trend break)
-      'bottom_edge'  — price within bottom RR_EDGE_PERCENT of the range
+      'bottom_edge'  — price within bottom RR_EDGE_PERCENT of the range (default 33%)
       'mid_range'    — interior; NO alert fires
-      'top_edge'     — price within top RR_EDGE_PERCENT of the range
+      'top_edge'     — price within top RR_EDGE_PERCENT of the range (default 33%)
       'above_range'  — price > high (breakout above)
       'unknown'      — missing or inverted inputs
 

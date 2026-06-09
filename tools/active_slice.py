@@ -75,18 +75,24 @@ Side = Literal["long", "short"]
 # polling_universe (see _POLLING_INCLUDED_KEYS).
 #
 # Thresholds:
-#   etf_pro              -> 7 days (Hedgeye publishes ETF Pro Mon, +1wk slack)
+#   etf_pro              -> 14 days (Hedgeye publishes ETF Pro Mon; 14d = ONE
+#                           missed publication of slack. 2026-06-03 retune from
+#                           7 → 14: operator caught the entire ETF Pro Short
+#                           bucket going silent on Monday mornings when the
+#                           previous publication aged to exactly 8 days before
+#                           the new one dropped. 14d covers the edge-of-cycle
+#                           AND a one-week parser miss without going fully stale.)
 #   signal_strength      -> 3 days (daily Add/Remove deltas; long-weekend OK)
-#   signal_strength_ks   -> 7 days (Keith's Signal Longs/Shorts is a WEEKLY
-#                           Sunday/Monday publication — same threshold as
-#                           ETF Pro since both publish weekly)
+#   signal_strength_ks   -> 14 days (Keith's weekly Signal Longs/Shorts —
+#                           same edge-of-cycle problem as ETF Pro; bumped
+#                           together for consistency)
 #   portfolio_solutions  -> 3 days (daily)
 #   investing_ideas      -> 3 days (daily)
 #   risk_range           -> 3 days (daily)
 SOURCE_STALENESS_DAYS = {
-    "etf_pro":              7,
+    "etf_pro":              14,
     "signal_strength":      3,
-    "signal_strength_ks":   7,
+    "signal_strength_ks":   14,
     "portfolio_solutions":  3,
     "investing_ideas":     3,
     "risk_range":          3,
