@@ -1195,42 +1195,60 @@ def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
 NOTIFIER_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-haiku-4-5-20251001")
 
 
-def _compute_source_label(flags: list[str]) -> str:
+def _compute_source_label(flags: list[str], rr_trend: str | None = None) -> str:
     """Deterministic [SourceLabel] prefix derived from source_flags.
 
-    Mirrors the cascade documented in the notifier prompt, but enforced
-    in Python so Haiku can't confabulate the label. The 2026-05-26 XME
-    bug: Haiku tagged XME as `[ETF Pro Short]` purely because the prompt
-    example for top_edge+SELL happened to use ETF Pro Short — even though
-    `source_flags_for("XME")` correctly returned only `quad_aligned` /
-    `quad_short`. Python now strips whatever bracket Haiku emits and
-    prepends this one instead.
+    2026-06-10 operator architectural directive: Hedgeye is the north star;
+    Risk Range with directional bias is the PRIMARY source label, not the
+    last-resort fallback. Cascade reordered:
 
-    Returns "" when no flag matches (omit prefix entirely)."""
-    # Order matters — first match wins. Fresh product flags rank above
-    # stale variants. Within products, ETF Pro short ranks first because
-    # it's the rarer / more actionable signal.
-    # 2026-05-29: stale_* entries removed. `source_flags_for()` no longer
-    # emits stale flags (they'd otherwise drive the cascade with stale
-    # data — operator-caught CASY false-COVER bug). Stale info still
-    # accessible via `tools.active_slice.stale_flags_for()` for
-    # diagnostic surfaces.
+      [Risk Range Bullish/Bearish/Neutral] — top priority when RR is present
+      [Signal Strength Short/Long/...]     — secondary
+      [Portfolio Solutions]                — tertiary
+      [ETF Pro Short/Long]                 — quaternary
+      [Investing Ideas]                    — quinary
+      [Quad]                               — fallback
+      [Operator]                           — manual override
+
+    The XME 2026-05-26 bug guard still applies — Python strips whatever
+    bracket Haiku emits and prepends this one. Returns "" when no flag
+    matches (omit prefix entirely).
+
+    rr_trend (optional) is the latest RR.trend string for the ticker. When
+    provided AND 'risk_range' is in flags, the label includes the bias.
+    Callers in the legacy/long-form decision path can omit it; the notifier
+    path (decide_notifier) supplies it so the operator sees Keith's
+    direction at a glance.
+    """
+    fset = set(flags or [])
+    # Tier 1 — Hedgeye Risk Range with directional bias. Operator framework:
+    # RR is the daily authoritative Hedgeye signal and outranks every other
+    # source. The bias suffix tells the operator which side Keith's on
+    # before the verb is even read.
+    if "risk_range" in fset:
+        t = (rr_trend or "").strip().lower()
+        if t in ("bullish", "up"):    return "[Risk Range Bullish]"
+        if t in ("bearish", "down"):  return "[Risk Range Bearish]"
+        return "[Risk Range Neutral]"
     cascade = [
-        # Hedgeye explicit-side flags first (most specific / most actionable)
-        ("etf_pro_short",         "[ETF Pro Short]"),
-        ("etf_pro_long",          "[ETF Pro Long]"),
+        # Tier 2 — Signal Strength explicit-side (Keith's weekly Best Idea
+        # Longs/Shorts text)
         ("signal_strength_short", "[Signal Strength Short]"),
         ("signal_strength_long",  "[Signal Strength Long]"),
-        # Implicit-side Hedgeye products
+        # Tier 3 — Portfolio Solutions (Keith holds it = long bias)
         ("portfolio_solutions",   "[Portfolio Solutions]"),
+        # Tier 4 — ETF Pro explicit-side (Monday weekly publication)
+        ("etf_pro_short",         "[ETF Pro Short]"),
+        ("etf_pro_long",          "[ETF Pro Long]"),
+        # Tier 5 — daily SS Stocks bucket (implicit long via delta-based
+        # membership; ranked after explicit-side products)
         ("signal_strength",       "[Signal Strength]"),
+        # Tier 6 — Investing Ideas (Top-21 long leaderboard)
         ("investing_ideas",       "[Investing Ideas]"),
-        # Reference categorization
+        # Fallback — Quad map (static categorization) / manual override
         ("quad_aligned",          "[Quad]"),
-        ("risk_range",            "[Risk Range]"),
         ("operator",              "[Operator]"),
     ]
-    fset = set(flags or [])
     for key, label in cascade:
         if key in fset:
             return label
@@ -1260,70 +1278,77 @@ def _normalize_mfr_signal(s: str | None) -> str:
     return "neutral"
 
 
-def _ticker_side(source_flags: list[str]) -> str:
-    """Resolve ticker side from source_flags. 2026-05-29 retune
-    (operator: 'fresh sources ALWAYS win over stale sources; conflict
-    between fresh sources → WATCH').
+def _ticker_side(source_flags: list[str], rr_trend: str | None = None) -> str:
+    """Resolve ticker side from source_flags + RR.trend.
 
-    Priority (tier-by-tier; first tier with a signal wins):
+    2026-06-10 operator architectural directive (Hedgeye-first):
+    Risk Range bias is PRIMARY. MFR/SG/T1A never set side.
 
-      Tier 1: ETF Pro EXPLICIT side (etf_pro_long / etf_pro_short)
-              — Keith's weekly publication carries explicit bias per
-              section header. If BOTH present (shouldn't happen on one
-              ticker, but defensive) → 'conflict' → gate returns WATCH.
+    Priority cascade (first tier with a signal wins):
 
-      Tier 2: Implicit-LONG Hedgeye products — portfolio_solutions
-              (Keith holds it = long), signal_strength (Best Idea Longs
-              dominate; we don't split sides in the typed table),
-              investing_ideas (Top-21 long-only leaderboard). Any one
-              of these wins over Quad map's static categorization
-              because they represent Keith's ACTIVE current view.
+      Tier 1: Risk Range trend (bullish/bearish) — Keith's daily directional
+              bias. AUTHORITATIVE. Overrides everything below.
 
-      Tier 3: Quad map (quad_long / quad_short) — static categorization.
-              Only used when no Hedgeye product has spoken.
+      Tier 2: Signal Strength explicit-side (signal_strength_long /
+              signal_strength_short) — Keith's weekly Best Idea Longs/Shorts.
 
-      Fallback: 'undetermined' — defaults to long behavior downstream.
+      Tier 3: Portfolio Solutions (portfolio_solutions) — Keith holds it
+              = long bias.
+
+      Tier 4: ETF Pro explicit-side (etf_pro_long / etf_pro_short) — Monday
+              weekly publication.
+
+      Tier 5: implicit-long Hedgeye products — signal_strength (daily SS
+              Stocks bucket, image-only so we default to long),
+              investing_ideas (Top-21 long-only).
+
+      Tier 6: Quad map (quad_long / quad_short) — static categorization
+              fallback.
+
+      Else:   'undetermined' — defaults to long behavior downstream.
 
     Stale flags are already stripped by tools.active_slice.source_flags_for
     before reaching here, so anything we see is fresh.
+
+    Conflict resolution: under the Hedgeye-first cascade RR.trend simply
+    overrides whatever lower tiers say — there is no 'conflict' outcome
+    for RR-vs-other-source disagreements (RR wins). 'conflict' is still
+    returned for the rare both-sides-set-in-the-same-tier case (a ticker
+    that somehow ends up in both SS-long and SS-short, etc.).
     """
-    if not source_flags:
-        return "undetermined"
-    fset = set(source_flags)
+    fset = set(source_flags or [])
 
-    # Tier 1 — Hedgeye explicit-side flags (ETF Pro + Keith's Signal
-    # Longs/Shorts). Both products carry per-ticker side text directly
-    # from the email body. SS-text-based 2026-05-29 retune — operator
-    # caught that SOFI/MA/AXP etc. were tagged as side-bearing shorts
-    # in hedgeye_keiths_signals but my code wasn't reading them.
-    long_flags  = {"etf_pro_long",  "signal_strength_long"}
-    short_flags = {"etf_pro_short", "signal_strength_short"}
-    has_long  = bool(fset & long_flags)
-    has_short = bool(fset & short_flags)
-    if has_long and has_short:
-        return "conflict"
-    if has_long:
-        return "long"
-    if has_short:
-        return "short"
+    # Tier 1 — Risk Range bias is the north star.
+    t = (rr_trend or "").strip().lower()
+    if t in ("bullish", "up"):    return "long"
+    if t in ("bearish", "down"):  return "short"
 
-    # Tier 2 — implicit-long Hedgeye products (no explicit side per row).
-    # signal_strength (delta-based bucket) is here because the daily SS
-    # Stocks email's full list is image-only and we can't split sides
-    # without OCR — historically operator's framework treats it as a
-    # Best-Idea-Longs default.
-    if fset & {"portfolio_solutions", "signal_strength", "investing_ideas"}:
-        return "long"
+    # Tier 2 — Signal Strength explicit-side
+    has_ss_long  = "signal_strength_long"  in fset
+    has_ss_short = "signal_strength_short" in fset
+    if has_ss_long and has_ss_short: return "conflict"
+    if has_ss_long:  return "long"
+    if has_ss_short: return "short"
 
-    # Tier 3 — Quad map (lowest priority, static)
+    # Tier 3 — Portfolio Solutions (Keith holds it = long)
+    if "portfolio_solutions" in fset: return "long"
+
+    # Tier 4 — ETF Pro explicit-side
+    has_etf_long  = "etf_pro_long"  in fset
+    has_etf_short = "etf_pro_short" in fset
+    if has_etf_long and has_etf_short: return "conflict"
+    if has_etf_long:  return "long"
+    if has_etf_short: return "short"
+
+    # Tier 5 — implicit-long Hedgeye products
+    if fset & {"signal_strength", "investing_ideas"}: return "long"
+
+    # Tier 6 — Quad map (lowest priority, static)
     qlong  = "quad_long"  in fset
     qshort = "quad_short" in fset
-    if qlong and qshort:
-        return "conflict"   # intersection rule should prevent this
-    if qshort:
-        return "short"
-    if qlong:
-        return "long"
+    if qlong and qshort: return "conflict"
+    if qshort: return "short"
+    if qlong:  return "long"
 
     return "undetermined"
 
@@ -1799,8 +1824,12 @@ def decide_notifier(
             "quad_aligned":      quad_aligned,
             # Resolve side for short-circuited tickers too — purely for
             # diagnostic consistency; the zone is mid_range/unknown so
-            # no action will fire either way.
-            "side":              _ticker_side(source_flags),
+            # no action will fire either way. Pass RR.trend (north-star
+            # input per 2026-06-10 architectural directive).
+            "side":              _ticker_side(
+                source_flags,
+                rr_trend=(rr.get("trend") if isinstance(rr, dict) else None),
+            ),
             "pct_rr":            pct_rr,
             "pct_mfr":           pct_mfr,
             "rr_mfr_divergence": divergence,
@@ -1841,12 +1870,13 @@ def decide_notifier(
 
     # Normalize trend + momentum + side for the gate. Python computes the
     # (zone, side, trend, momentum) → action mapping deterministically;
-    # Haiku's job is only the narrative wording. Side comes from the
-    # source_flags list — any *_short flag (etf_pro_short, quad_short)
-    # makes the ticker short-side; otherwise it's long-side.
+    # Haiku's job is only the narrative wording. Side comes primarily from
+    # RR.trend (operator architectural directive 2026-06-10: Hedgeye is
+    # north star — RR direction overrides every Hedgeye-product flag).
     trend_dir    = _normalize_mfr_signal(trend)
     momentum_dir = _normalize_mfr_signal(momentum)
-    side         = _ticker_side(source_flags)
+    rr_trend_val = (rr.get("trend") if isinstance(rr, dict) else None)
+    side         = _ticker_side(source_flags, rr_trend=rr_trend_val)
     gated_action, gated_ctx_initial = _trend_momentum_gate(
         zone, side, trend_dir, momentum_dir
     )
@@ -1965,7 +1995,11 @@ def decide_notifier(
     # "[ETF Pro Short]" purely because the prompt's top_edge example
     # happened to use it, even though XME has zero ETF Pro data. Strip
     # whatever bracket Haiku emitted and prepend the Python-computed one.
-    deterministic_label = _compute_source_label(source_flags)
+    # 2026-06-10: pass rr_trend so [Risk Range Bullish/Bearish/Neutral]
+    # surfaces Keith's direction in the label, not just the source.
+    deterministic_label = _compute_source_label(
+        source_flags, rr_trend=rr_trend_val,
+    )
     if deterministic_label:
         final_line = f"{deterministic_label} {payload}"
     else:

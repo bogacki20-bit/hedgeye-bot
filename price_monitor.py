@@ -350,6 +350,62 @@ def _framework_phrase(alignment: str) -> str:
     }.get(alignment, "framework-neutral")
 
 
+def _rr_direction(trend: str | None) -> str:
+    """Normalize RR.trend string → 'bullish' / 'bearish' / 'neutral'.
+
+    Hedgeye is the north star (2026-06-10 operator directive). RR.trend
+    is the AUTHORITATIVE side signal — drives both the action verb and
+    the source label. MFR/SG/T1A are supplementary context and never
+    override this.
+    """
+    t = (trend or "").strip().lower()
+    if t in ("bullish", "up"):    return "bullish"
+    if t in ("bearish", "down"):  return "bearish"
+    return "neutral"
+
+
+def _rr_source_label(trend: str | None) -> str:
+    """`[Risk Range <Bias>]` source-label prefix for the alert text.
+
+    Operator framework (2026-06-10): the source tag MUST surface Keith's
+    daily directional bias, not just the fact that RR data exists. Was
+    `[Risk Range]` regardless of bias; now `[Risk Range Bullish/Bearish/
+    Neutral]` so the operator sees at a glance which side Keith's on
+    before reading the verb.
+    """
+    d = _rr_direction(trend)
+    if d == "bullish": return "[Risk Range Bullish]"
+    if d == "bearish": return "[Risk Range Bearish]"
+    return "[Risk Range Neutral]"
+
+
+def _mfr_supplementary_phrase(ticker: str, rr_trend: str | None) -> str:
+    """Inline MFR context for the alert text. CONTEXT ONLY — never gates
+    the verb (operator framework 2026-06-10: Hedgeye is north star, MFR
+    is supplementary). Returns:
+        "" — MFR absent or MFR neutral
+        ", MFR <dir> trend (confirms)"            — MFR matches RR
+        ", MFR <dir> trend (divergence — context only)" — MFR ≠ RR
+    The divergence flag is informational so the operator can spot RR/MFR
+    disagreement at a glance — it does NOT change the action.
+    """
+    try:
+        from decision_engine import _get_mfr_latest
+        mfr = _get_mfr_latest(ticker) or {}
+    except Exception:
+        return ""
+    mfr_t = (mfr.get("trend_signal") or "").lower()
+    mfr_dir = ("bullish" if "bullish" in mfr_t
+               else "bearish" if "bearish" in mfr_t
+               else "neutral")
+    rr_dir = _rr_direction(rr_trend)
+    if mfr_dir == "neutral" or rr_dir == "neutral":
+        return ""
+    if mfr_dir == rr_dir:
+        return f", MFR {mfr_dir} trend (confirms)"
+    return f", MFR {mfr_dir} trend (divergence — context only)"
+
+
 def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
     """Build the trailing ' | SG: call wall $X / put wall $Y / ...' suffix
     when SpotGamma context has populated levels. Empty string when no levels
@@ -635,25 +691,35 @@ def compose_recommendation(
     # IV/RV vol-premium tag — only on a >15% absolute premium/discount.
     vol_suffix = _vol_suffix(ticker)
 
-    # 2026-06-10 RR-trend action gate: when Keith's RR.trend conflicts with
-    # the action a zone would normally fire, suppress the action and emit
-    # WATCH/HOLD instead. Pre-fix the bot was firing ADD on bottom-edge
-    # bearish-RR tickers (AMZN/TSLA/MSFT/META/GOLD/DAX all hit today) and
-    # TRIM on top-edge bullish-RR tickers (USD/USD-YEN/UST10Y/UST30Y/VIX/XOP).
-    # The alignment label was already 'counter' on these — but the action
-    # still fired, sized, and recommended dollars. Operator framework: never
-    # fight Keith's daily directional bias. Counter alignment now gates the
-    # verb itself, not just the label. 35% of today's alerts (12/34) were
-    # firing against the RR trend pre-patch.
+    # 2026-06-10 Hedgeye-first verb table (operator architectural directive):
+    # Hedgeye RR.trend is AUTHORITATIVE on direction. MFR is supplementary
+    # context — never gates the verb. Verbs mirror Keith's mean-revert /
+    # trend-continuation rules around the RR.trend bias:
+    #
+    #   zone          BULLISH            BEARISH            NEUTRAL
+    #   bottom_edge   ADD (scale-in)     COVER (target)     ADD (default)
+    #   top_edge      TRIM (mean rev)    SHORT (entry)      TRIM (default)
+    #   above_range   BUY (continuation) COVER (thesis bad) BUY (default)
+    #   below_range   SELL (thesis bad)  SHORT (continn)    SELL (default)
+    #
+    # Pre-fix (commit 1357337) routed bearish+bottom to WATCH. Operator
+    # corrected: bearish+bottom is COVER — Keith's bearish target IS the
+    # bottom of his RR, that's exactly where you take short-side profit.
+    rr_dir     = _rr_direction(trend)
+    rr_label   = _rr_source_label(trend)
+    mfr_phrase = _mfr_supplementary_phrase(ticker, trend)
+
     if zone == "bottom_edge":
         _align = _framework_alignment(trend, "bottom_edge")
         edge_pct = int(round(_edge_fraction() * 100))
-        if _align == "counter":
+        if rr_dir == "bearish":
             return {
-                "text": (f"WATCH {ticker} at {price:.2f} (bottom {edge_pct}% of range "
-                         f"but Keith RR trend bearish — don't fight Keith, no add)."
+                "text": (f"{rr_label} COVER {ticker} at {price:.2f} "
+                         f"(bottom {edge_pct}% of RR {low:g}-{high:g}, "
+                         f"Hedgeye RR bearish bias{mfr_phrase}) — "
+                         f"bearish target zone, consider taking profit on short."
                          f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
-                "suggested_action": "WATCH",
+                "suggested_action": "COVER",
                 "suggested_dollars": None,
                 "suggested_bps": None,
                 "framework_alignment": _align,
@@ -661,8 +727,10 @@ def compose_recommendation(
                 "spotgamma_context": spotgamma_ctx,
             }
         return {
-            "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
-                     f"bottom {edge_pct}% of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+            "text": (f"{rr_label} ADD ~${_add_usd:.0f} {ticker} at {price:.2f} "
+                     f"({ADD_BPS_LOW} bps, bottom {edge_pct}% of RR {low:g}-{high:g}, "
+                     f"Hedgeye RR {rr_dir} bias{mfr_phrase})."
+                     f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "ADD",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
@@ -671,27 +739,29 @@ def compose_recommendation(
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "below_range":
-        # Trend breakdown — Keith framework: exit longs, consider shorts.
-        # NOT contrarian add (that fights trend-following methodology).
-        # RR-trend gate (2026-06-10): if RR.trend is BULLISH at a breakdown,
-        # the slip below range is more likely noise than Keith inverting his
-        # bias — surface as WATCH, not SELL.
         _align = _framework_alignment(trend, "below_range")
-        if _align == "counter":
+        if rr_dir == "bearish":
+            # Bearish RR + breakdown below = trend continuation. Initiate /
+            # add to short.
             return {
-                "text": (f"WATCH {ticker} at {price:.2f} (below RR range "
-                         f"but Keith RR trend bullish — likely noise breakdown, no exit)."
+                "text": (f"{rr_label} SHORT {ticker} at {price:.2f} "
+                         f"(below RR {low:g}-{high:g}, "
+                         f"Hedgeye RR bearish bias{mfr_phrase}) — "
+                         f"trend continuation, consider adding to short."
                          f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
-                "suggested_action": "WATCH",
+                "suggested_action": "SHORT",
                 "suggested_dollars": None,
                 "suggested_bps": None,
                 "framework_alignment": _align,
                 "hedgeye_context": hedgeye_ctx,
                 "spotgamma_context": spotgamma_ctx,
             }
+        # bullish / neutral → trend breakdown invalidates the long thesis
         return {
-            "text": (f"SELL {ticker} at {price:.2f} — trend breakdown "
-                     f"(broke below range — avoid longs, consider shorts)."
+            "text": (f"{rr_label} SELL {ticker} at {price:.2f} — trend breakdown "
+                     f"(broke below RR {low:g}-{high:g}, "
+                     f"Hedgeye RR {rr_dir} bias{mfr_phrase} — "
+                     f"avoid longs, consider shorts)."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "SELL",
             "suggested_dollars": None,
@@ -703,22 +773,28 @@ def compose_recommendation(
     if zone == "top_edge":
         _align = _framework_alignment(trend, "top_edge")
         edge_pct = int(round(_edge_fraction() * 100))
-        if _align == "counter":
+        if rr_dir == "bearish":
+            # Bearish RR + price at top edge = good short entry. Top of
+            # the bearish range is resistance; mean revert mirrors the
+            # bullish "buy bottom" rule.
             return {
-                "text": (f"HOLD {ticker} at {price:.2f} (top {edge_pct}% of range "
-                         f"but Keith RR trend bullish — continuation likely, no trim)."
+                "text": (f"{rr_label} SHORT {ticker} at {price:.2f} "
+                         f"(top {edge_pct}% of RR {low:g}-{high:g}, "
+                         f"Hedgeye RR bearish bias{mfr_phrase}) — "
+                         f"good entry to initiate / add to short."
                          f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
-                "suggested_action": "HOLD",
+                "suggested_action": "SHORT",
                 "suggested_dollars": None,
                 "suggested_bps": None,
                 "framework_alignment": _align,
                 "hedgeye_context": hedgeye_ctx,
                 "spotgamma_context": spotgamma_ctx,
             }
+        # bullish / neutral → mean revert from top, trim longs
         return {
-            "text": (f"TRIM 50% {ticker} at {price:.2f} "
-                     f"(top {edge_pct}% of range, top-edge trim, "
-                     f"{_framework_phrase(_align)})."
+            "text": (f"{rr_label} TRIM 50% {ticker} at {price:.2f} "
+                     f"(top {edge_pct}% of RR {low:g}-{high:g}, "
+                     f"Hedgeye RR {rr_dir} bias{mfr_phrase})."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "TRIM",
             "suggested_dollars": None,
@@ -728,27 +804,29 @@ def compose_recommendation(
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "above_range":
-        # Trend continuation — Keith framework: add to longs. NOT a fade.
-        # RR-trend gate (2026-06-10): if RR.trend is BEARISH at a breakout,
-        # the move above range is more likely noise than Keith inverting his
-        # bias — surface as WATCH, not BUY. CAD/USD 13:30 hit this today.
         _align = _framework_alignment(trend, "above_range")
-        if _align == "counter":
+        if rr_dir == "bearish":
+            # Bearish RR + break above range = short thesis invalidated.
+            # Cover the short.
             return {
-                "text": (f"WATCH {ticker} at {price:.2f} (above RR range "
-                         f"but Keith RR trend bearish — likely failed breakout, no add)."
+                "text": (f"{rr_label} COVER {ticker} at {price:.2f} "
+                         f"(above RR {low:g}-{high:g}, "
+                         f"Hedgeye RR bearish bias{mfr_phrase}) — "
+                         f"short thesis invalidated, close short."
                          f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
-                "suggested_action": "WATCH",
+                "suggested_action": "COVER",
                 "suggested_dollars": None,
                 "suggested_bps": None,
                 "framework_alignment": _align,
                 "hedgeye_context": hedgeye_ctx,
                 "spotgamma_context": spotgamma_ctx,
             }
+        # bullish / neutral → trend continuation, add to longs
         return {
-            "text": (f"BUY ~${_add_usd:.0f} {ticker} at {price:.2f} "
-                     f"({ADD_BPS_LOW} bps, trend continuation — "
-                     f"broke above range, add to longs)."
+            "text": (f"{rr_label} BUY ~${_add_usd:.0f} {ticker} at {price:.2f} "
+                     f"({ADD_BPS_LOW} bps, above RR {low:g}-{high:g}, "
+                     f"Hedgeye RR {rr_dir} bias{mfr_phrase}) — "
+                     f"trend continuation, add to longs."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "BUY",
             "suggested_dollars": _add_usd,
