@@ -313,17 +313,28 @@ def _framework_alignment(trend: str | None, zone: str) -> str:
     with NEUTRAL or BEARISH trends still said 'framework-aligned' (a lie).
 
     Returns one of: 'aligned' / 'counter' / 'neutral' / 'stale'.
-        bottom_edge (buy zone): bullish=aligned, bearish=counter, neutral=neutral
-        top_edge    (trim zone): bearish=aligned, bullish=counter, neutral=neutral
-        anything else: neutral
+        bottom_edge (buy zone):   bullish=aligned, bearish=counter, neutral=neutral
+        top_edge    (trim zone):  bearish=aligned, bullish=counter, neutral=neutral
+        above_range (breakout):   bullish=aligned, bearish=counter, neutral=neutral
+        below_range (breakdown):  bearish=aligned, bullish=counter, neutral=neutral
+
+    2026-06-10 extension — above_range / below_range previously hard-coded to
+    'neutral'. Now they pick up the RR.trend the same way the edge zones do
+    so the action gate downstream can suppress counter-trend breakouts /
+    breakdowns (operator-caught: 13:30 CAD/USD BUY @ above_range with
+    RR.trend=BEARISH — bot was BUYing a breakout Keith called bearish).
     """
     t = (trend or "").strip().lower()
     if t in ("bullish", "up"):
         if zone == "bottom_edge": return "aligned"
         if zone == "top_edge":    return "counter"
+        if zone == "above_range": return "aligned"
+        if zone == "below_range": return "counter"
     elif t in ("bearish", "down"):
         if zone == "bottom_edge": return "counter"
         if zone == "top_edge":    return "aligned"
+        if zone == "above_range": return "counter"
+        if zone == "below_range": return "aligned"
     elif t in ("neutral", ""):
         return "neutral"
     return "neutral"
@@ -624,9 +635,31 @@ def compose_recommendation(
     # IV/RV vol-premium tag — only on a >15% absolute premium/discount.
     vol_suffix = _vol_suffix(ticker)
 
+    # 2026-06-10 RR-trend action gate: when Keith's RR.trend conflicts with
+    # the action a zone would normally fire, suppress the action and emit
+    # WATCH/HOLD instead. Pre-fix the bot was firing ADD on bottom-edge
+    # bearish-RR tickers (AMZN/TSLA/MSFT/META/GOLD/DAX all hit today) and
+    # TRIM on top-edge bullish-RR tickers (USD/USD-YEN/UST10Y/UST30Y/VIX/XOP).
+    # The alignment label was already 'counter' on these — but the action
+    # still fired, sized, and recommended dollars. Operator framework: never
+    # fight Keith's daily directional bias. Counter alignment now gates the
+    # verb itself, not just the label. 35% of today's alerts (12/34) were
+    # firing against the RR trend pre-patch.
     if zone == "bottom_edge":
         _align = _framework_alignment(trend, "bottom_edge")
         edge_pct = int(round(_edge_fraction() * 100))
+        if _align == "counter":
+            return {
+                "text": (f"WATCH {ticker} at {price:.2f} (bottom {edge_pct}% of range "
+                         f"but Keith RR trend bearish — don't fight Keith, no add)."
+                         f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                "suggested_action": "WATCH",
+                "suggested_dollars": None,
+                "suggested_bps": None,
+                "framework_alignment": _align,
+                "hedgeye_context": hedgeye_ctx,
+                "spotgamma_context": spotgamma_ctx,
+            }
         return {
             "text": (f"ADD ~${_add_usd:.0f} {ticker} at {price:.2f} ({ADD_BPS_LOW} bps, "
                      f"bottom {edge_pct}% of range, {_framework_phrase(_align)}).{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
@@ -640,6 +673,22 @@ def compose_recommendation(
     if zone == "below_range":
         # Trend breakdown — Keith framework: exit longs, consider shorts.
         # NOT contrarian add (that fights trend-following methodology).
+        # RR-trend gate (2026-06-10): if RR.trend is BULLISH at a breakdown,
+        # the slip below range is more likely noise than Keith inverting his
+        # bias — surface as WATCH, not SELL.
+        _align = _framework_alignment(trend, "below_range")
+        if _align == "counter":
+            return {
+                "text": (f"WATCH {ticker} at {price:.2f} (below RR range "
+                         f"but Keith RR trend bullish — likely noise breakdown, no exit)."
+                         f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                "suggested_action": "WATCH",
+                "suggested_dollars": None,
+                "suggested_bps": None,
+                "framework_alignment": _align,
+                "hedgeye_context": hedgeye_ctx,
+                "spotgamma_context": spotgamma_ctx,
+            }
         return {
             "text": (f"SELL {ticker} at {price:.2f} — trend breakdown "
                      f"(broke below range — avoid longs, consider shorts)."
@@ -647,13 +696,25 @@ def compose_recommendation(
             "suggested_action": "SELL",
             "suggested_dollars": None,
             "suggested_bps": None,
-            "framework_alignment": "neutral",
+            "framework_alignment": _align,
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
         }
     if zone == "top_edge":
         _align = _framework_alignment(trend, "top_edge")
         edge_pct = int(round(_edge_fraction() * 100))
+        if _align == "counter":
+            return {
+                "text": (f"HOLD {ticker} at {price:.2f} (top {edge_pct}% of range "
+                         f"but Keith RR trend bullish — continuation likely, no trim)."
+                         f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                "suggested_action": "HOLD",
+                "suggested_dollars": None,
+                "suggested_bps": None,
+                "framework_alignment": _align,
+                "hedgeye_context": hedgeye_ctx,
+                "spotgamma_context": spotgamma_ctx,
+            }
         return {
             "text": (f"TRIM 50% {ticker} at {price:.2f} "
                      f"(top {edge_pct}% of range, top-edge trim, "
@@ -668,6 +729,22 @@ def compose_recommendation(
         }
     if zone == "above_range":
         # Trend continuation — Keith framework: add to longs. NOT a fade.
+        # RR-trend gate (2026-06-10): if RR.trend is BEARISH at a breakout,
+        # the move above range is more likely noise than Keith inverting his
+        # bias — surface as WATCH, not BUY. CAD/USD 13:30 hit this today.
+        _align = _framework_alignment(trend, "above_range")
+        if _align == "counter":
+            return {
+                "text": (f"WATCH {ticker} at {price:.2f} (above RR range "
+                         f"but Keith RR trend bearish — likely failed breakout, no add)."
+                         f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
+                "suggested_action": "WATCH",
+                "suggested_dollars": None,
+                "suggested_bps": None,
+                "framework_alignment": _align,
+                "hedgeye_context": hedgeye_ctx,
+                "spotgamma_context": spotgamma_ctx,
+            }
         return {
             "text": (f"BUY ~${_add_usd:.0f} {ticker} at {price:.2f} "
                      f"({ADD_BPS_LOW} bps, trend continuation — "
@@ -676,7 +753,7 @@ def compose_recommendation(
             "suggested_action": "BUY",
             "suggested_dollars": _add_usd,
             "suggested_bps": ADD_BPS_LOW,
-            "framework_alignment": "neutral",
+            "framework_alignment": _align,
             "hedgeye_context": hedgeye_ctx,
             "spotgamma_context": spotgamma_ctx,
         }
