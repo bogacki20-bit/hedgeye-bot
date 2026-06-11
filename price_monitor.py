@@ -821,8 +821,13 @@ def compose_recommendation(
                 "spotgamma_context": spotgamma_ctx,
             }
         return {
-            "text": (f"{rr_label} ADD ~${_add_usd:.0f} {ticker} at {price:.2f} "
-                     f"({ADD_BPS_LOW} bps, bottom {edge_pct}% of RR {low:g}-{high:g}, "
+            # Sizing intentionally stripped from the alert body (5/25 +
+            # 2026-06-10 operator decision — bot must not put dollar
+            # amounts in front of the operator's sizing call). The
+            # suggested_dollars / suggested_bps fields below stay
+            # populated for backend metrics / persistence only.
+            "text": (f"{rr_label} ADD {ticker} at {price:.2f} "
+                     f"(bottom {edge_pct}% of RR {low:g}-{high:g}, "
                      f"Hedgeye RR {rr_dir} bias{mfr_phrase})."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "ADD",
@@ -915,10 +920,13 @@ def compose_recommendation(
                 "hedgeye_context": hedgeye_ctx,
                 "spotgamma_context": spotgamma_ctx,
             }
-        # bullish / neutral → trend continuation, add to longs
+        # bullish / neutral → trend continuation, add to longs.
+        # Sizing intentionally stripped from alert body (5/25 + 2026-06-10
+        # operator decision); suggested_dollars / suggested_bps stay
+        # populated for backend metrics only.
         return {
-            "text": (f"{rr_label} BUY ~${_add_usd:.0f} {ticker} at {price:.2f} "
-                     f"({ADD_BPS_LOW} bps, above RR {low:g}-{high:g}, "
+            "text": (f"{rr_label} BUY {ticker} at {price:.2f} "
+                     f"(above RR {low:g}-{high:g}, "
                      f"Hedgeye RR {rr_dir} bias{mfr_phrase}) — "
                      f"trend continuation, add to longs."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
