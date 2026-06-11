@@ -40,6 +40,87 @@ CLAUDE_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-sonnet-4-5")
 CORPUS_SNIPPET_LIMIT = 4   # how many corpus snippets to fold into the prompt
 CORPUS_MAX_CHARS = 2400    # cap total corpus text in prompt
 
+
+# ─────────────────────────── LLM cost ledger (mig 033) ───────────────
+#
+# Per-million-token Anthropic published rates (2026-Q2). cache_read is
+# typically ~10x cheaper than fresh input; cache_creation is the same
+# as input for the first call then never recurs for a TTL window.
+# Update here when Anthropic changes pricing; the ledger column stores
+# the dollar amount computed at insert-time so old rows aren't
+# retroactively rewritten.
+_LLM_PRICING_PER_MTOK = {
+    # Haiku 4.5: $1 / $5 / $0.10 (in / out / cache-read)
+    "claude-haiku-4-5":        {"in": 1.00,  "out": 5.00,  "cache_read": 0.10, "cache_creation": 1.25},
+    "claude-haiku-4-5-20251001": {"in": 1.00,  "out": 5.00,  "cache_read": 0.10, "cache_creation": 1.25},
+    # Sonnet 4.5: $3 / $15 / $0.30
+    "claude-sonnet-4-5":       {"in": 3.00,  "out": 15.00, "cache_read": 0.30, "cache_creation": 3.75},
+    "claude-sonnet-4-6":       {"in": 3.00,  "out": 15.00, "cache_read": 0.30, "cache_creation": 3.75},
+    # Opus 4.x: $15 / $75 / $1.50
+    "claude-opus-4-7":         {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_creation": 18.75},
+}
+
+
+def _llm_cost_estimate(model: str, *, input_tokens: int, output_tokens: int,
+                       cache_read_tokens: int = 0,
+                       cache_creation_tokens: int = 0) -> float:
+    """USD estimate for one Claude API call. Returns 0.0 on unknown
+    model so a pricing-table miss never breaks the call site."""
+    rates = _LLM_PRICING_PER_MTOK.get(model)
+    if not rates:
+        # Try a prefix match for date-suffixed model IDs we forgot to pin.
+        for k, v in _LLM_PRICING_PER_MTOK.items():
+            if model.startswith(k):
+                rates = v
+                break
+    if not rates:
+        log.debug("llm_calls: no pricing for model %r; cost=0", model)
+        return 0.0
+    cost = (
+        (input_tokens          * rates["in"]            )
+        + (output_tokens         * rates["out"]           )
+        + (cache_read_tokens     * rates["cache_read"]    )
+        + (cache_creation_tokens * rates["cache_creation"])
+    ) / 1_000_000.0
+    return round(cost, 6)
+
+
+def _log_llm_call(*, model: str, caller: str, ticker: Optional[str],
+                  input_tokens: int = 0, output_tokens: int = 0,
+                  cache_read_tokens: int = 0,
+                  cache_creation_tokens: int = 0,
+                  notes: Optional[str] = None) -> None:
+    """Append one row to llm_calls. Best-effort — never lets the ledger
+    raise back into the caller (the call already happened, the cost is
+    already accrued, we just want to record it)."""
+    try:
+        cost = _llm_cost_estimate(
+            model,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+        )
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO llm_calls
+                        (model, caller, ticker,
+                         input_tokens, output_tokens,
+                         cache_read_tokens, cache_creation_tokens,
+                         est_cost_usd, notes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (model, caller, ticker,
+                     int(input_tokens), int(output_tokens),
+                     int(cache_read_tokens), int(cache_creation_tokens),
+                     cost, notes),
+                )
+            conn.commit()
+    except Exception as e:
+        log.debug("llm_calls: ledger insert failed (%s)", e)
+
 # Path to the operating-rules canon. Edits here propagate without code change.
 from pathlib import Path as _Path
 FRAMEWORK_CANON_PATH = _Path(__file__).parent / "data" / "reference" / "framework_canon.md"
@@ -2104,8 +2185,24 @@ def decide_notifier(
         )
         line = "".join(getattr(b, "text", "") for b in resp.content
                        if getattr(b, "type", None) == "text").strip().splitlines()[0]
+        # llm_calls ledger row (mig 033) — fire-and-forget cost stamp.
+        u = getattr(resp, "usage", None)
+        _log_llm_call(
+            model=NOTIFIER_MODEL, caller="decide_notifier",
+            ticker=ticker.upper(),
+            input_tokens=getattr(u, "input_tokens", 0) or 0,
+            output_tokens=getattr(u, "output_tokens", 0) or 0,
+            cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
+            cache_creation_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
+            notes=f"signal_origin={signal_origin} zone={zone}",
+        )
     except Exception as e:
         log.error("notifier API call failed for %s: %s", ticker, e)
+        _log_llm_call(
+            model=NOTIFIER_MODEL, caller="decide_notifier",
+            ticker=ticker.upper(),
+            notes=f"api-failure: {e}",
+        )
         return None
 
     # Parse the leading verb. Accept long-side (BUY/SELL/HOLD/WATCH/AVOID)
@@ -2431,7 +2528,21 @@ def _decide_legacy(
                 cache_usage[k] = getattr(u, k, 0) or 0
     except Exception as e:
         log.error("decision_engine: Claude API call failed for %s: %s", ticker, e)
+        _log_llm_call(
+            model=CLAUDE_MODEL, caller="decide_legacy", ticker=ticker.upper(),
+            notes=f"api-failure: {e}",
+        )
         return None
+
+    # llm_calls ledger row — fire-and-forget cost stamp (mig 033).
+    _log_llm_call(
+        model=CLAUDE_MODEL, caller="decide_legacy", ticker=ticker.upper(),
+        input_tokens=cache_usage["input_tokens"],
+        output_tokens=cache_usage["output_tokens"],
+        cache_read_tokens=cache_usage["cache_read_input_tokens"],
+        cache_creation_tokens=cache_usage["cache_creation_input_tokens"],
+        notes=f"signal_origin={signal_origin}",
+    )
 
     try:
         decision = _parse_and_validate(raw_text, ctx=ctx)
