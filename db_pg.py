@@ -1013,6 +1013,69 @@ def _update_quad_bot_state(cur, captured_dt, metadata: dict) -> dict:
     return written
 
 
+def _insert_sg_levels_from_metadata(cur, captured_dt, metadata: dict,
+                                    capture_type: str) -> int:
+    """Walk the tape metadata and append one sg_levels row per ticker that
+    has at least one numeric level field. Returns the count written.
+
+    Expected shape (one of):
+      metadata['sg_levels'] = [{ticker, gamma_flip, call_wall, put_wall, …}, …]
+      metadata['levels'][TICKER] = {gamma_flip, call_wall, …}
+      metadata flat with TICKER as key — last-resort.
+
+    Any field absence is fine; we only require ticker + at least one
+    numeric level. Runs in the same transaction as the corpus write."""
+    Json = psycopg2.extras.Json
+    md = metadata or {}
+    rows: list[dict] = []
+
+    if isinstance(md.get("sg_levels"), list):
+        for entry in md["sg_levels"]:
+            if isinstance(entry, dict) and entry.get("ticker"):
+                rows.append(entry)
+    elif isinstance(md.get("levels"), dict):
+        for tk, entry in md["levels"].items():
+            if isinstance(entry, dict):
+                row = dict(entry)
+                row.setdefault("ticker", tk)
+                rows.append(row)
+
+    written = 0
+    for row in rows:
+        ticker = (row.get("ticker") or "").upper().strip()
+        if not ticker:
+            continue
+        level_fields = {
+            "gamma_flip":        row.get("gamma_flip"),
+            "call_wall":         row.get("call_wall"),
+            "put_wall":          row.get("put_wall"),
+            "hedge_wall":        row.get("hedge_wall"),
+            "key_gamma_strike":  row.get("key_gamma_strike"),
+        }
+        if not any(v is not None for v in level_fields.values()):
+            continue
+        cur.execute(
+            """
+            INSERT INTO sg_levels
+                (ticker, captured_at, capture_type,
+                 gamma_flip, call_wall, put_wall,
+                 hedge_wall, key_gamma_strike, raw)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                ticker, captured_dt, capture_type,
+                level_fields["gamma_flip"],
+                level_fields["call_wall"],
+                level_fields["put_wall"],
+                level_fields["hedge_wall"],
+                level_fields["key_gamma_strike"],
+                Json(row),
+            ),
+        )
+        written += 1
+    return written
+
+
 def _route_source_specific(cur, source, captured_dt, metadata, raw_text,
                            screenshot_path) -> dict:
     """Dispatch to per-source typed tables. Runs in the SAME transaction as the
@@ -1022,6 +1085,18 @@ def _route_source_specific(cur, source, captured_dt, metadata, raw_text,
         tape_src.setdefault("raw_report_markdown", raw_text)
         tape_src.setdefault("screenshot_path", screenshot_path)
         return {"tape_inserted": _insert_tape_report(cur, captured_dt, tape_src)}
+    if source == "spotgamma_tape_15m":
+        # New tape-watcher route (2026-06-10 — work order item 7). DUAL
+        # output by design: corpus_documents (the prose, via the upstream
+        # _insert_corpus_document call) for ML, sg_levels (the structured
+        # levels) for the deterministic alert/decision read path. No
+        # alerting from this source yet — silent accumulation for a few
+        # days, quality check first. Market-hours gate lives in api.py
+        # so out-of-window POSTs are rejected before they reach here.
+        sg_count = _insert_sg_levels_from_metadata(
+            cur, captured_dt, metadata, capture_type="tape_15m",
+        )
+        return {"sg_levels_inserted": sg_count}
     if source == "hedgeye_quad_dashboard":
         return {"bot_state_written": _update_quad_bot_state(cur, captured_dt, metadata)}
     return {}
