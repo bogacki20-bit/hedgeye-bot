@@ -8,3 +8,4 @@ yfinance>=0.2.40
 alpaca-py>=0.20
 openai>=1.30.0
 pyyaml>=6.0
+flask>=3.0.0

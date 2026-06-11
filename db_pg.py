@@ -18,7 +18,7 @@ import os
 import json
 import logging
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 
 import psycopg2
 import psycopg2.extras
@@ -829,6 +829,148 @@ def save_trade_recommendation(rec: dict) -> int:
             new_id = cur.fetchone()[0]
         conn.commit()
         return new_id
+
+
+# ─────────────────────────── SpotGamma Tape reports ───────────────────────────
+
+def _parse_captured_at(value) -> datetime:
+    """Parse the captured_at field from the tape POST body into a tz-aware
+    (or naive) datetime. Accepts ISO 8601 with offset or trailing 'Z'."""
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        raise ValueError("captured_at is required")
+    s = str(value).strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    return datetime.fromisoformat(s)
+
+
+def save_tape_report(report: dict) -> dict:
+    """Persist one SpotGamma Tape Tool capture in a single transaction.
+
+    Writes BOTH:
+      1. corpus_documents (source='spotgamma_tape') — full markdown + structured
+         metadata for RAG / full-text. The capture timestamp is stored in
+         source_ref so the existing corpus_documents_unique index gives us
+         per-capture idempotency (re-POSTing the same captured_at updates in
+         place; a new 15-min capture is a new row).
+      2. spotgamma_tape_reports — typed columns for ML, idempotent on captured_at.
+
+    Both inserts share one connection/transaction — either both land or neither.
+
+    `report` is the JSON POST body. Returns a small summary dict.
+    """
+    Json = psycopg2.extras.Json
+
+    captured_dt = _parse_captured_at(report.get("captured_at"))
+    captured_ref = captured_dt.isoformat()
+    source_date = captured_dt.date()
+
+    raw_md = report.get("raw_report_markdown") or ""
+    title = f"SG Tape Report {captured_ref}"
+
+    # corpus_documents.metadata = the structured payload WITHOUT the bulky
+    # markdown blob (that lives in full_text). Keep it small + queryable.
+    metadata = {
+        k: report.get(k)
+        for k in (
+            "spx", "ndx", "vix",
+            "top_volume", "top_gamma_notional", "top_movers",
+            "largest_trades", "live_flow_sample",
+            "bullish_concentration", "bearish_concentration",
+            "decision_note", "screenshot_url",
+        )
+        if report.get(k) is not None
+    }
+
+    # full_text is NOT NULL — fall back to a synthesized line if no markdown.
+    full_text = raw_md.strip() or (
+        f"{title}\n\n"
+        f"SPX={report.get('spx')} NDX={report.get('ndx')} VIX={report.get('vix')}\n"
+        f"{report.get('decision_note') or ''}".strip()
+    )
+
+    corpus_inserted = False
+    tape_inserted = False
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1) corpus_documents — idempotent via the existing 4-col unique index.
+            cur.execute(
+                """
+                INSERT INTO corpus_documents
+                    (source, source_date, source_ref, document_type,
+                     page_or_segment, title, full_text, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (source, COALESCE(source_ref, ''), source_date,
+                             COALESCE(page_or_segment, -1))
+                DO UPDATE SET
+                    title    = EXCLUDED.title,
+                    full_text = EXCLUDED.full_text,
+                    metadata = EXCLUDED.metadata,
+                    captured_at = NOW()
+                RETURNING (xmax = 0) AS inserted
+                """,
+                (
+                    "spotgamma_tape", source_date, captured_ref, "tape_report",
+                    None, title, full_text, Json(metadata),
+                ),
+            )
+            row = cur.fetchone()
+            corpus_inserted = bool(row[0]) if row else False
+
+            # 2) spotgamma_tape_reports — typed columns, idempotent on captured_at.
+            cur.execute(
+                """
+                INSERT INTO spotgamma_tape_reports
+                    (captured_at, spx, ndx, vix,
+                     top_volume_json, top_gamma_notional_json, top_movers_json,
+                     largest_trades_json, live_flow_sample_json,
+                     bullish_concentration, bearish_concentration, decision_note,
+                     raw_report_markdown, screenshot_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (captured_at) DO UPDATE SET
+                    spx = EXCLUDED.spx,
+                    ndx = EXCLUDED.ndx,
+                    vix = EXCLUDED.vix,
+                    top_volume_json = EXCLUDED.top_volume_json,
+                    top_gamma_notional_json = EXCLUDED.top_gamma_notional_json,
+                    top_movers_json = EXCLUDED.top_movers_json,
+                    largest_trades_json = EXCLUDED.largest_trades_json,
+                    live_flow_sample_json = EXCLUDED.live_flow_sample_json,
+                    bullish_concentration = EXCLUDED.bullish_concentration,
+                    bearish_concentration = EXCLUDED.bearish_concentration,
+                    decision_note = EXCLUDED.decision_note,
+                    raw_report_markdown = EXCLUDED.raw_report_markdown,
+                    screenshot_path = EXCLUDED.screenshot_path
+                RETURNING (xmax = 0) AS inserted
+                """,
+                (
+                    captured_dt,
+                    report.get("spx"), report.get("ndx"), report.get("vix"),
+                    Json(report.get("top_volume")) if report.get("top_volume") is not None else None,
+                    Json(report.get("top_gamma_notional")) if report.get("top_gamma_notional") is not None else None,
+                    Json(report.get("top_movers")) if report.get("top_movers") is not None else None,
+                    Json(report.get("largest_trades")) if report.get("largest_trades") is not None else None,
+                    Json(report.get("live_flow_sample")) if report.get("live_flow_sample") is not None else None,
+                    report.get("bullish_concentration"),
+                    report.get("bearish_concentration"),
+                    report.get("decision_note"),
+                    raw_md or None,
+                    report.get("screenshot_url"),
+                ),
+            )
+            row = cur.fetchone()
+            tape_inserted = bool(row[0]) if row else False
+        conn.commit()
+
+    return {
+        "captured_at": captured_ref,
+        "source_date": source_date.isoformat(),
+        "corpus_inserted": corpus_inserted,
+        "tape_inserted": tape_inserted,
+    }
 
 
 # ─────────────────────────── Smoke test ───────────────────────────

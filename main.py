@@ -206,5 +206,41 @@ if __name__ == "__main__":
     else:
         log.info("MFR watchlist sync disabled (MFR_WATCHLIST_SYNC=false).")
 
+    # HTTP API — serves /api/tape_report so the scheduled spotgamma-tape-watch
+    # task (running in a sandbox with no DB access) can route captures into
+    # Postgres over HTTP. Same daemon pattern. Toggle via API_ENABLED=false.
+    # Requires a public domain on the Railway service + TAPE_INGEST_SECRET set.
+    if os.getenv("API_ENABLED", "true").lower() in ("true", "1", "yes"):
+        try:
+            from api import run_api_server
+
+            def _resilient_api_loop():
+                import time, traceback
+                while True:
+                    try:
+                        run_api_server()
+                    except Exception as e:
+                        tb = traceback.format_exc()
+                        log.error("API server crashed: %s\n%s", e, tb)
+                        try:
+                            from notifier import send_telegram
+                            send_telegram(
+                                "Hedgeye Bot",
+                                f"API server crashed: {type(e).__name__}: {e}\n"
+                                f"Restarting in 30s. Tail: {tb[-300:]}",
+                            )
+                        except Exception:
+                            pass
+                        time.sleep(30)
+
+            threading.Thread(
+                target=_resilient_api_loop, daemon=True, name="api_server"
+            ).start()
+            log.info("API server thread started (/api/tape_report).")
+        except Exception as e:
+            log.error("Failed to start API server thread: %s", e)
+    else:
+        log.info("API server disabled (API_ENABLED=false).")
+
     log.info("Hedgeye bot running — email parser → Postgres lake.")
     run_email_loop()
