@@ -313,13 +313,21 @@ def _send_alert(decision: dict) -> bool:
 
 def _quad_alignment(ticker: str, direction: Optional[str]) -> str:
     """'aligned' / 'counter' / 'neutral' — is the decision's direction
-    consistent with the active Quad's favored longs/shorts universe?"""
+    consistent with the active Quad's favored longs/shorts universe?
+
+    Membership test goes against the doctrine-universe ETF proxy
+    (normalize_ticker → to_doctrine_proxy), not the raw RR/macro label
+    (2026-06-10 fix — pre-fix the lookup compared 'GOLD'/'SPX' against
+    a universe that only holds 'GLD'/'SPY' and always returned neutral).
+    """
     try:
         from tools.doctrine import universe_for_quad
+        from tools.ticker_aliases import normalize_ticker, to_doctrine_proxy
         q = _active_quad()
         longs = set(universe_for_quad(q, "longs"))
         shorts = set(universe_for_quad(q, "shorts"))
-        t = (ticker or "").upper()
+        raw = (ticker or "").upper()
+        t = (to_doctrine_proxy(normalize_ticker(raw)) or raw).upper()
         d = (direction or "").lower()
         if d in ("long", "buy"):
             if t in longs:

@@ -51,3 +51,41 @@ def normalize_ticker(ticker: str | None) -> str | None:
         return ticker
     t = ticker.strip().upper()
     return ALIASES.get(t, t)
+
+
+# ─────────────────────────── Doctrine proxy map ───────────────────────────
+#
+# Hedgeye's Risk Range labels are macro symbols (SPX, COMPQ, GOLD, BRENT, …),
+# but config/hedgeye_doctrine.yaml's quad_universe / expected_returns are
+# keyed by tradeable ETF tickers (SPY, QQQ, GLD, USO, …). Without a bridge,
+# every doctrine-membership test for an RR-labeled ticker missed and
+# rendered "favored neutral" — the bug operator caught 2026-06-10 where
+# GOLD alerts said "Q3 favored neutral" with Q3 active and GLD in
+# Q3 longs.commodities.
+#
+# Direction: macro/index label → doctrine ETF proxy. Apply BEFORE the
+# membership test, never as a substitute for normalize_ticker() (which
+# walks the other way — ETF wrapper → macro label, for trade
+# reconciliation). The two maps live in the same module for visibility
+# so a future contributor sees both at once.
+RR_TO_DOCTRINE_PROXY: dict[str, str] = {
+    "GOLD":    "GLD",
+    "SILVER":  "SLV",
+    "WTIC":    "USO",
+    "BRENT":   "USO",
+    "NATGAS":  "UNG",
+    "COPPER":  "CPER",
+    "COMPQ":   "QQQ",
+    "SPX":     "SPY",
+    "BITCOIN": "GBTC",
+}
+
+
+def to_doctrine_proxy(ticker: str | None) -> str | None:
+    """Map an RR/macro label to its doctrine-universe ETF proxy. Falls
+    through to the input (uppercased) when no proxy is known so single
+    stocks and tickers already in doctrine form aren't disturbed."""
+    if not ticker:
+        return ticker
+    t = ticker.strip().upper()
+    return RR_TO_DOCTRINE_PROXY.get(t, t)

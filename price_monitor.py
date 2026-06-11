@@ -507,16 +507,24 @@ def _quad_doctrine_suffix(ticker: str, side: str = "long") -> str:
     ticker's historical quarterly EV in the active Quad, and the
     position-cap headroom. Empty string on any lookup failure so the
     alert never breaks on doctrine/portfolio issues.
+
+    Doctrine lookups go through tools.ticker_aliases (2026-06-10):
+    normalize_ticker() to canonical Hedgeye label, then to_doctrine_proxy()
+    to the doctrine-universe ETF (GOLD→GLD, SPX→SPY, etc). Pre-fix the
+    membership test compared raw RR labels against ETF-keyed universes
+    and rendered every macro alert as 'favored neutral'.
     """
     try:
         from tools.doctrine import (
             current_quarterly_quad, universe_for_quad, expected_return,
             asset_class_for, position_size_cap,
         )
+        from tools.ticker_aliases import normalize_ticker, to_doctrine_proxy
     except Exception:
         return ""
     try:
-        t = (ticker or "").upper()
+        raw = (ticker or "").upper()
+        t = (to_doctrine_proxy(normalize_ticker(raw)) or raw).upper()
         q = current_quarterly_quad()
         qn = q.split()[-1]
         longs = set(universe_for_quad(q, "longs"))
@@ -527,7 +535,10 @@ def _quad_doctrine_suffix(ticker: str, side: str = "long") -> str:
             favored, align = "short", ("aligned" if side == "short" else "counter")
         else:
             favored, align = "neutral", "neutral"
-        parts = [f" | Quad: {t} is Q{qn} favored {favored} ({align})"]
+        # Show both the RR label and the doctrine proxy when they differ,
+        # so the operator can verify the mapping at a glance.
+        label = raw if t == raw else f"{raw}→{t}"
+        parts = [f" | Quad: {label} is Q{qn} favored {favored} ({align})"]
 
         ev = expected_return(t, q)
         if ev is not None:
