@@ -1,0 +1,53 @@
+-- ============================================================================
+-- Migration 032 — generalized scrape ingest (/api/scrape_ingest)
+--
+-- The bot's HTTP API now accepts captures from multiple scheduled scrape SKILLs,
+-- each tagged with a `source` label, via POST /api/scrape_ingest (see api.py /
+-- db_pg.save_scrape_ingest). Every capture lands in corpus_documents; some
+-- sources also route to a typed table:
+--   source='spotgamma_tape'         -> spotgamma_tape_reports  (migration 031)
+--   source='hedgeye_quad_dashboard' -> bot_state               (migration 008)
+-- Other sources are corpus-only until a router is added.
+--
+-- No NEW tables are required for this migration — spotgamma_tape_reports (031),
+-- bot_state (008) and corpus_documents (003) already exist. This migration only
+-- (re)asserts the corpus_documents idempotency index so the dedup guarantee is
+-- self-contained, and documents the design.
+--
+-- Apply via apply_migration.py. All statements idempotent — safe to re-run.
+-- ============================================================================
+
+-- ── corpus_documents dedup / idempotency ────────────────────────────────────
+-- Re-sends must not duplicate. We achieve this through the EXISTING 4-column
+-- unique index by writing the capture timestamp into source_ref:
+--   (source, COALESCE(source_ref,''), source_date, COALESCE(page_or_segment,-1))
+--
+-- NOTE (intentional deviation from the spec's "UNIQUE(source, source_date)"):
+-- a plain UNIQUE(source, source_date) is NOT used because
+--   * it would FAIL to create against existing data — many sources legitimately
+--     have multiple rows per (source, source_date) (macro_show_deck has one row
+--     per slide; spotgamma per-date has many source_refs), and
+--   * it would collapse intraday captures (e.g. spotgamma_tape every 15 min, the
+--     hedgeye sweep 3x/day) to ONE row per source per day, destroying the very
+--     granularity this feature captures.
+-- "Re-sends dedupe" means a re-POST of the SAME captured_at — which the index
+-- below handles exactly, while still allowing many distinct captures per day.
+CREATE UNIQUE INDEX IF NOT EXISTS corpus_documents_unique
+    ON corpus_documents
+       (source, COALESCE(source_ref, ''), source_date, COALESCE(page_or_segment, -1));
+
+-- bot_state keys written by source='hedgeye_quad_dashboard' (documentation only;
+-- bot_state is a generic key/value table from migration 008, no schema change):
+--   scraped_monthly_quad        'Quad 1'..'Quad 4'
+--   scraped_quarterly_quad      'Quad 1'..'Quad 4'
+--   scraped_quad_probabilities  JSON string of the scraped probability breakdown
+--   scraped_quad_captured_at    ISO timestamp of the latest dashboard capture
+--
+-- These use a `scraped_` prefix ON PURPOSE: tools/doctrine.py resolves the LIVE
+-- trade-routing regime from bot_state keys monthly_quad/quarterly_quad then the
+-- legacy current_monthly_quad/current_quarterly_quad — ABOVE the operator's
+-- CURRENT_*_QUAD_OVERRIDE env vars. Writing the automated scrape into those keys
+-- would silently override the operator's deliberately-set regime. The scraped_*
+-- keys are a non-authoritative mirror; promote to the canonical keys (one-line
+-- change in db_pg._update_quad_bot_state) once the operator confirms. The
+-- canonical operator-managed log stays in quad_regime_history (tools/quad_regime).

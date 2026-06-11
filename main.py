@@ -206,10 +206,11 @@ if __name__ == "__main__":
     else:
         log.info("MFR watchlist sync disabled (MFR_WATCHLIST_SYNC=false).")
 
-    # HTTP API — serves /api/tape_report so the scheduled spotgamma-tape-watch
-    # task (running in a sandbox with no DB access) can route captures into
-    # Postgres over HTTP. Same daemon pattern. Toggle via API_ENABLED=false.
-    # Requires a public domain on the Railway service + TAPE_INGEST_SECRET set.
+    # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
+    # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
+    # captures into Postgres over HTTP. Same daemon pattern. Toggle via
+    # API_ENABLED=false. Requires a public domain on the Railway service +
+    # SCRAPE_INGEST_SECRET set.
     if os.getenv("API_ENABLED", "true").lower() in ("true", "1", "yes"):
         try:
             from api import run_api_server
@@ -236,7 +237,7 @@ if __name__ == "__main__":
             threading.Thread(
                 target=_resilient_api_loop, daemon=True, name="api_server"
             ).start()
-            log.info("API server thread started (/api/tape_report).")
+            log.info("API server thread started (/api/scrape_ingest, /api/tape_report).")
         except Exception as e:
             log.error("Failed to start API server thread: %s", e)
     else:
