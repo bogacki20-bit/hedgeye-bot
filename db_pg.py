@@ -831,7 +831,15 @@ def save_trade_recommendation(rec: dict) -> int:
         return new_id
 
 
-# ─────────────────────────── SpotGamma Tape reports ───────────────────────────
+# ─────────────────────────── Scrape ingest (generalized) ───────────────────────────
+#
+# One HTTP endpoint (/api/scrape_ingest) accepts captures from multiple scheduled
+# SKILLs, each tagged with a `source` label. Every capture lands in
+# corpus_documents (RAG / full-text). Some sources ALSO route to a typed table:
+#   spotgamma_tape         -> spotgamma_tape_reports
+#   hedgeye_quad_dashboard -> bot_state (current quads + probabilities)
+# Other sources are corpus-only until a router is added. The legacy
+# save_tape_report() (flat body, POST /api/tape_report) reshapes onto this path.
 
 def _parse_captured_at(value) -> datetime:
     """Parse the captured_at field from the tape POST body into a tz-aware
@@ -846,131 +854,241 @@ def _parse_captured_at(value) -> datetime:
     return datetime.fromisoformat(s)
 
 
-def save_tape_report(report: dict) -> dict:
-    """Persist one SpotGamma Tape Tool capture in a single transaction.
+def _insert_corpus_document(cur, *, source, captured_dt, title, raw_text,
+                            metadata, document_type="scrape") -> bool:
+    """Insert/refresh one corpus_documents row using an existing cursor.
 
-    Writes BOTH:
-      1. corpus_documents (source='spotgamma_tape') — full markdown + structured
-         metadata for RAG / full-text. The capture timestamp is stored in
-         source_ref so the existing corpus_documents_unique index gives us
-         per-capture idempotency (re-POSTing the same captured_at updates in
-         place; a new 15-min capture is a new row).
-      2. spotgamma_tape_reports — typed columns for ML, idempotent on captured_at.
+    Idempotent via the existing corpus_documents_unique index. The capture
+    timestamp is written into source_ref so multiple captures the same day are
+    distinct rows (intraday granularity preserved) while a re-POST of the same
+    captured_at updates in place. Returns True if the row was newly inserted."""
+    Json = psycopg2.extras.Json
+    captured_ref = captured_dt.isoformat()
+    full_text = (raw_text or "").strip() or title
+    cur.execute(
+        """
+        INSERT INTO corpus_documents
+            (source, source_date, source_ref, document_type,
+             page_or_segment, title, full_text, metadata)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (source, COALESCE(source_ref, ''), source_date,
+                     COALESCE(page_or_segment, -1))
+        DO UPDATE SET
+            title       = EXCLUDED.title,
+            full_text   = EXCLUDED.full_text,
+            metadata    = EXCLUDED.metadata,
+            captured_at = NOW()
+        RETURNING (xmax = 0) AS inserted
+        """,
+        (
+            source, captured_dt.date(), captured_ref, document_type,
+            None, title, full_text, Json(metadata or {}),
+        ),
+    )
+    row = cur.fetchone()
+    return bool(row[0]) if row else False
 
-    Both inserts share one connection/transaction — either both land or neither.
 
-    `report` is the JSON POST body. Returns a small summary dict.
-    """
+def _insert_tape_report(cur, captured_dt, src: dict) -> bool:
+    """Write the typed spotgamma_tape_reports row from a tape-shaped dict `src`
+    (top_volume, top_gamma_notional, top_movers, largest_trades,
+    live_flow_sample, spx/ndx/vix, *_concentration, decision_note,
+    raw_report_markdown, screenshot_path). Idempotent on captured_at.
+    Returns True if newly inserted."""
     Json = psycopg2.extras.Json
 
-    captured_dt = _parse_captured_at(report.get("captured_at"))
-    captured_ref = captured_dt.isoformat()
-    source_date = captured_dt.date()
+    def j(key):
+        v = src.get(key)
+        return Json(v) if v is not None else None
 
-    raw_md = report.get("raw_report_markdown") or ""
-    title = f"SG Tape Report {captured_ref}"
+    cur.execute(
+        """
+        INSERT INTO spotgamma_tape_reports
+            (captured_at, spx, ndx, vix,
+             top_volume_json, top_gamma_notional_json, top_movers_json,
+             largest_trades_json, live_flow_sample_json,
+             bullish_concentration, bearish_concentration, decision_note,
+             raw_report_markdown, screenshot_path)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (captured_at) DO UPDATE SET
+            spx = EXCLUDED.spx,
+            ndx = EXCLUDED.ndx,
+            vix = EXCLUDED.vix,
+            top_volume_json = EXCLUDED.top_volume_json,
+            top_gamma_notional_json = EXCLUDED.top_gamma_notional_json,
+            top_movers_json = EXCLUDED.top_movers_json,
+            largest_trades_json = EXCLUDED.largest_trades_json,
+            live_flow_sample_json = EXCLUDED.live_flow_sample_json,
+            bullish_concentration = EXCLUDED.bullish_concentration,
+            bearish_concentration = EXCLUDED.bearish_concentration,
+            decision_note = EXCLUDED.decision_note,
+            raw_report_markdown = EXCLUDED.raw_report_markdown,
+            screenshot_path = EXCLUDED.screenshot_path
+        RETURNING (xmax = 0) AS inserted
+        """,
+        (
+            captured_dt,
+            src.get("spx"), src.get("ndx"), src.get("vix"),
+            j("top_volume"), j("top_gamma_notional"), j("top_movers"),
+            j("largest_trades"), j("live_flow_sample"),
+            src.get("bullish_concentration"),
+            src.get("bearish_concentration"),
+            src.get("decision_note"),
+            src.get("raw_report_markdown") or None,
+            src.get("screenshot_path"),
+        ),
+    )
+    row = cur.fetchone()
+    return bool(row[0]) if row else False
 
-    # corpus_documents.metadata = the structured payload WITHOUT the bulky
-    # markdown blob (that lives in full_text). Keep it small + queryable.
-    metadata = {
+
+def _update_quad_bot_state(cur, captured_dt, metadata: dict) -> dict:
+    """For source='hedgeye_quad_dashboard': persist the scraped quads +
+    probabilities into bot_state (a durable key/value scratch store).
+
+    IMPORTANT — writes NON-authoritative `scraped_*` keys on purpose:
+      * tools/doctrine.py resolves the LIVE regime from bot_state keys
+        `quarterly_quad`/`monthly_quad` then the legacy
+        `current_quarterly_quad`/`current_monthly_quad` — BEFORE the operator's
+        CURRENT_*_QUAD_OVERRIDE env vars. That path feeds price_monitor /
+        proactive_scanner trade routing.
+      * Writing the scrape into those keys would silently override the operator's
+        deliberately-set regime with an automated 3x/day scrape. Not safe to do
+        implicitly — especially before the sweep SKILL's payload shape is proven.
+      * So we mirror the scrape into `scraped_monthly_quad` /
+        `scraped_quarterly_quad` / `scraped_quad_probabilities` /
+        `scraped_quad_captured_at`, which nothing reads for routing. To make the
+        scrape authoritative, promote these to the canonical keys (one-line
+        change) once the operator confirms.
+    Also deliberately does NOT touch quad_regime_history (canonical regime log,
+    tools/quad_regime.py). Returns the keys written."""
+    from tools.quad_regime import _normalize as _norm_quad
+
+    def _quad(*candidates):
+        """Normalize a quad value to 'Quad N'. Handles what tools.quad_regime
+        accepts ('Quad 3'/'quad3'/'3') plus the 'Q2' abbreviation the dashboard
+        scrape may emit. Returns None if no candidate yields a 1–4 quad."""
+        import re
+        for c in candidates:
+            if c is None:
+                continue
+            n = _norm_quad(c)
+            if n:
+                return n
+            m = re.search(r"[1-4]", str(c))
+            if m:
+                return f"Quad {m.group(0)}"
+        return None
+
+    md = metadata or {}
+    monthly = _quad(md.get("monthly_quad"),
+                    md.get("current_monthly_quad"), md.get("monthly"))
+    quarterly = _quad(md.get("quarterly_quad"),
+                      md.get("current_quarterly_quad"), md.get("quarterly"))
+    probs = md.get("probabilities") if md.get("probabilities") is not None \
+        else md.get("quad_probabilities")
+
+    pairs = []
+    if monthly:
+        pairs.append(("scraped_monthly_quad", monthly))
+    if quarterly:
+        pairs.append(("scraped_quarterly_quad", quarterly))
+    if probs is not None:
+        pairs.append(("scraped_quad_probabilities",
+                      probs if isinstance(probs, str) else json.dumps(probs)))
+    pairs.append(("scraped_quad_captured_at", captured_dt.isoformat()))
+
+    written = {}
+    for k, v in pairs:
+        cur.execute(
+            """
+            INSERT INTO bot_state (key, value, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (key) DO UPDATE
+              SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            (k, v),
+        )
+        written[k] = v
+    return written
+
+
+def _route_source_specific(cur, source, captured_dt, metadata, raw_text,
+                           screenshot_path) -> dict:
+    """Dispatch to per-source typed tables. Runs in the SAME transaction as the
+    corpus write. Unknown sources are corpus-only (returns {})."""
+    if source == "spotgamma_tape":
+        tape_src = dict(metadata or {})
+        tape_src.setdefault("raw_report_markdown", raw_text)
+        tape_src.setdefault("screenshot_path", screenshot_path)
+        return {"tape_inserted": _insert_tape_report(cur, captured_dt, tape_src)}
+    if source == "hedgeye_quad_dashboard":
+        return {"bot_state_written": _update_quad_bot_state(cur, captured_dt, metadata)}
+    return {}
+
+
+def save_scrape_ingest(body: dict) -> dict:
+    """Generalized scrape ingest entry point (POST /api/scrape_ingest).
+
+    Always writes corpus_documents for `source`; ALSO routes to a source-specific
+    table when one exists (see _route_source_specific). Corpus write + routing
+    share one transaction — all land or none. Returns a summary dict.
+    """
+    source = (body.get("source") or "").strip()
+    if not source:
+        raise ValueError("source is required")
+    captured_dt = _parse_captured_at(body.get("captured_at"))
+    metadata = body.get("metadata") or {}
+    raw_text = body.get("raw_text") or ""
+    screenshot_path = body.get("screenshot_path")
+    title = body.get("title") or f"{source} {captured_dt.isoformat()}"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            corpus_inserted = _insert_corpus_document(
+                cur, source=source, captured_dt=captured_dt, title=title,
+                raw_text=raw_text, metadata=metadata,
+            )
+            routed = _route_source_specific(
+                cur, source, captured_dt, metadata, raw_text, screenshot_path,
+            )
+        conn.commit()
+
+    return {
+        "source": source,
+        "captured_at": captured_dt.isoformat(),
+        "source_date": captured_dt.date().isoformat(),
+        "corpus_inserted": corpus_inserted,
+        **routed,
+    }
+
+
+def save_tape_report(report: dict) -> dict:
+    """Backward-compat for POST /api/tape_report (flat body shape).
+
+    The tape SKILL sends tape fields at the top level (spx, top_volume, …,
+    raw_report_markdown). Reshape onto the generalized scrape_ingest path so
+    there's one code path. New callers should use /api/scrape_ingest directly.
+    """
+    tape_meta = {
         k: report.get(k)
         for k in (
             "spx", "ndx", "vix",
             "top_volume", "top_gamma_notional", "top_movers",
             "largest_trades", "live_flow_sample",
-            "bullish_concentration", "bearish_concentration",
-            "decision_note", "screenshot_url",
+            "bullish_concentration", "bearish_concentration", "decision_note",
         )
         if report.get(k) is not None
     }
-
-    # full_text is NOT NULL — fall back to a synthesized line if no markdown.
-    full_text = raw_md.strip() or (
-        f"{title}\n\n"
-        f"SPX={report.get('spx')} NDX={report.get('ndx')} VIX={report.get('vix')}\n"
-        f"{report.get('decision_note') or ''}".strip()
-    )
-
-    corpus_inserted = False
-    tape_inserted = False
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # 1) corpus_documents — idempotent via the existing 4-col unique index.
-            cur.execute(
-                """
-                INSERT INTO corpus_documents
-                    (source, source_date, source_ref, document_type,
-                     page_or_segment, title, full_text, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (source, COALESCE(source_ref, ''), source_date,
-                             COALESCE(page_or_segment, -1))
-                DO UPDATE SET
-                    title    = EXCLUDED.title,
-                    full_text = EXCLUDED.full_text,
-                    metadata = EXCLUDED.metadata,
-                    captured_at = NOW()
-                RETURNING (xmax = 0) AS inserted
-                """,
-                (
-                    "spotgamma_tape", source_date, captured_ref, "tape_report",
-                    None, title, full_text, Json(metadata),
-                ),
-            )
-            row = cur.fetchone()
-            corpus_inserted = bool(row[0]) if row else False
-
-            # 2) spotgamma_tape_reports — typed columns, idempotent on captured_at.
-            cur.execute(
-                """
-                INSERT INTO spotgamma_tape_reports
-                    (captured_at, spx, ndx, vix,
-                     top_volume_json, top_gamma_notional_json, top_movers_json,
-                     largest_trades_json, live_flow_sample_json,
-                     bullish_concentration, bearish_concentration, decision_note,
-                     raw_report_markdown, screenshot_path)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (captured_at) DO UPDATE SET
-                    spx = EXCLUDED.spx,
-                    ndx = EXCLUDED.ndx,
-                    vix = EXCLUDED.vix,
-                    top_volume_json = EXCLUDED.top_volume_json,
-                    top_gamma_notional_json = EXCLUDED.top_gamma_notional_json,
-                    top_movers_json = EXCLUDED.top_movers_json,
-                    largest_trades_json = EXCLUDED.largest_trades_json,
-                    live_flow_sample_json = EXCLUDED.live_flow_sample_json,
-                    bullish_concentration = EXCLUDED.bullish_concentration,
-                    bearish_concentration = EXCLUDED.bearish_concentration,
-                    decision_note = EXCLUDED.decision_note,
-                    raw_report_markdown = EXCLUDED.raw_report_markdown,
-                    screenshot_path = EXCLUDED.screenshot_path
-                RETURNING (xmax = 0) AS inserted
-                """,
-                (
-                    captured_dt,
-                    report.get("spx"), report.get("ndx"), report.get("vix"),
-                    Json(report.get("top_volume")) if report.get("top_volume") is not None else None,
-                    Json(report.get("top_gamma_notional")) if report.get("top_gamma_notional") is not None else None,
-                    Json(report.get("top_movers")) if report.get("top_movers") is not None else None,
-                    Json(report.get("largest_trades")) if report.get("largest_trades") is not None else None,
-                    Json(report.get("live_flow_sample")) if report.get("live_flow_sample") is not None else None,
-                    report.get("bullish_concentration"),
-                    report.get("bearish_concentration"),
-                    report.get("decision_note"),
-                    raw_md or None,
-                    report.get("screenshot_url"),
-                ),
-            )
-            row = cur.fetchone()
-            tape_inserted = bool(row[0]) if row else False
-        conn.commit()
-
-    return {
-        "captured_at": captured_ref,
-        "source_date": source_date.isoformat(),
-        "corpus_inserted": corpus_inserted,
-        "tape_inserted": tape_inserted,
+    body = {
+        "source": "spotgamma_tape",
+        "captured_at": report.get("captured_at"),
+        "title": f"SG Tape Report {report.get('captured_at')}",
+        "metadata": tape_meta,
+        "raw_text": report.get("raw_report_markdown") or "",
+        "screenshot_path": report.get("screenshot_path") or report.get("screenshot_url"),
     }
+    return save_scrape_ingest(body)
 
 
 # ─────────────────────────── Smoke test ───────────────────────────
