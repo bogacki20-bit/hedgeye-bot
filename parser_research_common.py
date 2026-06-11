@@ -72,6 +72,213 @@ def quad(body: str):
     return f"Quad {m.group(1)}" if m else None
 
 
+# ─────────────────────────── Quad tilt extraction ────────────────────
+#
+# Hedgeye announces a regime change as a TILT: "our tilt from Quad 3 to
+# Quad 4 for both July and Q3". The naive `quad()` above grabs the FIRST
+# Quad mention — which is the tilt-FROM (Quad 3), the regime we are
+# LEAVING. That silently masks the actual call. `tilt_target_quads()`
+# reads the DESTINATION Quad and assigns it to the monthly / quarterly /
+# global axis, honouring forward-dated month references ("for July" when
+# the email is published in June → the monthly flip is effective July 1).
+
+import datetime as _dt
+
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5,
+    "june": 6, "july": 7, "august": 8, "september": 9, "october": 10,
+    "november": 11, "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+# "tilt/shift/move/rotate ... from Quad X to Quad Y"  → destination Y.
+_FROM_TO_RE = re.compile(
+    r"\bfrom\s+#?Quad\s*([1-4])\s+to\s+#?Quad\s*([1-4])", re.I)
+# Directional "shifting/tilting/moving/rotating/chopping (in)to Quad Y" with
+# no explicit FROM — destination Y. Also catches "in favor of Quad Y".
+_TO_ONLY_RE = re.compile(
+    r"\b(?:tilt\w*|shift\w*|mov\w*|rotat\w*|chopping|lean\w*|"
+    r"in\s+favor\s+of|favo\w*r?s?|now\s+a)\s+"
+    r"(?:marginally\s+|heavily\s+|sizeabl[ey]\s+|toward[s]?\s+|"
+    r"(?:in)?to\s+|a\s+){0,3}#?Quad\s*([1-4])", re.I)
+_MONTH_RE = re.compile(
+    r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)\b", re.I)
+_QUARTER_RE = re.compile(r"\bQ([1-4])\b")
+
+
+def _next_month_start(month_num: int, ref: _dt.date) -> _dt.date:
+    """First day of the next occurrence of `month_num` on/after `ref`'s
+    month. Same-month → ref's month this year; earlier month → next year."""
+    year = ref.year + 1 if month_num < ref.month else ref.year
+    return _dt.date(year, month_num, 1)
+
+
+def _periods_in_window(text: str, start: int, end: int,
+                       fwd: int = 60, back: int = 24) -> tuple[set, set]:
+    """Return (month_nums, quarter_nums) mentioned in a window around the
+    [start,end) span. Stops the forward scan at clause breaks so a tilt
+    'for July and Q3 and our June CPI Nowcast' doesn't sweep in 'June'."""
+    seg = text[max(0, start - back): min(len(text), end + fwd)]
+    # Cut the forward context at the first clause that introduces an
+    # unrelated subject ("and our", "CPI", "Nowcast", a period, etc).
+    cut = re.split(r"\band our\b|\bCPI\b|Nowcast|[.;]", seg, maxsplit=1,
+                   flags=re.I)[0]
+    months = {_MONTHS[m.group(1).lower()] for m in _MONTH_RE.finditer(cut)}
+    quarters = {int(m.group(1)) for m in _QUARTER_RE.finditer(cut)}
+    return months, quarters
+
+
+def tilt_target_quads(subject: str, body: str,
+                      ref_date: _dt.date | None = None) -> dict | None:
+    """Extract the DESTINATION Quad(s) of any regime tilt in this note.
+
+    Returns a structured dict (or None when no tilt/Quad call is present):
+
+        {"effective_monthly":        "Quad 4" | None,
+         "effective_quarterly":      "Quad 4" | None,
+         "effective_global":         "Quad 4" | None,
+         "monthly_effective_from":   "2026-07-01" | None,   # ISO, or None=now
+         "quarterly_effective_from": None}                  # quarterly=immediate
+
+    Period assignment:
+      * A tilt phrase whose window names a quarter (Q1-Q4) → quarterly axis.
+      * A tilt phrase whose window names a month → monthly axis; if that
+        month is in the FUTURE relative to ref_date, the monthly flip is
+        forward-dated to the 1st of that month (operator switches on the
+        1st, not on publication). Quarterly tilts apply immediately.
+      * A tilt phrase with no period context is GENERAL — it seeds both the
+        monthly and quarterly axes (unless a period-specific phrase already
+        set that axis).
+    """
+    subject = subject or ""
+    body = body or ""
+    ref_date = ref_date or _dt.date.today()
+    text = f"{subject}. {body}"
+
+    monthly = quarterly = general = None
+    from_monthly = from_quarterly = from_general = None
+    monthly_from = None
+
+    # 1. Explicit "from Quad X to Quad Y" — strongest signal, period-aware.
+    #    The FROM quad is the regime being LEFT; it's the value the bot must
+    #    hold an axis at while a forward-dated tilt is not yet effective.
+    for m in _FROM_TO_RE.finditer(text):
+        src = f"Quad {m.group(1)}"
+        dest = f"Quad {m.group(2)}"
+        months, quarters = _periods_in_window(text, m.start(), m.end())
+        if quarters:
+            quarterly, from_quarterly = dest, src
+        if months:
+            monthly, from_monthly = dest, src
+            fut = sorted(mo for mo in months if mo != ref_date.month)
+            if fut:
+                monthly_from = _next_month_start(min(fut), ref_date).isoformat()
+        if not months and not quarters:
+            general = general or dest
+            from_general = from_general or src
+
+    # 2. Directional "shifting/chopping into Quad Y" (subject + body) — fills
+    #    any axis still empty. Subject "Chopping Into #Quad4?" lands here.
+    if not (monthly and quarterly):
+        for m in _TO_ONLY_RE.finditer(text):
+            dest = f"Quad {m.group(1)}"
+            months, quarters = _periods_in_window(text, m.start(), m.end())
+            if quarters and not quarterly:
+                quarterly = dest
+            if months and not monthly:
+                monthly = dest
+                fut = sorted(mo for mo in months if mo != ref_date.month)
+                if fut:
+                    monthly_from = _next_month_start(
+                        min(fut), ref_date).isoformat()
+            if not months and not quarters:
+                general = general or dest
+
+    # NB: there is deliberately NO bare-"Quad N" fallback. A note that only
+    # mentions a Quad in passing (no tilt / favored / directional cue) must
+    # NOT seed a regime target — otherwise the live updater would churn the
+    # regime on incidental references. Only the directional/from-to/favored
+    # phrasings above produce a target.
+    if not (monthly or quarterly or general):
+        return None
+
+    # A general (period-less) target seeds whichever axis is still empty.
+    eff_monthly = monthly or general
+    eff_quarterly = quarterly or general
+    # Forward-date only applies to a monthly target that named a future month.
+    if eff_monthly != monthly:
+        monthly_from = None
+
+    return {
+        "effective_monthly":        eff_monthly,
+        "effective_quarterly":      eff_quarterly,
+        "effective_global":         None,
+        "monthly_effective_from":   monthly_from,
+        "quarterly_effective_from": None,
+        # The regime the tilt is LEAVING — used to hold an axis at the
+        # correct pre-tilt value while a forward-dated tilt is pending.
+        "from_monthly":             from_monthly or from_general,
+        "from_quarterly":           from_quarterly or from_general,
+    }
+
+
+# ─────────────────────────── Deck / PDF link discovery ───────────────
+#
+# Research-note emails link the actual slide deck behind a CTA ("CLICK
+# HERE FOR THE UPDATED 2Q26 MACRO THEMES DECK"). The <a> usually wraps
+# only "CLICK HERE" and the deck href is a Hedgeye click-tracker
+# (url63.hedgeye.com/ls/click?...) that 30x-redirects to the real PDF, so
+# we match on the link TEXT plus the trailing copy, and exclude the
+# obvious non-deck links (unsubscribe / preferences / browser view).
+
+_ANCHOR_RE = re.compile(r"<a\b[^>]*\bhref=\"([^\"]+)\"[^>]*>(.*?)</a>",
+                        re.I | re.S)
+_DECK_CUE_RE = re.compile(
+    r"\b(DECK|DOWNLOAD|FULL\s+REPORT|FULL\s+DECK|MACRO\s+THEMES|"
+    r"VIEW\s+THE\s+(?:DECK|REPORT|PRESENTATION)|PRESENTATION|SLIDES?)\b",
+    re.I)
+_DECK_SKIP_RE = re.compile(
+    r"unsubscrib|preferenc|update\s+your|in\s+your\s+browser|view\s+it|"
+    r"privacy|terms|contact|twitter|facebook|linkedin|youtube|mailto:",
+    re.I)
+
+
+def deck_pdf_url(html_body: str) -> str | None:
+    """Best-effort discovery of the slide-deck URL linked from a research
+    note email. Prefers a direct ``.pdf`` href; otherwise returns the CTA
+    link whose anchor text + trailing copy reads like a deck/report CTA.
+    Returns None when nothing deck-like is found."""
+    html = html_body or ""
+    if not html:
+        return None
+
+    anchors = list(_ANCHOR_RE.finditer(html))
+
+    # 1. A direct PDF href wins outright.
+    for m in anchors:
+        href = m.group(1).strip()
+        if ".pdf" in href.lower() and href.lower().startswith("http"):
+            return href
+
+    # 2. CTA link: anchor text + ~120 chars of following copy must read like
+    #    a deck CTA, and the link must not be an obvious utility link.
+    for m in anchors:
+        href = m.group(1).strip()
+        if not href.lower().startswith("http"):
+            continue
+        atext = re.sub(r"<[^>]+>", " ", m.group(2))
+        tail = re.sub(r"<[^>]+>", " ", html[m.end(): m.end() + 240])
+        context = re.sub(r"\s+", " ", f"{atext} {tail}").strip()
+        if _DECK_SKIP_RE.search(atext):
+            continue
+        if _DECK_CUE_RE.search(context):
+            return href
+    return None
+
+
 def clean_tickers(blob: str, *, paren_only: bool = False,
                    limit: int = 60) -> list[str]:
     """Tickers from a fragment. paren_only=True keeps only "(TICKER)"

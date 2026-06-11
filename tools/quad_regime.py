@@ -326,6 +326,132 @@ def set_quads(monthly_quad: str,
     }
 
 
+# ─────────────────────── research-note tilt → regime ─────────────────
+
+def apply_research_note_tilts(today=None, dry_run: bool = False) -> dict:
+    """Advance the live Quad regime from the most recent research-note tilt.
+
+    The Quads/GIP / Early Look parsers stamp the DESTINATION Quad of any
+    regime tilt onto hedgeye_research_notes.tilt_target_quads. This reads
+    the freshest such row and pushes it into bot_state via set_quads(),
+    honouring three rules:
+
+      1. Forward-dated monthly tilts ("Quad 4 for July") only take effect
+         on/after their effective-from date — until then the monthly axis
+         holds its current value. Quarterly tilts apply immediately.
+      2. Operator env overrides (CURRENT_MONTHLY_QUAD_OVERRIDE /
+         CURRENT_QUARTERLY_QUAD_OVERRIDE) ALWAYS win — that axis is left at
+         the operator's explicit value and never moved by a tilt.
+      3. The resulting quad_regime_history row is stamped
+         source='hedgeye_research_note' with the research_note id in notes.
+
+    Returns a summary dict; {'action': 'no-tilt'} when nothing to apply.
+    """
+    from datetime import date as _date
+    today = today or _date.today()
+
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, signal_date, tilt_target_quads, effective_from_date
+                  FROM hedgeye_research_notes
+                 WHERE tilt_target_quads IS NOT NULL
+                 ORDER BY signal_date DESC, id DESC
+                 LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"action": "no-tilt"}
+            rn_id, sig_date, tilt, eff_from_col = row
+
+            # Current canonical bot_state (used to hold an axis whose tilt is
+            # not yet effective, or which an env override is pinning).
+            cur_m = _bot_state_get(cur, "monthly_quad") \
+                or _bot_state_get(cur, "current_monthly_quad")
+            cur_q = _bot_state_get(cur, "quarterly_quad") \
+                or _bot_state_get(cur, "current_quarterly_quad")
+    except Exception as e:
+        log.warning("apply_research_note_tilts: read failed (%s)", e)
+        return {"action": "error", "error": str(e)}
+
+    if not isinstance(tilt, dict):
+        return {"action": "no-tilt", "id": rn_id}
+
+    # Fall back to the canonical reader if bot_state has no baseline yet.
+    if not (cur_m and cur_q):
+        base = current_quad_regime()
+        cur_m = cur_m or base.get("monthly_quad")
+        cur_q = cur_q or base.get("quarterly_quad")
+
+    def _effective(target, from_iso) -> bool:
+        """True if `target` should apply now (no from-date, or reached)."""
+        if not target:
+            return False
+        if not from_iso:
+            return True
+        try:
+            return today >= _date.fromisoformat(str(from_iso)[:10])
+        except ValueError:
+            return True
+
+    tgt_m = _normalize(tilt.get("effective_monthly"))
+    tgt_q = _normalize(tilt.get("effective_quarterly"))
+    m_from = tilt.get("monthly_effective_from")
+    q_from = tilt.get("quarterly_effective_from")
+    # While a forward-dated tilt is pending, hold the axis at the regime the
+    # tilt is LEAVING (the pre-tilt value) rather than whatever bot_state
+    # currently reads — that keeps the result deterministic even if an
+    # earlier note transiently advanced the same axis.
+    hold_m = _normalize(tilt.get("from_monthly")) or cur_m
+    hold_q = _normalize(tilt.get("from_quarterly")) or cur_q
+
+    new_m = tgt_m if _effective(tgt_m, m_from) else hold_m
+    new_q = tgt_q if _effective(tgt_q, q_from) else hold_q
+
+    # Rule 2 — operator env overrides are immovable.
+    env_m = _normalize(os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE"))
+    env_q = _normalize(os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE"))
+    pinned = []
+    if env_m:
+        new_m = env_m
+        pinned.append("monthly")
+    if env_q:
+        new_q = env_q
+        pinned.append("quarterly")
+
+    if not (new_m and new_q):
+        return {"action": "incomplete", "id": rn_id,
+                "monthly": new_m, "quarterly": new_q}
+
+    pending_monthly = bool(tgt_m and not _effective(tgt_m, m_from)
+                           and "monthly" not in pinned and tgt_m != new_m)
+
+    if dry_run:
+        return {"action": "dry-run", "id": rn_id,
+                "monthly": new_m, "quarterly": new_q,
+                "pending_monthly_target": tgt_m if pending_monthly else None,
+                "monthly_effective_from": m_from, "pinned": pinned}
+
+    notes = (f"hedgeye_research_note id={rn_id} signal_date={sig_date}; "
+             f"tilt monthly={tgt_m or '-'} quarterly={tgt_q or '-'}"
+             + (f"; monthly forward-dated to {m_from} (held at {cur_m})"
+                if pending_monthly else "")
+             + (f"; env-pinned {','.join(pinned)}" if pinned else ""))
+    result = set_quads(
+        monthly_quad=new_m,
+        quarterly_quad=new_q,
+        source="hedgeye_research_note",
+        notes=notes,
+        alert_on_change=True,
+    )
+    result.update({"id": rn_id, "pinned": pinned,
+                   "pending_monthly_target": tgt_m if pending_monthly else None})
+    return result
+
+
 # ─────────────────────────── manual operator entry ───────────────────
 
 def record_quad_change(monthly_quad: str, quarterly_quad: str,
@@ -365,12 +491,16 @@ def _cli(argv=None) -> int:
     import argparse, json
     ap = argparse.ArgumentParser(prog="tools.quad_regime")
     ap.add_argument("command",
-                    choices=("show", "sync", "set"),
+                    choices=("show", "sync", "set", "apply-tilts"),
                     help="show=print current regime; sync=read env and "
-                         "insert if changed; set=insert an explicit regime")
+                         "insert if changed; set=insert an explicit regime; "
+                         "apply-tilts=advance regime from the latest "
+                         "research-note tilt")
     ap.add_argument("--monthly", help="Monthly Quad (for `set`)")
     ap.add_argument("--quarterly", help="Quarterly Quad (for `set`)")
     ap.add_argument("--notes", help="Optional notes for `set`/`sync`")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="apply-tilts: compute only, no writes")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -380,6 +510,10 @@ def _cli(argv=None) -> int:
         return 0
     if a.command == "sync":
         print(json.dumps(sync_quad_regime_from_env(notes=a.notes), indent=2))
+        return 0
+    if a.command == "apply-tilts":
+        print(json.dumps(apply_research_note_tilts(dry_run=a.dry_run),
+                         indent=2, default=str))
         return 0
     if a.command == "set":
         if not (a.monthly and a.quarterly):
