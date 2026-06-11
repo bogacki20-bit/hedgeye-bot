@@ -241,6 +241,135 @@ def _was_recently_alerted(ticker: str, action: str, conviction: str,
     return False
 
 
+def _was_ticker_recently_alerted(ticker: str,
+                                 within_hours: int = DEFAULT_DEDUP_HOURS) -> bool:
+    """True if ANY trade_recommendation for this ticker exists in the
+    last `within_hours`. Ticker-level form for the pre-decide dedup
+    (2026-06-10 cost fix) — we don't know the action/conviction before
+    decide() runs, but we don't need to: if we pinged the operator about
+    this ticker any time in the dedup window, skip the cycle's Haiku
+    call entirely."""
+    try:
+        import db_pg
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=within_hours)
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1 FROM trade_recommendations
+                    WHERE ticker = %s
+                      AND created_at >= %s
+                      AND COALESCE(conviction, '') IN ('Best Idea', 'Adding')
+                    LIMIT 1
+                    """,
+                    (ticker.upper(), cutoff),
+                )
+                if cur.fetchone():
+                    return True
+    except Exception as e:
+        log.debug("scanner ticker-dedup query failed (%s); will allow", e)
+    return False
+
+
+# ─────────────────────────── Pre-decide quick filter ─────────────────────
+#
+# Most tickers in the polling universe sit in mid_range with stable
+# source flags for hours at a time. Calling decide() (a Haiku API call)
+# for each of them on every 5-min scan is what was driving the API
+# bill: ~231 calls/scan, ~95% of which deterministically short-circuited
+# inside decide_notifier to action=WATCH on the mid_range gate. Move
+# both checks BEFORE decide().
+
+_SOURCE_FLAGS_STATE_KEY = "scanner_last_source_flags"
+
+
+def _load_last_source_flags() -> dict[str, list[str]]:
+    """Read the per-ticker source_flags snapshot from the prior scan.
+
+    Stored as a JSON blob in bot_state under one row so the lookup is a
+    single SELECT and the writeback a single INSERT … ON CONFLICT.
+    Returns {} on absence / parse error so the caller always gets a
+    usable dict."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM bot_state WHERE key = %s",
+                            (_SOURCE_FLAGS_STATE_KEY,))
+                row = cur.fetchone()
+        if row and row[0]:
+            data = json.loads(row[0])
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        log.debug("scanner: source-flags state load failed (%s)", e)
+    return {}
+
+
+def _save_last_source_flags(state: dict[str, list[str]]) -> None:
+    try:
+        import db_pg
+        payload = json.dumps(state, sort_keys=True)
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO bot_state (key, value, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (key) DO UPDATE
+                        SET value = EXCLUDED.value, updated_at = NOW()
+                    """,
+                    (_SOURCE_FLAGS_STATE_KEY, payload),
+                )
+            conn.commit()
+    except Exception as e:
+        log.debug("scanner: source-flags state save failed (%s)", e)
+
+
+def _quick_zone_for(ticker: str) -> str:
+    """Compute the price_monitor zone for `ticker` without going through
+    unified_refresh. Reads the latest RR row from db_pg (cheap) + a
+    yfinance quote (cheap). Returns 'unknown' on any failure so the
+    pre-filter conservatively keeps the ticker (no false positives that
+    suppress a real edge alert)."""
+    try:
+        import db_pg
+        from price_monitor import compute_zone, HEDGEYE_TO_YFINANCE, fetch_prices
+        rr = db_pg.get_active_risk_range(ticker) if hasattr(db_pg, "get_active_risk_range") else None
+        if not rr:
+            # Fallback: pull from the bulk query (worst-case: one extra
+            # SELECT, still cheap vs the Haiku call we're trying to avoid).
+            for row in db_pg.get_active_risk_ranges():
+                if row["ticker"] == ticker:
+                    rr = row
+                    break
+        if not rr:
+            return "unknown"
+        lo = float(rr["buy_trade"])  if rr["buy_trade"]  is not None else None
+        hi = float(rr["sell_trade"]) if rr["sell_trade"] is not None else None
+        if lo is None or hi is None:
+            return "unknown"
+        yf_sym = HEDGEYE_TO_YFINANCE.get(ticker)
+        if not yf_sym:
+            return "unknown"
+        prices = fetch_prices([yf_sym])
+        price = prices.get(yf_sym)
+        if price is None:
+            return "unknown"
+        return compute_zone(price, lo, hi)
+    except Exception as e:
+        log.debug("scanner: quick-zone for %s failed (%s)", ticker, e)
+        return "unknown"
+
+
+def _current_source_flags(ticker: str) -> list[str]:
+    try:
+        from tools.active_slice import source_flags_for
+        return sorted(source_flags_for(ticker) or [])
+    except Exception:
+        return []
+
+
 def _persist_recommendation(decision: dict) -> None:
     """Write the decision as a trade_recommendations row. Status='proposed'
     by default so the row is visible to any future approval UI."""
@@ -345,8 +474,21 @@ def _quad_alignment(ticker: str, direction: Optional[str]) -> str:
 
 
 def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
-              dedup_hours: int) -> dict:
-    """Evaluate a single ticker. Returns a result summary."""
+              dedup_hours: int,
+              prior_source_flags: dict[str, list[str]] | None = None,
+              flags_state_out: dict[str, list[str]] | None = None) -> dict:
+    """Evaluate a single ticker. Returns a result summary.
+
+    Order matters (2026-06-10 cost fix):
+      1. Ticker-level dedup BEFORE refresh + decide(). If we already
+         pinged on this ticker in the dedup window, no Haiku call.
+      2. Quick zone + source-flags pre-filter BEFORE refresh + decide().
+         When the ticker is in mid_range AND its source flags haven't
+         changed since the last scan, skip decide() — the deterministic
+         mid_range gate inside decide_notifier was always going to
+         short-circuit to WATCH anyway.
+      3. Otherwise fall through to unified_refresh + decide() as before.
+    """
     result = {
         "ticker": ticker,
         "actionable": False,
@@ -356,8 +498,29 @@ def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
         "error": None,
     }
 
-    # Refresh upstream sources first (lockstep). Best-effort — even if a
-    # source is stale, decision_engine will still get whatever's in the DB.
+    # Step 1: ticker-level dedup — was this ticker pinged recently at
+    # any conviction? If so we never need to look at it this cycle.
+    if _was_ticker_recently_alerted(ticker, within_hours=dedup_hours):
+        result["deduped"] = True
+        result["skipped_reason"] = "ticker-recently-alerted"
+        return result
+
+    # Step 2: pre-decide quick filter — skip the Haiku call when the
+    # ticker is in mid_range AND its source flags are identical to the
+    # prior scan. Record current flags either way so the next scan can
+    # diff against them.
+    flags_now = _current_source_flags(ticker)
+    if flags_state_out is not None:
+        flags_state_out[ticker] = flags_now
+    prior = (prior_source_flags or {}).get(ticker)
+    if prior is not None and sorted(prior) == flags_now:
+        zone = _quick_zone_for(ticker)
+        if zone == "mid_range":
+            result["skipped_reason"] = "mid_range + flags unchanged"
+            return result
+
+    # Step 3: full refresh + decide. Best-effort — even if a source is
+    # stale, decision_engine will still get whatever's in the DB.
     if refresh:
         try:
             import unified_refresh
@@ -475,15 +638,25 @@ def scan(tickers: Optional[list[str]] = None,
     log.info("scanner: starting scan over %d tickers (dry_run=%s, priority=%s, workers=%d)",
              len(watchlist), dry_run, priority, max_workers)
 
+    # Pre-decide filter state (2026-06-10 cost fix). Load the prior
+    # scan's per-ticker source_flags so _scan_one can skip mid_range
+    # tickers whose flags haven't changed. flags_state_out collects the
+    # current cycle's flags for writeback after the scan.
+    prior_source_flags = _load_last_source_flags()
+    flags_state_out: dict[str, list[str]] = {}
+
     per_ticker: list = [None] * len(watchlist)
-    counts = {"actionable": 0, "alerted": 0, "deduped": 0, "errors": 0}
+    counts = {"actionable": 0, "alerted": 0, "deduped": 0,
+              "errors": 0, "skipped_quiet": 0}
 
     if max_workers and max_workers > 1 and watchlist:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_to_idx = {
                 pool.submit(_scan_one, t, dry_run=dry_run, refresh=refresh,
-                            dedup_hours=dedup_hours): i
+                            dedup_hours=dedup_hours,
+                            prior_source_flags=prior_source_flags,
+                            flags_state_out=flags_state_out): i
                 for i, t in enumerate(watchlist)
             }
             done_count = 0
@@ -504,18 +677,30 @@ def scan(tickers: Optional[list[str]] = None,
                 if r["alerted"]:    counts["alerted"] += 1
                 if r["deduped"]:    counts["deduped"] += 1
                 if r["error"]:      counts["errors"] += 1
+                if r.get("skipped_reason") and not r["deduped"]:
+                    counts["skipped_quiet"] += 1
     else:
         for i, ticker in enumerate(watchlist):
             log.info("scanner: [%d/%d] %s", i + 1, len(watchlist), ticker)
             r = _scan_one(ticker, dry_run=dry_run, refresh=refresh,
-                         dedup_hours=dedup_hours)
+                         dedup_hours=dedup_hours,
+                         prior_source_flags=prior_source_flags,
+                         flags_state_out=flags_state_out)
             per_ticker[i] = r
             if r["actionable"]: counts["actionable"] += 1
             if r["alerted"]:    counts["alerted"] += 1
             if r["deduped"]:    counts["deduped"] += 1
             if r["error"]:      counts["errors"] += 1
+            if r.get("skipped_reason") and not r["deduped"]:
+                counts["skipped_quiet"] += 1
             if throttle_seconds and i < len(watchlist) - 1:
                 time.sleep(throttle_seconds)
+
+    # Persist this cycle's source_flags snapshot so the next scan can
+    # diff against it. Best-effort — failure to write just degrades the
+    # pre-filter to "always run decide()" until the next successful save.
+    if flags_state_out and not dry_run:
+        _save_last_source_flags(flags_state_out)
 
     summary = {
         "started_at":   started_at.isoformat(),
