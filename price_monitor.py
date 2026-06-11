@@ -422,6 +422,7 @@ def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
     pw = levels.get("put_wall")
     kg = levels.get("key_gamma_strike")
     hw = levels.get("hedge_wall")
+    gf = levels.get("gamma_flip")   # 2026-06-10 mig 034 — was missing pre-fix
 
     def _f(v):
         try:
@@ -429,27 +430,38 @@ def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
         except (TypeError, ValueError):
             return None
 
-    cw_f, pw_f, kg_f, hw_f = _f(cw), _f(pw), _f(kg), _f(hw)
+    cw_f, pw_f, kg_f, hw_f, gf_f = _f(cw), _f(pw), _f(kg), _f(hw), _f(gf)
     parts: list[str] = []
     if cw_f is not None: parts.append(f"call wall ${cw_f:g}")
     if pw_f is not None: parts.append(f"put wall ${pw_f:g}")
+    if gf_f is not None: parts.append(f"gamma flip ${gf_f:g}")
     if kg_f is not None: parts.append(f"key gamma ${kg_f:g}")
     if hw_f is not None: parts.append(f"hedge wall ${hw_f:g}")
     if not parts:
         return ""
 
-    # Anchor sentence using call wall first, falling back to put wall.
-    anchor_lv = cw_f if cw_f is not None else pw_f
-    anchor_name = "call wall" if cw_f is not None else "put wall"
+    # Anchor sentence: prefer gamma_flip (regime line — bullish above /
+    # bearish below — operator-prioritised 2026-06-10), then call wall,
+    # then put wall.
     try:
         p = float(price) if price is not None else None
     except (TypeError, ValueError):
         p = None
+
     anchor_phrase = ""
-    if p is not None and anchor_lv:
-        diff_pct = (p - anchor_lv) / anchor_lv * 100.0
-        side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
-        anchor_phrase = f" (price ${p:g} {side} {anchor_name} by {abs(diff_pct):.1f}%)"
+    if p is not None:
+        if gf_f is not None:
+            diff_pct = (p - gf_f) / gf_f * 100.0
+            side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
+            regime = "bullish gamma regime" if side == "above" else ("flip-zone" if side == "at" else "bearish gamma regime")
+            anchor_phrase = (f" ({side} gamma flip ${gf_f:g} by "
+                             f"{abs(diff_pct):.1f}% — {regime})")
+        elif cw_f is not None or pw_f is not None:
+            anchor_lv = cw_f if cw_f is not None else pw_f
+            anchor_name = "call wall" if cw_f is not None else "put wall"
+            diff_pct = (p - anchor_lv) / anchor_lv * 100.0
+            side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
+            anchor_phrase = f" (price ${p:g} {side} {anchor_name} by {abs(diff_pct):.1f}%)"
 
     return " | SG: " + " / ".join(parts) + anchor_phrase
 
@@ -507,16 +519,24 @@ def _quad_doctrine_suffix(ticker: str, side: str = "long") -> str:
     ticker's historical quarterly EV in the active Quad, and the
     position-cap headroom. Empty string on any lookup failure so the
     alert never breaks on doctrine/portfolio issues.
+
+    Doctrine lookups go through tools.ticker_aliases (2026-06-10):
+    normalize_ticker() to canonical Hedgeye label, then to_doctrine_proxy()
+    to the doctrine-universe ETF (GOLD→GLD, SPX→SPY, etc). Pre-fix the
+    membership test compared raw RR labels against ETF-keyed universes
+    and rendered every macro alert as 'favored neutral'.
     """
     try:
         from tools.doctrine import (
             current_quarterly_quad, universe_for_quad, expected_return,
             asset_class_for, position_size_cap,
         )
+        from tools.ticker_aliases import normalize_ticker, to_doctrine_proxy
     except Exception:
         return ""
     try:
-        t = (ticker or "").upper()
+        raw = (ticker or "").upper()
+        t = (to_doctrine_proxy(normalize_ticker(raw)) or raw).upper()
         q = current_quarterly_quad()
         qn = q.split()[-1]
         longs = set(universe_for_quad(q, "longs"))
@@ -527,7 +547,10 @@ def _quad_doctrine_suffix(ticker: str, side: str = "long") -> str:
             favored, align = "short", ("aligned" if side == "short" else "counter")
         else:
             favored, align = "neutral", "neutral"
-        parts = [f" | Quad: {t} is Q{qn} favored {favored} ({align})"]
+        # Show both the RR label and the doctrine proxy when they differ,
+        # so the operator can verify the mapping at a glance.
+        label = raw if t == raw else f"{raw}→{t}"
+        parts = [f" | Quad: {label} is Q{qn} favored {favored} ({align})"]
 
         ev = expected_return(t, q)
         if ev is not None:
@@ -639,10 +662,61 @@ def compose_recommendation(
     """
     icon, label = ZONE_LABELS.get(zone, ("", zone))
 
+    # 2026-06-10 RR-trend guards (operator architectural directive).
+    # Applied BEFORE the per-zone verb construction so VIX/UST/USD and
+    # no-trend-set tickers never produce a trade verb. Imports lazy so a
+    # broken decision_engine module never breaks alert formatting.
+    try:
+        from decision_engine import (_is_informational, _informational_phrasing,
+                                     _normalize_mfr_signal,
+                                     _rr_framework_alignment)
+    except Exception:
+        _is_informational = None  # type: ignore[assignment]
+        _informational_phrasing = None  # type: ignore[assignment]
+        _normalize_mfr_signal = None  # type: ignore[assignment]
+        _rr_framework_alignment = None  # type: ignore[assignment]
+
+    # Guard 1: INFORMATIONAL tickers — regime read only, no verb, no sizing.
+    if _is_informational is not None and _is_informational(ticker):
+        regime = (_informational_phrasing(ticker, zone, price, low, high)
+                  if _informational_phrasing else
+                  f"{ticker.upper()} — informational, regime read only")
+        return {
+            "text": f"[Informational] {regime}",
+            "suggested_action": "WATCH",
+            "suggested_dollars": None,
+            "suggested_bps": None,
+            "framework_alignment": "neutral",
+            "hedgeye_context": {},
+            "spotgamma_context": {},
+        }
+
+    # Guard 2: RR.trend NULL or neutral — no Hedgeye direction, no trade.
+    rr_norm_for_guard = (_normalize_mfr_signal(trend)
+                         if _normalize_mfr_signal else
+                         _rr_direction(trend))
+    if rr_norm_for_guard == "neutral":
+        return {
+            "text": (f"[Risk Range Neutral] WATCH {ticker} at {price:.2f} — "
+                     f"no Hedgeye trend (RR {low:g}-{high:g}, zone={zone}) — "
+                     f"no trade."),
+            "suggested_action": "WATCH",
+            "suggested_dollars": None,
+            "suggested_bps": None,
+            "framework_alignment": "neutral",
+            "hedgeye_context": {},
+            "spotgamma_context": {},
+        }
+
     # Hedgeye context still pulled from monitor_context (TTL-cached).
-    # SpotGamma stripped from live path 2026-05-24 — spotgamma_ctx is always
-    # {} now. spotgamma_snapshots / spotgamma_* corpus_documents continue to
-    # ingest for ML training; only the read into the alert template is gone.
+    #
+    # SpotGamma back into the alert path 2026-06-10 — DETERMINISTIC ONLY.
+    # Read the latest sg_levels row (migration 034) — free DB read, no LLM.
+    # Hierarchy: SG refines terrain (entry / level / structure); Hedgeye RR
+    # trend decides direction. SG NEVER overrides a Keith trend.
+    # Macro tickers without dealer-options coverage (BRENT, UST*, etc) are
+    # skipped — they never have sg_levels rows and we don't want the alert
+    # body to anchor on stale data.
     try:
         from monitor_context import get_hedgeye_ctx
         hedgeye_ctx = get_hedgeye_ctx() or {}
@@ -650,6 +724,26 @@ def compose_recommendation(
         log.warning(f"monitor_context lookup failed (continuing with empty ctx): {e}")
         hedgeye_ctx = {}
     spotgamma_ctx: dict = {}
+    if ticker.upper() not in MACRO_NO_SG_TICKERS:
+        try:
+            import db_pg
+            sg_row = db_pg.get_latest_sg_levels(ticker, max_age_hours=24) or {}
+            if sg_row:
+                # Flatten onto the dict shape _sg_levels_suffix expects.
+                # raw jsonb already supplies the same keys; keep both so
+                # _cross_source_suffix gets the structured fields too.
+                spotgamma_ctx = {
+                    "call_wall":         sg_row.get("call_wall"),
+                    "put_wall":          sg_row.get("put_wall"),
+                    "hedge_wall":        sg_row.get("hedge_wall"),
+                    "key_gamma_strike":  sg_row.get("key_gamma_strike"),
+                    "gamma_flip":        sg_row.get("gamma_flip"),
+                    "captured_at":       sg_row.get("captured_at"),
+                    "capture_type":      sg_row.get("capture_type"),
+                }
+        except Exception as e:
+            log.debug("price_monitor: sg_levels read failed for %s (%s)",
+                      ticker, e)
 
     # Suggested $ size: Style B (bps × account value, clamped at $1K per-fill
     # ceiling). Single source of truth is recommender.size_for(conviction, account).
@@ -727,8 +821,13 @@ def compose_recommendation(
                 "spotgamma_context": spotgamma_ctx,
             }
         return {
-            "text": (f"{rr_label} ADD ~${_add_usd:.0f} {ticker} at {price:.2f} "
-                     f"({ADD_BPS_LOW} bps, bottom {edge_pct}% of RR {low:g}-{high:g}, "
+            # Sizing intentionally stripped from the alert body (5/25 +
+            # 2026-06-10 operator decision — bot must not put dollar
+            # amounts in front of the operator's sizing call). The
+            # suggested_dollars / suggested_bps fields below stay
+            # populated for backend metrics / persistence only.
+            "text": (f"{rr_label} ADD {ticker} at {price:.2f} "
+                     f"(bottom {edge_pct}% of RR {low:g}-{high:g}, "
                      f"Hedgeye RR {rr_dir} bias{mfr_phrase})."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
             "suggested_action": "ADD",
@@ -821,10 +920,13 @@ def compose_recommendation(
                 "hedgeye_context": hedgeye_ctx,
                 "spotgamma_context": spotgamma_ctx,
             }
-        # bullish / neutral → trend continuation, add to longs
+        # bullish / neutral → trend continuation, add to longs.
+        # Sizing intentionally stripped from alert body (5/25 + 2026-06-10
+        # operator decision); suggested_dollars / suggested_bps stay
+        # populated for backend metrics only.
         return {
-            "text": (f"{rr_label} BUY ~${_add_usd:.0f} {ticker} at {price:.2f} "
-                     f"({ADD_BPS_LOW} bps, above RR {low:g}-{high:g}, "
+            "text": (f"{rr_label} BUY {ticker} at {price:.2f} "
+                     f"(above RR {low:g}-{high:g}, "
                      f"Hedgeye RR {rr_dir} bias{mfr_phrase}) — "
                      f"trend continuation, add to longs."
                      f"{sg_suffix}{hurst_suffix}{xs_suffix}{quad_suffix}{vol_suffix}"),
@@ -935,6 +1037,30 @@ def run_monitor_cycle(dry_run: bool = False) -> dict:
     }
 
     import db_pg  # lazy
+
+    # Quad preflight — doctrine raises QuadUnsetError when neither bot_state
+    # nor env supplies a Quad value (2026-06-10 fix: no silent Quad-1
+    # default). One Telegram halt notice, then skip the cycle. The same
+    # check exists in proactive_scanner.scan() — they call the same
+    # underlying doctrine functions, so guarding here keeps the monitor
+    # cycle from blowing up inside compose_recommendation's quad suffix.
+    try:
+        from tools.doctrine import (current_monthly_quad,
+                                    current_quarterly_quad,
+                                    QuadUnsetError)
+        current_quarterly_quad()
+        current_monthly_quad()
+    except QuadUnsetError as e:
+        log.error("price_monitor halted — Quad unset: %s", e)
+        if not dry_run:
+            try:
+                from notifier import send_telegram
+                send_telegram("QUAD UNSET — halted",
+                              f"price_monitor skipping cycle: {e}")
+            except Exception as exc:
+                log.warning("Telegram halt notice failed: %s", exc)
+        summary["quad_unset"] = True
+        return summary
 
     rows = db_pg.get_active_risk_ranges()
     summary["tickers_examined"] = len(rows)

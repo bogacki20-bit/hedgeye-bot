@@ -16,3 +16,4 @@ data/snapshots/
 
 # Scheduled-task wrapper log files (one per day)
 logs/
+.claude/

@@ -40,6 +40,87 @@ CLAUDE_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-sonnet-4-5")
 CORPUS_SNIPPET_LIMIT = 4   # how many corpus snippets to fold into the prompt
 CORPUS_MAX_CHARS = 2400    # cap total corpus text in prompt
 
+
+# ─────────────────────────── LLM cost ledger (mig 033) ───────────────
+#
+# Per-million-token Anthropic published rates (2026-Q2). cache_read is
+# typically ~10x cheaper than fresh input; cache_creation is the same
+# as input for the first call then never recurs for a TTL window.
+# Update here when Anthropic changes pricing; the ledger column stores
+# the dollar amount computed at insert-time so old rows aren't
+# retroactively rewritten.
+_LLM_PRICING_PER_MTOK = {
+    # Haiku 4.5: $1 / $5 / $0.10 (in / out / cache-read)
+    "claude-haiku-4-5":        {"in": 1.00,  "out": 5.00,  "cache_read": 0.10, "cache_creation": 1.25},
+    "claude-haiku-4-5-20251001": {"in": 1.00,  "out": 5.00,  "cache_read": 0.10, "cache_creation": 1.25},
+    # Sonnet 4.5: $3 / $15 / $0.30
+    "claude-sonnet-4-5":       {"in": 3.00,  "out": 15.00, "cache_read": 0.30, "cache_creation": 3.75},
+    "claude-sonnet-4-6":       {"in": 3.00,  "out": 15.00, "cache_read": 0.30, "cache_creation": 3.75},
+    # Opus 4.x: $15 / $75 / $1.50
+    "claude-opus-4-7":         {"in": 15.00, "out": 75.00, "cache_read": 1.50, "cache_creation": 18.75},
+}
+
+
+def _llm_cost_estimate(model: str, *, input_tokens: int, output_tokens: int,
+                       cache_read_tokens: int = 0,
+                       cache_creation_tokens: int = 0) -> float:
+    """USD estimate for one Claude API call. Returns 0.0 on unknown
+    model so a pricing-table miss never breaks the call site."""
+    rates = _LLM_PRICING_PER_MTOK.get(model)
+    if not rates:
+        # Try a prefix match for date-suffixed model IDs we forgot to pin.
+        for k, v in _LLM_PRICING_PER_MTOK.items():
+            if model.startswith(k):
+                rates = v
+                break
+    if not rates:
+        log.debug("llm_calls: no pricing for model %r; cost=0", model)
+        return 0.0
+    cost = (
+        (input_tokens          * rates["in"]            )
+        + (output_tokens         * rates["out"]           )
+        + (cache_read_tokens     * rates["cache_read"]    )
+        + (cache_creation_tokens * rates["cache_creation"])
+    ) / 1_000_000.0
+    return round(cost, 6)
+
+
+def _log_llm_call(*, model: str, caller: str, ticker: Optional[str],
+                  input_tokens: int = 0, output_tokens: int = 0,
+                  cache_read_tokens: int = 0,
+                  cache_creation_tokens: int = 0,
+                  notes: Optional[str] = None) -> None:
+    """Append one row to llm_calls. Best-effort — never lets the ledger
+    raise back into the caller (the call already happened, the cost is
+    already accrued, we just want to record it)."""
+    try:
+        cost = _llm_cost_estimate(
+            model,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+        )
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO llm_calls
+                        (model, caller, ticker,
+                         input_tokens, output_tokens,
+                         cache_read_tokens, cache_creation_tokens,
+                         est_cost_usd, notes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (model, caller, ticker,
+                     int(input_tokens), int(output_tokens),
+                     int(cache_read_tokens), int(cache_creation_tokens),
+                     cost, notes),
+                )
+            conn.commit()
+    except Exception as e:
+        log.debug("llm_calls: ledger insert failed (%s)", e)
+
 # Path to the operating-rules canon. Edits here propagate without code change.
 from pathlib import Path as _Path
 FRAMEWORK_CANON_PATH = _Path(__file__).parent / "data" / "reference" / "framework_canon.md"
@@ -1353,6 +1434,120 @@ def _ticker_side(source_flags: list[str], rr_trend: str | None = None) -> str:
     return "undetermined"
 
 
+# ─────────────────────────── RR-trend gating (2026-06-10) ────────────
+#
+# Tickers Keith calls out for regime context but never as standalone
+# trades — break above range = "risk-off", that's the alert, no verb.
+# Pre-fix the bot was emitting BUY/SELL/SHORT/COVER for these.
+INFORMATIONAL_TICKERS: frozenset[str] = frozenset({
+    "VIX", "UST2Y", "UST10Y", "UST30Y", "USD",
+})
+
+
+def _is_informational(ticker: str) -> bool:
+    return (ticker or "").upper().strip() in INFORMATIONAL_TICKERS
+
+
+def _informational_phrasing(ticker: str, zone: str,
+                            price: float | None,
+                            rr_lo: float | None,
+                            rr_hi: float | None) -> str:
+    """Regime-only sentence for INFORMATIONAL_TICKERS. No verbs, no sizing.
+
+    Maps a zone + ticker to the macro reading Keith wants surfaced:
+        VIX above_range  → "risk-off"
+        VIX below_range  → "risk-on"
+        UST*Y above_range → "yields breaking out — duration pressure"
+        UST*Y below_range → "yields breaking down — duration bid"
+        USD above_range  → "dollar strength accelerating"
+        USD below_range  → "dollar weakness accelerating"
+    """
+    t = (ticker or "").upper().strip()
+    pos = ""
+    if price is not None and rr_lo is not None and rr_hi is not None:
+        pos = f" at {price} vs RR {rr_lo}-{rr_hi}"
+    headline = {
+        "VIX":    {"above_range": "risk-off",
+                   "below_range": "risk-on",
+                   "top_edge":    "vol expanding",
+                   "bottom_edge": "vol compressing"},
+        "UST2Y":  {"above_range": "front-end yields breaking out",
+                   "below_range": "front-end yields breaking down"},
+        "UST10Y": {"above_range": "10Y yield breaking out — duration pressure",
+                   "below_range": "10Y yield breaking down — duration bid"},
+        "UST30Y": {"above_range": "long-bond yield breaking out",
+                   "below_range": "long-bond yield breaking down"},
+        "USD":    {"above_range": "dollar strength accelerating",
+                   "below_range": "dollar weakness accelerating"},
+    }.get(t, {}).get(zone)
+    if headline:
+        return f"{t} {headline}{pos} — regime read, not a trade."
+    return f"{t}{pos} — informational, regime read only."
+
+
+def _rr_framework_alignment(rr_trend_norm: str, zone: str) -> str:
+    """Mirror of price_monitor._framework_alignment, lifted into the
+    decision_engine path so the counter-trend downgrade can run here too.
+    Returns 'aligned' / 'counter' / 'neutral'.
+    """
+    t = (rr_trend_norm or "").lower()
+    if t == "bullish":
+        if zone in ("bottom_edge", "above_range"): return "aligned"
+        if zone in ("top_edge",    "below_range"): return "counter"
+    if t == "bearish":
+        if zone in ("top_edge",    "below_range"): return "aligned"
+        if zone in ("bottom_edge", "above_range"): return "counter"
+    return "neutral"
+
+
+# Verbs that OPEN or ADD-to risk. Counter-trend downgrade applies to
+# these. Exits (SELL/TRIM/COVER) are always allowed regardless of
+# alignment — closing a position never needs Keith's blessing.
+_ENTRY_VERBS = frozenset({"BUY", "ADD", "SHORT"})
+
+
+def _apply_rr_trend_guards(
+    ticker: str,
+    zone: str,
+    rr_trend_raw: str | None,
+    gated_action: str,
+    gated_ctx: str,
+) -> tuple[str, str]:
+    """Apply the three 2026-06-10 RR-trend guards on top of the existing
+    trend+momentum gate result:
+
+      1. INFORMATIONAL ticker → force WATCH with regime phrasing, never
+         a trade verb.
+      2. RR.trend NULL/neutral → force WATCH ('no Hedgeye trend — no
+         trade'), regardless of MFR trend/momentum (kills the NVDA-class
+         bug where bullish MFR fired ADD with no RR direction).
+      3. RR.trend counter to zone AND action is BUY/ADD/SHORT →
+         downgrade to WATCH ('counter to RR trend — informational').
+         Exits (SELL/TRIM/COVER) pass through untouched.
+
+    Returns the possibly-downgraded (action, context) pair.
+    """
+    # 1. INFORMATIONAL class — handled upstream with full price context
+    # (need rr_lo/rr_hi/price to render). Here we only enforce the verb
+    # block as a defense in depth.
+    if _is_informational(ticker):
+        return ("WATCH", f"{ticker.upper()} — informational, regime read only")
+
+    rr_norm = _normalize_mfr_signal(rr_trend_raw)
+
+    # 2. No Hedgeye trend, no trade.
+    if rr_norm == "neutral":
+        return ("WATCH", "no Hedgeye trend — no trade")
+
+    # 3. Counter-trend entry downgrade.
+    if gated_action in _ENTRY_VERBS:
+        align = _rr_framework_alignment(rr_norm, zone)
+        if align == "counter":
+            return ("WATCH", "counter to RR trend — informational")
+
+    return (gated_action, gated_ctx)
+
+
 def _trend_momentum_gate(zone: str, side: str, trend_dir: str,
                          momentum_dir: str) -> tuple[str, str]:
     """Map (zone, side, trend, momentum) to (action_verb, context_phrase).
@@ -1868,6 +2063,75 @@ def decide_notifier(
             },
         }
 
+    # INFORMATIONAL ticker short-circuit (2026-06-10). VIX / UST*Y / USD
+    # are regime reads, never trades — emit deterministic regime phrasing
+    # and skip the Haiku call entirely. Same shape as the mid_range
+    # short-circuit so scanner dedup + persistence stay uniform.
+    if _is_informational(ticker):
+        if account_value_usd is None:
+            try:
+                from portfolio import account_value, hedgeye_target_account
+                acct = hedgeye_target_account("Long")
+                account_value_usd = float(account_value(acct) or 0)
+            except Exception:
+                account_value_usd = 50_000.0
+        regime = _informational_phrasing(ticker, zone, price, rr_lo, rr_hi)
+        return {
+            "ticker":            ticker.upper(),
+            "signal_origin":     signal_origin,
+            "signal_conviction": signal_conviction,
+            "account_value_usd": account_value_usd,
+            "conviction":        "Monitor",
+            "direction":         "long",
+            "action":            "WATCH",
+            "bps":               None,
+            "recommended_dollars": None,
+            "confidence":        0.0,
+            "reasoning":         f"WATCH {ticker.upper()} — {regime}",
+            "evidence":          [],
+            "decided_at":        datetime.utcnow().isoformat() + "Z",
+            "source_flags":      source_flags,
+            "quad_aligned":      quad_aligned,
+            "side":              "informational",
+            "pct_rr":            pct_rr,
+            "pct_mfr":           pct_mfr,
+            "rr_mfr_divergence": divergence,
+            "context_summary": {
+                "hedgeye_quad":     None,
+                "vix_bucket":       None,
+                "risk_range_low":   rr_lo,
+                "risk_range_high":  rr_hi,
+                "mfr_range_low":    mfr_lo,
+                "mfr_range_high":   mfr_hi,
+                "mfr_hurst":        hurst,
+                "yahoo_price":      price,
+                "mfr_zone":         zone,
+                "range_position_pct": range_position_pct,
+                "pct_rr":           pct_rr,
+                "pct_mfr":          pct_mfr,
+                "rr_mfr_divergence": divergence,
+                "mfr_call_wall":    call_wall,
+                "mfr_put_wall":     put_wall,
+                "mfr_zero_gamma":   zero_gamma,
+                "spotgamma_call_wall": None,
+                "spotgamma_put_wall":  None,
+                "source_flags":     source_flags,
+                "quad_aligned":     quad_aligned,
+                "informational":    True,
+            },
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens":     0,
+            "input_tokens":                0,
+            "output_tokens":               0,
+            "prompt_context_full": {
+                "model":      NOTIFIER_MODEL,
+                "system":     "[skipped — informational ticker]",
+                "user":       "[skipped — informational ticker]",
+                "raw_output": regime,
+                "decided_at": datetime.utcnow().isoformat() + "Z",
+            },
+        }
+
     # Normalize trend + momentum + side for the gate. Python computes the
     # (zone, side, trend, momentum) → action mapping deterministically;
     # Haiku's job is only the narrative wording. Side comes primarily from
@@ -1881,6 +2145,41 @@ def decide_notifier(
         zone, side, trend_dir, momentum_dir
     )
 
+    # 2026-06-10 — RR-trend guards (operator architectural directive):
+    #   (a) INFORMATIONAL_TICKERS (VIX/UST*/USD): never emit trade verbs.
+    #   (b) RR.trend NULL or neutral: force WATCH ('no Hedgeye trend —
+    #       no trade'). Kills the ADD-NVDA-at-205 bug — pre-fix, an MFR
+    #       bullish trend overrode an absent RR direction and the bot
+    #       fired ADD on a ticker Keith had no opinion on.
+    #   (c) counter-trend BUY/ADD/SHORT: downgrade to WATCH. Exits
+    #       (SELL/TRIM/COVER) always allowed.
+    gated_action, gated_ctx_initial = _apply_rr_trend_guards(
+        ticker, zone, rr_trend_val, gated_action, gated_ctx_initial
+    )
+
+    # SG framing back into the prompt 2026-06-10 — DETERMINISTIC ONLY.
+    # ONE pre-computed line from _spotgamma_framing_line, fed by sg_levels
+    # (migration 034). NEVER raw JSON, NEVER prose. Hierarchy: SG refines
+    # terrain (entry/level/structure); Hedgeye RR trend decides direction.
+    # SG NEVER overrides a Keith trend.
+    sg_line = ""
+    try:
+        import db_pg
+        sg_row = db_pg.get_latest_sg_levels(ticker, max_age_hours=24)
+        if sg_row:
+            sg_dict = {
+                "call_wall":        sg_row.get("call_wall"),
+                "put_wall":         sg_row.get("put_wall"),
+                "key_gamma_strike": sg_row.get("key_gamma_strike"),
+                "hedge_wall":       sg_row.get("hedge_wall"),
+                "gamma_flip":       sg_row.get("gamma_flip"),
+            }
+            line = _spotgamma_framing_line(sg_dict, price)
+            if line:
+                sg_line = line.splitlines()[0] + "\n"
+    except Exception as e:
+        log.debug("notifier: sg_levels read failed for %s (%s)", ticker, e)
+
     user_msg = (
         f"Ticker: {ticker.upper()}\n"
         f"Price: {price}\n"
@@ -1892,6 +2191,7 @@ def decide_notifier(
         + f"MFR trend: {trend_dir}\n"
         + f"MFR momentum: {momentum_dir}\n"
         + wall_line
+        + sg_line
         + source_flags_line
         + f"Recommended action: {gated_action} — {gated_ctx_initial}\n"
         + f"Signal origin: {signal_origin}"
@@ -1909,8 +2209,24 @@ def decide_notifier(
         )
         line = "".join(getattr(b, "text", "") for b in resp.content
                        if getattr(b, "type", None) == "text").strip().splitlines()[0]
+        # llm_calls ledger row (mig 033) — fire-and-forget cost stamp.
+        u = getattr(resp, "usage", None)
+        _log_llm_call(
+            model=NOTIFIER_MODEL, caller="decide_notifier",
+            ticker=ticker.upper(),
+            input_tokens=getattr(u, "input_tokens", 0) or 0,
+            output_tokens=getattr(u, "output_tokens", 0) or 0,
+            cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
+            cache_creation_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
+            notes=f"signal_origin={signal_origin} zone={zone}",
+        )
     except Exception as e:
         log.error("notifier API call failed for %s: %s", ticker, e)
+        _log_llm_call(
+            model=NOTIFIER_MODEL, caller="decide_notifier",
+            ticker=ticker.upper(),
+            notes=f"api-failure: {e}",
+        )
         return None
 
     # Parse the leading verb. Accept long-side (BUY/SELL/HOLD/WATCH/AVOID)
@@ -2236,7 +2552,21 @@ def _decide_legacy(
                 cache_usage[k] = getattr(u, k, 0) or 0
     except Exception as e:
         log.error("decision_engine: Claude API call failed for %s: %s", ticker, e)
+        _log_llm_call(
+            model=CLAUDE_MODEL, caller="decide_legacy", ticker=ticker.upper(),
+            notes=f"api-failure: {e}",
+        )
         return None
+
+    # llm_calls ledger row — fire-and-forget cost stamp (mig 033).
+    _log_llm_call(
+        model=CLAUDE_MODEL, caller="decide_legacy", ticker=ticker.upper(),
+        input_tokens=cache_usage["input_tokens"],
+        output_tokens=cache_usage["output_tokens"],
+        cache_read_tokens=cache_usage["cache_read_input_tokens"],
+        cache_creation_tokens=cache_usage["cache_creation_input_tokens"],
+        notes=f"signal_origin={signal_origin}",
+    )
 
     try:
         decision = _parse_and_validate(raw_text, ctx=ctx)

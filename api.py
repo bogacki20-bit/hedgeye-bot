@@ -17,8 +17,15 @@ routes the service's public domain to whatever PORT we bind.
 
 Auth: shared-secret bearer token, matched against SCRAPE_INGEST_SECRET (with a
 backward-compat fallback to the older TAPE_INGEST_SECRET). NEVER logged.
+
+Market-hours gate (2026-06-10): scrape sources flagged as session-only
+(spotgamma_tape_15m and the legacy spotgamma_tape) are rejected outside
+9:30-16:15 ET weekdays. Prevents the tape watcher from scraping overnight
+when SG is just showing yesterday's close and the data has no signal.
 """
 
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 import hmac
 import logging
 import os
@@ -30,6 +37,24 @@ import db_pg
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Sources whose data is only meaningful during the regular US session +
+# a 15-min close-window buffer. Out-of-window POSTs are rejected with 409
+# so the SKILL can log/skip without retrying.
+_SESSION_GATED_SOURCES = frozenset({"spotgamma_tape_15m", "spotgamma_tape"})
+
+_ET = ZoneInfo("America/New_York")
+_GATE_OPEN  = dtime(9, 30)
+_GATE_CLOSE = dtime(16, 15)
+
+
+def _within_market_window(now: datetime | None = None) -> bool:
+    """True 9:30-16:15 ET, Mon-Fri. The 15-min post-close buffer covers
+    the final scheduled capture of the session."""
+    n = now or datetime.now(_ET)
+    if n.weekday() >= 5:
+        return False
+    return _GATE_OPEN <= n.time() <= _GATE_CLOSE
 
 
 def _secrets() -> list[str]:
@@ -73,10 +98,23 @@ def scrape_ingest():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify({"error": "body must be a JSON object"}), 400
-    if not body.get("source"):
+    source = (body.get("source") or "").strip()
+    if not source:
         return jsonify({"error": "source is required"}), 400
     if not body.get("captured_at"):
         return jsonify({"error": "captured_at is required"}), 400
+
+    # Session-only gate (2026-06-10). Session-gated sources outside the
+    # 9:30-16:15 ET weekday window are rejected with 409 so the SKILL
+    # can log/skip without retrying. Pre-fix the tape watcher could fire
+    # overnight on a snapshot of yesterday's close with no signal.
+    if source in _SESSION_GATED_SOURCES and not _within_market_window():
+        log.info("scrape_ingest: rejecting %s — outside market hours", source)
+        return jsonify({
+            "error": "outside market hours",
+            "source": source,
+            "window_et": "9:30-16:15 Mon-Fri",
+        }), 409
 
     try:
         result = db_pg.save_scrape_ingest(body)
@@ -107,6 +145,16 @@ def tape_report():
         return jsonify({"error": "body must be a JSON object"}), 400
     if not body.get("captured_at"):
         return jsonify({"error": "captured_at is required"}), 400
+
+    # Same market-hours gate as /api/scrape_ingest — spotgamma_tape is
+    # in _SESSION_GATED_SOURCES so overnight POSTs get the same 409.
+    if not _within_market_window():
+        log.info("tape_report: rejecting — outside market hours")
+        return jsonify({
+            "error": "outside market hours",
+            "source": "spotgamma_tape",
+            "window_et": "9:30-16:15 Mon-Fri",
+        }), 409
 
     try:
         result = db_pg.save_tape_report(body)

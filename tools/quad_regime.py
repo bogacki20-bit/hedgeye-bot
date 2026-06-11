@@ -171,6 +171,161 @@ def sync_quad_regime_from_env(notes: Optional[str] = None) -> dict:
                 "monthly_quad": env_m, "quarterly_quad": env_q}
 
 
+# ─────────────────────────── unified write path ──────────────────────
+
+# Keys the canonical doctrine reader (tools.doctrine) looks for, plus the
+# legacy long keys tools.detect_quads.run() used to write directly. set_quads()
+# below populates BOTH so the reader stays correct regardless of which path
+# wrote last.
+_BOT_STATE_QUARTERLY_KEYS = ("quarterly_quad", "current_quarterly_quad")
+_BOT_STATE_MONTHLY_KEYS   = ("monthly_quad", "current_monthly_quad")
+
+
+def _bot_state_get(cur, key: str) -> Optional[str]:
+    cur.execute("SELECT value FROM bot_state WHERE key = %s", (key,))
+    r = cur.fetchone()
+    return r[0] if r else None
+
+
+def _bot_state_set(cur, key: str, value: str) -> None:
+    cur.execute(
+        """
+        INSERT INTO bot_state (key, value, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value, updated_at = NOW()
+        """,
+        (key, value),
+    )
+
+
+def _tactical_note(prev_q, new_q, prev_m, new_m) -> str:
+    if new_q and prev_q and new_q != prev_q:
+        return ("QUARTERLY rotation — re-evaluate strategic universe and "
+                "asset-class caps for the new regime.")
+    if new_m and prev_m and new_m != prev_m:
+        return ("MONTHLY rotation — tighten/loosen tactical bias and alert "
+                "calibration; strategic universe unchanged.")
+    return "First detection — baseline established."
+
+
+def set_quads(monthly_quad: str,
+              quarterly_quad: str,
+              source: str,
+              notes: Optional[str] = None,
+              alert_on_change: bool = True) -> dict:
+    """Single entry point for persisting a Quad change. Writes:
+      - bot_state {monthly_quad, current_monthly_quad,
+                   quarterly_quad, current_quarterly_quad,
+                   last_quad_detection_at}
+      - quad_regime_history (only when at least one Quad actually changed)
+    Then, on a real rotation:
+      - alerts_fired row (ticker='_QUAD', boundary='quad_rotation')
+      - one Telegram push (when alert_on_change is True)
+
+    `source`: 'cron' (detect_quads daily), 'operator' (manual seed), 'startup'
+    (sync_quad_regime_from_env), etc — recorded in the history row.
+
+    All bot_state and history writes share one psycopg2 connection / one
+    transaction so a partial failure can't leave the reader pointing at a
+    different value than the history log.
+
+    Returns:
+        {'action':       'inserted'|'unchanged',
+         'monthly_quad': X,    'quarterly_quad': Y,
+         'prev_monthly': X|None, 'prev_quarterly': Y|None,
+         'history_id':   int|None,
+         'rotation':     bool,
+         'rotation_type':'QUARTERLY'|'MONTHLY'|None}
+    """
+    m = _normalize(monthly_quad)
+    q = _normalize(quarterly_quad)
+    if not (m and q):
+        raise ValueError(
+            f"set_quads: unrecognized Quad input monthly={monthly_quad!r} "
+            f"quarterly={quarterly_quad!r}"
+        )
+
+    import db_pg
+    with db_pg.get_conn() as conn:
+        with conn.cursor() as cur:
+            # Read previous canonical state — short keys first, fall back
+            # to legacy long keys (matches doctrine reader ordering).
+            prev_m = _bot_state_get(cur, "monthly_quad") \
+                  or _bot_state_get(cur, "current_monthly_quad")
+            prev_q = _bot_state_get(cur, "quarterly_quad") \
+                  or _bot_state_get(cur, "current_quarterly_quad")
+
+            # Always refresh bot_state (idempotent for unchanged values; the
+            # updated_at bump is a useful liveness signal for monitoring).
+            for k in _BOT_STATE_MONTHLY_KEYS:
+                _bot_state_set(cur, k, m)
+            for k in _BOT_STATE_QUARTERLY_KEYS:
+                _bot_state_set(cur, k, q)
+            _bot_state_set(cur, "last_quad_detection_at",
+                            datetime.now(timezone.utc).isoformat())
+
+            rotation = (prev_m is not None and prev_m != m) or \
+                       (prev_q is not None and prev_q != q)
+
+            history_id = None
+            if rotation or prev_m is None or prev_q is None:
+                cur.execute(
+                    """
+                    INSERT INTO quad_regime_history
+                        (monthly_quad, quarterly_quad, source, notes,
+                         effective_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    RETURNING id
+                    """,
+                    (m, q, source, notes),
+                )
+                history_id = cur.fetchone()[0]
+
+        conn.commit()
+
+    rotation_type = None
+    if rotation:
+        rotation_type = "QUARTERLY" if (prev_q and prev_q != q) else "MONTHLY"
+        if alert_on_change:
+            note = _tactical_note(prev_q, q, prev_m, m)
+            msg = (
+                "🔄 QUAD ROTATION DETECTED\n"
+                f"Yesterday: Quarterly {prev_q or '?'} / Monthly {prev_m or '?'}\n"
+                f"Today:     Quarterly {q} / Monthly {m}\n"
+                f"Rotation type: {rotation_type}\n"
+                f"Source: {source}\n"
+                f"Tactical adjustment: {note}"
+            )
+            try:
+                import db_pg, datetime as _dt
+                db_pg.record_alert(
+                    ticker="_QUAD",
+                    boundary="quad_rotation",
+                    signal_date=_dt.date.today(),
+                    recommendation_text=msg,
+                    suggested_action="QUAD_ROTATION",
+                )
+            except Exception as e:
+                log.warning("set_quads: could not record _QUAD alert: %s", e)
+            try:
+                from notifier import send_telegram
+                send_telegram("QUAD ROTATION DETECTED", msg, priority=2)
+            except Exception as e:
+                log.warning("set_quads: telegram push failed: %s", e)
+
+    return {
+        "action":         "inserted" if history_id else "unchanged",
+        "monthly_quad":   m,
+        "quarterly_quad": q,
+        "prev_monthly":   prev_m,
+        "prev_quarterly": prev_q,
+        "history_id":     history_id,
+        "rotation":       rotation,
+        "rotation_type":  rotation_type,
+    }
+
+
 # ─────────────────────────── manual operator entry ───────────────────
 
 def record_quad_change(monthly_quad: str, quarterly_quad: str,

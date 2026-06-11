@@ -1013,6 +1013,69 @@ def _update_quad_bot_state(cur, captured_dt, metadata: dict) -> dict:
     return written
 
 
+def _insert_sg_levels_from_metadata(cur, captured_dt, metadata: dict,
+                                    capture_type: str) -> int:
+    """Walk the tape metadata and append one sg_levels row per ticker that
+    has at least one numeric level field. Returns the count written.
+
+    Expected shape (one of):
+      metadata['sg_levels'] = [{ticker, gamma_flip, call_wall, put_wall, …}, …]
+      metadata['levels'][TICKER] = {gamma_flip, call_wall, …}
+      metadata flat with TICKER as key — last-resort.
+
+    Any field absence is fine; we only require ticker + at least one
+    numeric level. Runs in the same transaction as the corpus write."""
+    Json = psycopg2.extras.Json
+    md = metadata or {}
+    rows: list[dict] = []
+
+    if isinstance(md.get("sg_levels"), list):
+        for entry in md["sg_levels"]:
+            if isinstance(entry, dict) and entry.get("ticker"):
+                rows.append(entry)
+    elif isinstance(md.get("levels"), dict):
+        for tk, entry in md["levels"].items():
+            if isinstance(entry, dict):
+                row = dict(entry)
+                row.setdefault("ticker", tk)
+                rows.append(row)
+
+    written = 0
+    for row in rows:
+        ticker = (row.get("ticker") or "").upper().strip()
+        if not ticker:
+            continue
+        level_fields = {
+            "gamma_flip":        row.get("gamma_flip"),
+            "call_wall":         row.get("call_wall"),
+            "put_wall":          row.get("put_wall"),
+            "hedge_wall":        row.get("hedge_wall"),
+            "key_gamma_strike":  row.get("key_gamma_strike"),
+        }
+        if not any(v is not None for v in level_fields.values()):
+            continue
+        cur.execute(
+            """
+            INSERT INTO sg_levels
+                (ticker, captured_at, capture_type,
+                 gamma_flip, call_wall, put_wall,
+                 hedge_wall, key_gamma_strike, raw)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                ticker, captured_dt, capture_type,
+                level_fields["gamma_flip"],
+                level_fields["call_wall"],
+                level_fields["put_wall"],
+                level_fields["hedge_wall"],
+                level_fields["key_gamma_strike"],
+                Json(row),
+            ),
+        )
+        written += 1
+    return written
+
+
 def _route_source_specific(cur, source, captured_dt, metadata, raw_text,
                            screenshot_path) -> dict:
     """Dispatch to per-source typed tables. Runs in the SAME transaction as the
@@ -1022,6 +1085,18 @@ def _route_source_specific(cur, source, captured_dt, metadata, raw_text,
         tape_src.setdefault("raw_report_markdown", raw_text)
         tape_src.setdefault("screenshot_path", screenshot_path)
         return {"tape_inserted": _insert_tape_report(cur, captured_dt, tape_src)}
+    if source == "spotgamma_tape_15m":
+        # New tape-watcher route (2026-06-10 — work order item 7). DUAL
+        # output by design: corpus_documents (the prose, via the upstream
+        # _insert_corpus_document call) for ML, sg_levels (the structured
+        # levels) for the deterministic alert/decision read path. No
+        # alerting from this source yet — silent accumulation for a few
+        # days, quality check first. Market-hours gate lives in api.py
+        # so out-of-window POSTs are rejected before they reach here.
+        sg_count = _insert_sg_levels_from_metadata(
+            cur, captured_dt, metadata, capture_type="tape_15m",
+        )
+        return {"sg_levels_inserted": sg_count}
     if source == "hedgeye_quad_dashboard":
         return {"bot_state_written": _update_quad_bot_state(cur, captured_dt, metadata)}
     return {}
@@ -1089,6 +1164,100 @@ def save_tape_report(report: dict) -> dict:
         "screenshot_path": report.get("screenshot_path") or report.get("screenshot_url"),
     }
     return save_scrape_ingest(body)
+
+
+# ─────────────────────────── sg_levels (mig 034) ───────────────────────────
+#
+# Canonical SpotGamma levels table. Populated by the tape watcher (capture_type
+# 'tape_15m'), the daily SG email ingest, and the manual operator-paste path.
+# Read into both price_monitor (deterministic alert-body suffix) and
+# decision_engine (one pre-computed framing line for the prompt). SG refines
+# terrain; Hedgeye RR trend decides direction. SG never overrides Keith.
+
+def save_sg_levels(
+    *,
+    ticker: str,
+    capture_type: str,
+    gamma_flip=None,
+    call_wall=None,
+    put_wall=None,
+    hedge_wall=None,
+    key_gamma_strike=None,
+    raw: dict | None = None,
+    captured_at: datetime | None = None,
+) -> int | None:
+    """Append one row to sg_levels. Returns the new row id, or None on
+    failure (DB transient errors don't break the caller's main loop)."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sg_levels
+                        (ticker, captured_at, capture_type,
+                         gamma_flip, call_wall, put_wall,
+                         hedge_wall, key_gamma_strike, raw)
+                    VALUES (%s, COALESCE(%s, NOW()), %s,
+                            %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        (ticker or "").upper(),
+                        captured_at, capture_type,
+                        gamma_flip, call_wall, put_wall,
+                        hedge_wall, key_gamma_strike,
+                        json.dumps(raw) if raw is not None else None,
+                    ),
+                )
+                row_id = cur.fetchone()[0]
+            conn.commit()
+        return row_id
+    except Exception as e:
+        log.warning("save_sg_levels failed for %s (%s): %s",
+                    ticker, capture_type, e)
+        return None
+
+
+def get_latest_sg_levels(ticker: str, *, max_age_hours: int | None = None) -> dict | None:
+    """Return the most recent sg_levels row for `ticker` as a flat dict,
+    or None if no row exists (or all rows fail the `max_age_hours`
+    freshness filter). Keys mirror the column names; `captured_at` is
+    an aware UTC datetime, `raw` is the parsed jsonb dict."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                if max_age_hours is None:
+                    cur.execute(
+                        """
+                        SELECT id, ticker, captured_at, capture_type,
+                               gamma_flip, call_wall, put_wall,
+                               hedge_wall, key_gamma_strike, raw
+                          FROM sg_levels
+                         WHERE ticker = %s
+                         ORDER BY captured_at DESC
+                         LIMIT 1
+                        """,
+                        ((ticker or "").upper(),),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, ticker, captured_at, capture_type,
+                               gamma_flip, call_wall, put_wall,
+                               hedge_wall, key_gamma_strike, raw
+                          FROM sg_levels
+                         WHERE ticker = %s
+                           AND captured_at >= NOW() - %s::interval
+                         ORDER BY captured_at DESC
+                         LIMIT 1
+                        """,
+                        ((ticker or "").upper(), f"{int(max_age_hours)} hours"),
+                    )
+                row = cur.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        log.debug("get_latest_sg_levels failed for %s: %s", ticker, e)
+        return None
 
 
 # ─────────────────────────── Smoke test ───────────────────────────

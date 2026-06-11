@@ -96,66 +96,8 @@ def _detect_from_text(text: str) -> tuple[Optional[str], Optional[str], dict]:
     return qq, mq, debug
 
 
-def _get_state(key: str) -> Optional[str]:
-    try:
-        import db_pg
-        with db_pg.get_conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT value FROM bot_state WHERE key = %s", (key,))
-            row = cur.fetchone()
-        return row[0] if row else None
-    except Exception as e:
-        log.warning("bot_state read failed (%s): %s", key, e)
-        return None
-
-
-def _set_state(key: str, value: str) -> None:
-    import db_pg
-    with db_pg.get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO bot_state (key, value, updated_at)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (key) DO UPDATE
-              SET value = EXCLUDED.value, updated_at = NOW()
-            """,
-            (key, value),
-        )
-        conn.commit()
-
-
-def _record_rotation_alert(msg: str) -> None:
-    """Write a quad_rotation row to alerts_fired (synthetic ticker
-    '_QUAD', boundary 'quad_rotation') — one per day via the existing
-    (ticker, boundary, signal_date) unique constraint."""
-    try:
-        import db_pg
-        db_pg.record_alert(
-            ticker="_QUAD",
-            boundary="quad_rotation",
-            signal_date=dt.date.today(),
-            recommendation_text=msg,
-            suggested_action="QUAD_ROTATION",
-        )
-    except Exception as e:
-        log.warning("could not record quad_rotation alert: %s", e)
-
-
-def _push_telegram(msg: str) -> None:
-    try:
-        from notifier import send_telegram
-        send_telegram("QUAD ROTATION DETECTED", msg, priority=2)
-    except Exception as e:
-        log.warning("telegram push failed: %s", e)
-
-
-def _tactical_note(prev_q, new_q, prev_m, new_m) -> str:
-    if new_q and prev_q and new_q != prev_q:
-        return ("QUARTERLY rotation — re-evaluate strategic universe and "
-                "asset-class caps for the new regime.")
-    if new_m and prev_m and new_m != prev_m:
-        return ("MONTHLY rotation — tighten/loosen tactical bias and alert "
-                "calibration; strategic universe unchanged.")
-    return "First detection — baseline established."
+# bot_state writes go through tools.quad_regime.set_quads() — see run()
+# below. Keep this module focused on detection (dashboard text → Quad).
 
 
 def run(dry_run: bool = False) -> int:
@@ -196,30 +138,19 @@ def run(dry_run: bool = False) -> int:
         print("[dry-run] no bot_state writes, no alerts.")
         return 0
 
-    prev_q = _get_state("current_quarterly_quad")
-    prev_m = _get_state("current_monthly_quad")
-
-    _set_state("current_quarterly_quad", qq)
-    _set_state("current_monthly_quad", mq or qq)
-    _set_state("last_quad_detection_at", dt.datetime.utcnow().isoformat() + "Z")
-
-    changed = (prev_q is not None and prev_q != qq) or \
-              (prev_m is not None and (mq or qq) != prev_m)
-    if changed:
-        rot = "QUARTERLY" if (prev_q and prev_q != qq) else "MONTHLY"
-        note = _tactical_note(prev_q, qq, prev_m, mq or qq)
-        msg = (
-            "🔄 QUAD ROTATION DETECTED\n"
-            f"Yesterday: Quarterly {prev_q or '?'} / Monthly {prev_m or '?'}\n"
-            f"Today:     Quarterly {qq} / Monthly {mq or qq}\n"
-            f"Rotation type: {rot}\n"
-            f"Tactical adjustment: {note}"
-        )
-        print(msg)
-        _record_rotation_alert(msg)
-        _push_telegram(msg)
-    else:
-        print("No rotation vs. previously stored Quad state.")
+    # One door into bot_state / quad_regime_history (2026-06-10): set_quads()
+    # owns validation, the dual short+legacy bot_state writes, the history
+    # append, the alerts_fired row, and the rotation Telegram push. Don't
+    # add raw INSERTs here — extend set_quads() instead.
+    from tools.quad_regime import set_quads
+    result = set_quads(
+        monthly_quad=mq or qq,
+        quarterly_quad=qq,
+        source="cron",
+        notes=f"detect_quads dashboard={md.name}",
+        alert_on_change=True,
+    )
+    print(f"set_quads: {result}")
     return 0
 
 
