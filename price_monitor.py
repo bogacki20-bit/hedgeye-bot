@@ -650,6 +650,52 @@ def compose_recommendation(
     """
     icon, label = ZONE_LABELS.get(zone, ("", zone))
 
+    # 2026-06-10 RR-trend guards (operator architectural directive).
+    # Applied BEFORE the per-zone verb construction so VIX/UST/USD and
+    # no-trend-set tickers never produce a trade verb. Imports lazy so a
+    # broken decision_engine module never breaks alert formatting.
+    try:
+        from decision_engine import (_is_informational, _informational_phrasing,
+                                     _normalize_mfr_signal,
+                                     _rr_framework_alignment)
+    except Exception:
+        _is_informational = None  # type: ignore[assignment]
+        _informational_phrasing = None  # type: ignore[assignment]
+        _normalize_mfr_signal = None  # type: ignore[assignment]
+        _rr_framework_alignment = None  # type: ignore[assignment]
+
+    # Guard 1: INFORMATIONAL tickers — regime read only, no verb, no sizing.
+    if _is_informational is not None and _is_informational(ticker):
+        regime = (_informational_phrasing(ticker, zone, price, low, high)
+                  if _informational_phrasing else
+                  f"{ticker.upper()} — informational, regime read only")
+        return {
+            "text": f"[Informational] {regime}",
+            "suggested_action": "WATCH",
+            "suggested_dollars": None,
+            "suggested_bps": None,
+            "framework_alignment": "neutral",
+            "hedgeye_context": {},
+            "spotgamma_context": {},
+        }
+
+    # Guard 2: RR.trend NULL or neutral — no Hedgeye direction, no trade.
+    rr_norm_for_guard = (_normalize_mfr_signal(trend)
+                         if _normalize_mfr_signal else
+                         _rr_direction(trend))
+    if rr_norm_for_guard == "neutral":
+        return {
+            "text": (f"[Risk Range Neutral] WATCH {ticker} at {price:.2f} — "
+                     f"no Hedgeye trend (RR {low:g}-{high:g}, zone={zone}) — "
+                     f"no trade."),
+            "suggested_action": "WATCH",
+            "suggested_dollars": None,
+            "suggested_bps": None,
+            "framework_alignment": "neutral",
+            "hedgeye_context": {},
+            "spotgamma_context": {},
+        }
+
     # Hedgeye context still pulled from monitor_context (TTL-cached).
     # SpotGamma stripped from live path 2026-05-24 — spotgamma_ctx is always
     # {} now. spotgamma_snapshots / spotgamma_* corpus_documents continue to
