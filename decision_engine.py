@@ -2157,6 +2157,29 @@ def decide_notifier(
         ticker, zone, rr_trend_val, gated_action, gated_ctx_initial
     )
 
+    # SG framing back into the prompt 2026-06-10 — DETERMINISTIC ONLY.
+    # ONE pre-computed line from _spotgamma_framing_line, fed by sg_levels
+    # (migration 034). NEVER raw JSON, NEVER prose. Hierarchy: SG refines
+    # terrain (entry/level/structure); Hedgeye RR trend decides direction.
+    # SG NEVER overrides a Keith trend.
+    sg_line = ""
+    try:
+        import db_pg
+        sg_row = db_pg.get_latest_sg_levels(ticker, max_age_hours=24)
+        if sg_row:
+            sg_dict = {
+                "call_wall":        sg_row.get("call_wall"),
+                "put_wall":         sg_row.get("put_wall"),
+                "key_gamma_strike": sg_row.get("key_gamma_strike"),
+                "hedge_wall":       sg_row.get("hedge_wall"),
+                "gamma_flip":       sg_row.get("gamma_flip"),
+            }
+            line = _spotgamma_framing_line(sg_dict, price)
+            if line:
+                sg_line = line.splitlines()[0] + "\n"
+    except Exception as e:
+        log.debug("notifier: sg_levels read failed for %s (%s)", ticker, e)
+
     user_msg = (
         f"Ticker: {ticker.upper()}\n"
         f"Price: {price}\n"
@@ -2168,6 +2191,7 @@ def decide_notifier(
         + f"MFR trend: {trend_dir}\n"
         + f"MFR momentum: {momentum_dir}\n"
         + wall_line
+        + sg_line
         + source_flags_line
         + f"Recommended action: {gated_action} — {gated_ctx_initial}\n"
         + f"Signal origin: {signal_origin}"

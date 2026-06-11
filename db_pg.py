@@ -1091,6 +1091,100 @@ def save_tape_report(report: dict) -> dict:
     return save_scrape_ingest(body)
 
 
+# ─────────────────────────── sg_levels (mig 034) ───────────────────────────
+#
+# Canonical SpotGamma levels table. Populated by the tape watcher (capture_type
+# 'tape_15m'), the daily SG email ingest, and the manual operator-paste path.
+# Read into both price_monitor (deterministic alert-body suffix) and
+# decision_engine (one pre-computed framing line for the prompt). SG refines
+# terrain; Hedgeye RR trend decides direction. SG never overrides Keith.
+
+def save_sg_levels(
+    *,
+    ticker: str,
+    capture_type: str,
+    gamma_flip=None,
+    call_wall=None,
+    put_wall=None,
+    hedge_wall=None,
+    key_gamma_strike=None,
+    raw: dict | None = None,
+    captured_at: datetime | None = None,
+) -> int | None:
+    """Append one row to sg_levels. Returns the new row id, or None on
+    failure (DB transient errors don't break the caller's main loop)."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sg_levels
+                        (ticker, captured_at, capture_type,
+                         gamma_flip, call_wall, put_wall,
+                         hedge_wall, key_gamma_strike, raw)
+                    VALUES (%s, COALESCE(%s, NOW()), %s,
+                            %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        (ticker or "").upper(),
+                        captured_at, capture_type,
+                        gamma_flip, call_wall, put_wall,
+                        hedge_wall, key_gamma_strike,
+                        json.dumps(raw) if raw is not None else None,
+                    ),
+                )
+                row_id = cur.fetchone()[0]
+            conn.commit()
+        return row_id
+    except Exception as e:
+        log.warning("save_sg_levels failed for %s (%s): %s",
+                    ticker, capture_type, e)
+        return None
+
+
+def get_latest_sg_levels(ticker: str, *, max_age_hours: int | None = None) -> dict | None:
+    """Return the most recent sg_levels row for `ticker` as a flat dict,
+    or None if no row exists (or all rows fail the `max_age_hours`
+    freshness filter). Keys mirror the column names; `captured_at` is
+    an aware UTC datetime, `raw` is the parsed jsonb dict."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                if max_age_hours is None:
+                    cur.execute(
+                        """
+                        SELECT id, ticker, captured_at, capture_type,
+                               gamma_flip, call_wall, put_wall,
+                               hedge_wall, key_gamma_strike, raw
+                          FROM sg_levels
+                         WHERE ticker = %s
+                         ORDER BY captured_at DESC
+                         LIMIT 1
+                        """,
+                        ((ticker or "").upper(),),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, ticker, captured_at, capture_type,
+                               gamma_flip, call_wall, put_wall,
+                               hedge_wall, key_gamma_strike, raw
+                          FROM sg_levels
+                         WHERE ticker = %s
+                           AND captured_at >= NOW() - %s::interval
+                         ORDER BY captured_at DESC
+                         LIMIT 1
+                        """,
+                        ((ticker or "").upper(), f"{int(max_age_hours)} hours"),
+                    )
+                row = cur.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        log.debug("get_latest_sg_levels failed for %s: %s", ticker, e)
+        return None
+
+
 # ─────────────────────────── Smoke test ───────────────────────────
 
 def smoke_test() -> list[str]:

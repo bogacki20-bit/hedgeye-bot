@@ -422,6 +422,7 @@ def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
     pw = levels.get("put_wall")
     kg = levels.get("key_gamma_strike")
     hw = levels.get("hedge_wall")
+    gf = levels.get("gamma_flip")   # 2026-06-10 mig 034 — was missing pre-fix
 
     def _f(v):
         try:
@@ -429,27 +430,38 @@ def _sg_levels_suffix(sg_ctx: dict | None, price: float | None) -> str:
         except (TypeError, ValueError):
             return None
 
-    cw_f, pw_f, kg_f, hw_f = _f(cw), _f(pw), _f(kg), _f(hw)
+    cw_f, pw_f, kg_f, hw_f, gf_f = _f(cw), _f(pw), _f(kg), _f(hw), _f(gf)
     parts: list[str] = []
     if cw_f is not None: parts.append(f"call wall ${cw_f:g}")
     if pw_f is not None: parts.append(f"put wall ${pw_f:g}")
+    if gf_f is not None: parts.append(f"gamma flip ${gf_f:g}")
     if kg_f is not None: parts.append(f"key gamma ${kg_f:g}")
     if hw_f is not None: parts.append(f"hedge wall ${hw_f:g}")
     if not parts:
         return ""
 
-    # Anchor sentence using call wall first, falling back to put wall.
-    anchor_lv = cw_f if cw_f is not None else pw_f
-    anchor_name = "call wall" if cw_f is not None else "put wall"
+    # Anchor sentence: prefer gamma_flip (regime line — bullish above /
+    # bearish below — operator-prioritised 2026-06-10), then call wall,
+    # then put wall.
     try:
         p = float(price) if price is not None else None
     except (TypeError, ValueError):
         p = None
+
     anchor_phrase = ""
-    if p is not None and anchor_lv:
-        diff_pct = (p - anchor_lv) / anchor_lv * 100.0
-        side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
-        anchor_phrase = f" (price ${p:g} {side} {anchor_name} by {abs(diff_pct):.1f}%)"
+    if p is not None:
+        if gf_f is not None:
+            diff_pct = (p - gf_f) / gf_f * 100.0
+            side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
+            regime = "bullish gamma regime" if side == "above" else ("flip-zone" if side == "at" else "bearish gamma regime")
+            anchor_phrase = (f" ({side} gamma flip ${gf_f:g} by "
+                             f"{abs(diff_pct):.1f}% — {regime})")
+        elif cw_f is not None or pw_f is not None:
+            anchor_lv = cw_f if cw_f is not None else pw_f
+            anchor_name = "call wall" if cw_f is not None else "put wall"
+            diff_pct = (p - anchor_lv) / anchor_lv * 100.0
+            side = "above" if diff_pct > 0 else ("at" if abs(diff_pct) < 0.05 else "below")
+            anchor_phrase = f" (price ${p:g} {side} {anchor_name} by {abs(diff_pct):.1f}%)"
 
     return " | SG: " + " / ".join(parts) + anchor_phrase
 
@@ -697,9 +709,14 @@ def compose_recommendation(
         }
 
     # Hedgeye context still pulled from monitor_context (TTL-cached).
-    # SpotGamma stripped from live path 2026-05-24 — spotgamma_ctx is always
-    # {} now. spotgamma_snapshots / spotgamma_* corpus_documents continue to
-    # ingest for ML training; only the read into the alert template is gone.
+    #
+    # SpotGamma back into the alert path 2026-06-10 — DETERMINISTIC ONLY.
+    # Read the latest sg_levels row (migration 034) — free DB read, no LLM.
+    # Hierarchy: SG refines terrain (entry / level / structure); Hedgeye RR
+    # trend decides direction. SG NEVER overrides a Keith trend.
+    # Macro tickers without dealer-options coverage (BRENT, UST*, etc) are
+    # skipped — they never have sg_levels rows and we don't want the alert
+    # body to anchor on stale data.
     try:
         from monitor_context import get_hedgeye_ctx
         hedgeye_ctx = get_hedgeye_ctx() or {}
@@ -707,6 +724,26 @@ def compose_recommendation(
         log.warning(f"monitor_context lookup failed (continuing with empty ctx): {e}")
         hedgeye_ctx = {}
     spotgamma_ctx: dict = {}
+    if ticker.upper() not in MACRO_NO_SG_TICKERS:
+        try:
+            import db_pg
+            sg_row = db_pg.get_latest_sg_levels(ticker, max_age_hours=24) or {}
+            if sg_row:
+                # Flatten onto the dict shape _sg_levels_suffix expects.
+                # raw jsonb already supplies the same keys; keep both so
+                # _cross_source_suffix gets the structured fields too.
+                spotgamma_ctx = {
+                    "call_wall":         sg_row.get("call_wall"),
+                    "put_wall":          sg_row.get("put_wall"),
+                    "hedge_wall":        sg_row.get("hedge_wall"),
+                    "key_gamma_strike":  sg_row.get("key_gamma_strike"),
+                    "gamma_flip":        sg_row.get("gamma_flip"),
+                    "captured_at":       sg_row.get("captured_at"),
+                    "capture_type":      sg_row.get("capture_type"),
+                }
+        except Exception as e:
+            log.debug("price_monitor: sg_levels read failed for %s (%s)",
+                      ticker, e)
 
     # Suggested $ size: Style B (bps × account value, clamped at $1K per-fill
     # ceiling). Single source of truth is recommender.size_for(conviction, account).
