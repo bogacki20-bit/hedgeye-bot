@@ -2,16 +2,22 @@
 
 Reads config/hedgeye_doctrine.yaml and the live Quad state.
 
-As of 2026-05-24, the canonical Quad inputs are the env vars
-CURRENT_QUARTERLY_QUAD_OVERRIDE and CURRENT_MONTHLY_QUAD_OVERRIDE — the
-operator sets them after reading the macro show. The bot_state fallback
-(written historically by tools/detect_quads.py) is still consulted if env
-is missing, and a final default of "Quad 1" is logged loudly so a misconfig
-shows up in logs rather than silently routing trades.
+Quad input resolution (2026-06-10 fix — silent Quad-1 default removed):
+
+    1. bot_state.monthly_quad / .quarterly_quad   ← canonical operator seed
+    2. CURRENT_MONTHLY_QUAD_OVERRIDE / _QUARTERLY env vars  ← shell escape
+    3. raise QuadUnsetError                         ← halts the cycle
+
+No default Quad anywhere — the pre-fix behaviour silently routed every
+universe lookup against Quad 1, so a bot that started before the operator
+had set the Quad would issue Quad-1 doctrine alerts indistinguishable
+from real ones. Callers (price_monitor, proactive_scanner) catch
+QuadUnsetError, fire ONE Telegram "QUAD UNSET — halted" message and skip
+the cycle.
 
     load_doctrine()                              -> dict (cached)
-    current_quarterly_quad()                     -> "Quad N"
-    current_monthly_quad()                       -> "Quad N"
+    current_quarterly_quad()                     -> "Quad N"  (raises QuadUnsetError)
+    current_monthly_quad()                       -> "Quad N"  (raises QuadUnsetError)
     universe_for_quad(quad, side)                -> [tickers]
     asset_class_for(ticker)                      -> "equities" | ...
     position_size_cap(ticker, side, acct_value)  -> max dollars
@@ -37,7 +43,14 @@ log = logging.getLogger(__name__)
 _DOCTRINE_PATH = Path(__file__).resolve().parent.parent / "config" / "hedgeye_doctrine.yaml"
 
 _VALID_QUADS = {"Quad 1", "Quad 2", "Quad 3", "Quad 4"}
-_DEFAULT_QUAD = "Quad 1"
+
+
+class QuadUnsetError(RuntimeError):
+    """Raised when neither bot_state nor env supplies a Quad value.
+
+    Callers (price_monitor, proactive_scanner) catch this, emit ONE
+    Telegram halt notice and skip the cycle rather than silently routing
+    against a default Quad. See module docstring."""
 
 
 @functools.lru_cache(maxsize=1)
@@ -57,63 +70,77 @@ def _normalize_quad(value: Optional[str]) -> Optional[str]:
     return None
 
 
-def _quad_from_bot_state(key: str) -> Optional[str]:
-    """Read a Quad value from the bot_state table; None if unavailable."""
+def _quad_from_bot_state(*keys: str) -> Optional[str]:
+    """Read a Quad value from bot_state, trying each key in order; None if
+    unavailable. Multi-key form supports the post-2026-06-10 short keys
+    (`monthly_quad`, `quarterly_quad`) with fallback to the legacy
+    `current_monthly_quad` / `current_quarterly_quad` rows tools/detect_quads.py
+    used to write."""
     try:
         import db_pg
         with db_pg.get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT value FROM bot_state WHERE key = %s", (key,))
-                row = cur.fetchone()
-        if row and row[0]:
-            return _normalize_quad(row[0])
-    except Exception as e:  # table missing / DB down — fall back to default
-        log.debug("bot_state lookup failed for %s (%s)", key, e)
+                for k in keys:
+                    cur.execute("SELECT value FROM bot_state WHERE key = %s", (k,))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        q = _normalize_quad(row[0])
+                        if q:
+                            return q
+    except Exception as e:  # table missing / DB down
+        log.debug("bot_state lookup failed for %s (%s)", keys, e)
     return None
 
 
 def current_quarterly_quad() -> str:
     """Active QUARTERLY Quad (strategic).
 
-    Canonical: CURRENT_QUARTERLY_QUAD_OVERRIDE env var (set by operator).
-    Fallback: bot_state row (historical autodetect path; disabled by default).
-    Final: _DEFAULT_QUAD with a loud log line so misconfig is visible.
+    Resolution: bot_state.quarterly_quad → CURRENT_QUARTERLY_QUAD_OVERRIDE
+    env → raise QuadUnsetError. No default — silent Quad-1 routing was
+    causing the bot to issue Quad-1 doctrine alerts whenever the operator
+    hadn't seeded the Quad yet (2026-06-10 architectural fix).
     """
+    state = _quad_from_bot_state("quarterly_quad", "current_quarterly_quad")
+    if state:
+        return state
     override = _normalize_quad(os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE"))
     if override:
         return override
-    state = _quad_from_bot_state("current_quarterly_quad")
-    if state:
-        log.warning("CURRENT_QUARTERLY_QUAD_OVERRIDE not set; using bot_state "
-                    "fallback %s. Set the env var to make Quad input explicit.",
-                    state)
-        return state
-    log.warning("No quarterly Quad input found (env or bot_state); defaulting "
-                "to %s. Set CURRENT_QUARTERLY_QUAD_OVERRIDE.", _DEFAULT_QUAD)
-    return _DEFAULT_QUAD
+    raise QuadUnsetError(
+        "quarterly Quad unset — seed bot_state.quarterly_quad (or set "
+        "CURRENT_QUARTERLY_QUAD_OVERRIDE) before running doctrine lookups"
+    )
 
 
 def current_monthly_quad() -> str:
     """Active MONTHLY Quad (tactical).
 
-    Canonical: CURRENT_MONTHLY_QUAD_OVERRIDE env var (set by operator).
-    Fallback: bot_state row, then the active quarterly Quad.
+    Resolution: bot_state.monthly_quad → CURRENT_MONTHLY_QUAD_OVERRIDE
+    env → raise QuadUnsetError. No silent fall-through to the quarterly
+    Quad — the operator's monthly read can disagree with the quarterly
+    and routing tactical alerts off the wrong frame is exactly the
+    failure mode this fix exists to prevent.
     """
+    state = _quad_from_bot_state("monthly_quad", "current_monthly_quad")
+    if state:
+        return state
     override = _normalize_quad(os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE"))
     if override:
         return override
-    state = _quad_from_bot_state("current_monthly_quad")
-    if state:
-        log.warning("CURRENT_MONTHLY_QUAD_OVERRIDE not set; using bot_state "
-                    "fallback %s. Set the env var to make Quad input explicit.",
-                    state)
-        return state
-    return current_quarterly_quad()
+    raise QuadUnsetError(
+        "monthly Quad unset — seed bot_state.monthly_quad (or set "
+        "CURRENT_MONTHLY_QUAD_OVERRIDE) before running doctrine lookups"
+    )
 
 
 def universe_for_quad(quad: str, side: str = "longs") -> list[str]:
-    """Flattened favored ticker list for `quad` on `side` ('longs'|'shorts')."""
-    q = _normalize_quad(quad) or _DEFAULT_QUAD
+    """Flattened favored ticker list for `quad` on `side` ('longs'|'shorts').
+
+    Raises QuadUnsetError when `quad` can't be normalized (was returning
+    Quad 1's universe silently on garbage input)."""
+    q = _normalize_quad(quad)
+    if not q:
+        raise QuadUnsetError(f"universe_for_quad: unrecognized quad {quad!r}")
     side = "shorts" if str(side).lower().startswith("short") else "longs"
     block = (load_doctrine().get("quad_universe", {}).get(q, {}) or {}).get(side, {})
     out: list[str] = []

@@ -936,6 +936,30 @@ def run_monitor_cycle(dry_run: bool = False) -> dict:
 
     import db_pg  # lazy
 
+    # Quad preflight — doctrine raises QuadUnsetError when neither bot_state
+    # nor env supplies a Quad value (2026-06-10 fix: no silent Quad-1
+    # default). One Telegram halt notice, then skip the cycle. The same
+    # check exists in proactive_scanner.scan() — they call the same
+    # underlying doctrine functions, so guarding here keeps the monitor
+    # cycle from blowing up inside compose_recommendation's quad suffix.
+    try:
+        from tools.doctrine import (current_monthly_quad,
+                                    current_quarterly_quad,
+                                    QuadUnsetError)
+        current_quarterly_quad()
+        current_monthly_quad()
+    except QuadUnsetError as e:
+        log.error("price_monitor halted — Quad unset: %s", e)
+        if not dry_run:
+            try:
+                from notifier import send_telegram
+                send_telegram("QUAD UNSET — halted",
+                              f"price_monitor skipping cycle: {e}")
+            except Exception as exc:
+                log.warning("Telegram halt notice failed: %s", exc)
+        summary["quad_unset"] = True
+        return summary
+
     rows = db_pg.get_active_risk_ranges()
     summary["tickers_examined"] = len(rows)
     if not rows:

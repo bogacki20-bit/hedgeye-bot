@@ -59,13 +59,14 @@ DEFAULT_DEDUP_HOURS    = 4
 
 def _active_quad(use_monthly: bool = False) -> str:
     """Active Quad for universe/alignment — quarterly (strategic) by
-    default, monthly (tactical) when --use-monthly-quad is set."""
-    try:
-        from tools.doctrine import current_monthly_quad, current_quarterly_quad
-        return current_monthly_quad() if use_monthly else current_quarterly_quad()
-    except Exception as e:
-        log.warning("scanner: doctrine quad lookup failed (%s); default Quad 1", e)
-        return "Quad 1"
+    default, monthly (tactical) when --use-monthly-quad is set.
+
+    Lets QuadUnsetError propagate (2026-06-10): the old `default Quad 1`
+    branch was the silent failure mode the surgery is meant to kill.
+    Callers that can't tolerate it must preflight via scan().
+    """
+    from tools.doctrine import current_monthly_quad, current_quarterly_quad
+    return current_monthly_quad() if use_monthly else current_quarterly_quad()
 
 
 def _resolve_watchlist(explicit: Optional[list[str]],
@@ -427,6 +428,36 @@ def scan(tickers: Optional[list[str]] = None,
     Anthropic API tolerates 8 concurrent messages calls comfortably. The
     network-bound legs (yfinance / MFR) also parallelise well.
     """
+    # Quad preflight — doctrine raises QuadUnsetError when neither bot_state
+    # nor env supplies a Quad value (2026-06-10 fix: no silent Quad-1
+    # default). One Telegram halt notice, return an empty-but-shaped
+    # summary so the caller log lines stay legible.
+    try:
+        from tools.doctrine import (current_monthly_quad,
+                                    current_quarterly_quad,
+                                    QuadUnsetError)
+        current_quarterly_quad()
+        current_monthly_quad()
+    except QuadUnsetError as e:
+        log.error("scanner halted — Quad unset: %s", e)
+        if not dry_run:
+            try:
+                from notifier import send_telegram
+                send_telegram("QUAD UNSET — halted",
+                              f"proactive_scanner skipping cycle: {e}")
+            except Exception as exc:
+                log.warning("Telegram halt notice failed: %s", exc)
+        now = datetime.now(timezone.utc).isoformat()
+        return {
+            "started_at":  now,
+            "finished_at": now,
+            "watchlist":   [],
+            "counts":      {"actionable": 0, "alerted": 0, "deduped": 0,
+                            "errors": 0, "quad_unset": 1},
+            "per_ticker":  [],
+            "dry_run":     dry_run,
+        }
+
     watchlist = _resolve_watchlist(tickers, max_tickers, priority=priority,
                                     quad_filtered=quad_filtered,
                                     use_monthly_quad=use_monthly_quad,
