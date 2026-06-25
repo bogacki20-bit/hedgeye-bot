@@ -7,10 +7,12 @@
 # textually present (the deltas) but cannot see the image content
 # without OCR.
 #
-# This file is unioned into the `signal_strength` source bucket by
-# tools.active_slice. Operator pastes the current SS list here
-# (copying from Keith's email image or the Hedgeye dashboard) and the
-# bot polls all of them.
+# This file is the AUTHORITATIVE `signal_strength` roster in
+# tools.active_slice — when non-empty it REPLACES the drift-prone
+# Add/Remove delta reconstruction (the SS full list is image-only in the
+# email, so accumulated deltas drift: the bot held 118 names vs the real
+# 78 on 2026-06-24). Operator pastes Keith's current full SS list here and
+# the bot polls EXACTLY these names. Empty list -> fall back to deltas.
 #
 # Format: one ticker per line under `tickers:`. Whitespace and case
 # are normalized on load. Empty list is fine — the bucket then falls
@@ -21,4 +23,83 @@
 # membership; the bot treats them as implicit-long by default. If you
 # need explicit short-side handling for SS tickers, add them to
 # operator_watchlist.yaml with a side annotation (future enhancement).
-tickers: []
+# Updated 2026-06-24 — Hedgeye Signal Strength: 78 names.
+tickers:
+  - AMAT
+  - RSI
+  - CZR
+  - MAR
+  - CSX
+  - MRVL
+  - LRCX
+  - VIK
+  - HST
+  - GLASF
+  - ROK
+  - LAMR
+  - LFST
+  - UNH
+  - URI
+  - APLE
+  - DDOG
+  - MNST
+  - PRMB
+  - ATZAF
+  - ATRO
+  - ILMN
+  - RHP
+  - BJRI
+  - HLT
+  - TXG
+  - LLY
+  - CHEF
+  - SNOW
+  - CRWD
+  - OKTA
+  - PANW
+  - MGM
+  - WST
+  - DLTR
+  - BROS
+  - CAKE
+  - RRGB
+  - JPM
+  - CFG
+  - KDP
+  - EXP
+  - KTB
+  - SJM
+  - VSXY
+  - ADDYY
+  - BRKR
+  - LYV
+  - CBRL
+  - ETSY
+  - TGT
+  - CASY
+  - KXIAY
+  - SG
+  - OMF
+  - RPBPF
+  - CAVA
+  - SBUX
+  - BRUN
+  - AXP
+  - SWBI
+  - REAL
+  - SYF
+  - AFRM
+  - XYZ
+  - FAF
+  - COMP
+  - DHI
+  - TOL
+  - OUT
+  - PCAR
+  - OC
+  - TT
+  - TTWO
+  - CCL
+  - RCL
+  - WRBY
+  - NVO

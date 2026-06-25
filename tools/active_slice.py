@@ -457,7 +457,15 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                 is_stale = (ss_latest is not None
                             and ss_age is not None
                             and ss_age > SOURCE_STALENESS_DAYS["signal_strength"])
-                if is_stale and not manual_ss:
+                if manual_ss:
+                    # AUTHORITATIVE override: when the operator maintains the full
+                    # SS list in ss_full_list.yaml it REPLACES the delta
+                    # reconstruction entirely — the SS email's full list is
+                    # image-only, so accumulated Add/Remove deltas drift (held 118
+                    # vs the real 78 on 2026-06-24). With the manual list present
+                    # the bot polls EXACTLY those names; ss_members is ignored.
+                    out["signal_strength"] = _dedup_sort(manual_ss)
+                elif is_stale:
                     out["stale_signal_strength"] = ss_members
                     log.info("active_slice: hedgeye_signal_strength "
                              "latest=%s is %dd old (>%dd); marked stale, "
@@ -465,8 +473,8 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                              ss_latest, int(ss_age),
                              SOURCE_STALENESS_DAYS["signal_strength"])
                 else:
-                    # Fresh OR operator gave us a manual list — union.
-                    out["signal_strength"] = _dedup_sort(ss_members + manual_ss)
+                    # No manual list — fall back to the delta reconstruction.
+                    out["signal_strength"] = ss_members
 
                 # ─── Keith's Signal Longs/Shorts (weekly text product) ──
                 # hedgeye_keiths_signals carries the FULL text-parsed long/
