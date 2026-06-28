@@ -260,3 +260,88 @@ def _commit_anchor(pending: dict) -> str:
     _set_bot_state("ss_last_anchor_date", today.isoformat())
     return (f"✅ SS anchor set: {len(upload)} names. Delta roster was {len(current)}; "
             f"corrected +{add or 'none'} −{rem or 'none'}.")
+
+
+# ─────────────────────────── Friday anchor prompt + re-ping (step 5) ───────────────────────────
+# Prompt-only — writes ONLY bot_state (ss_last_prompt_date), never the roster.
+
+PROMPT_DATE_KEY = "ss_last_prompt_date"
+ANCHOR_FRESH_DAYS = 7
+_FRIDAY_MSG = ("📋 Friday Signal Strength roster anchor.\n"
+               "Paste this week's FULL SS list, then reply CONFIRM:\n"
+               "SS: TICK1 TICK2 TICK3 ...")
+
+
+def _et_now():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/New_York"))
+
+
+def _ss_email_parsed_today(now_et) -> bool:
+    """True if today's (ET) Signal Strength email is already parsed."""
+    import db_pg
+    start_utc = now_et.replace(hour=0, minute=0, second=0,
+                               microsecond=0).astimezone(timezone.utc)
+    with db_pg.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM hedgeye_emails_raw "
+                "WHERE subject ILIKE %s AND classified_as='signal_strength' "
+                "AND received_at >= %s LIMIT 1",
+                ("%Signal Strength Stocks%", start_utc))
+            return cur.fetchone() is not None
+
+
+def _send_prompt(text: str) -> None:
+    try:
+        from notifier import send_telegram
+        send_telegram("SS Roster", text, priority=1)
+    except Exception as e:
+        log.warning("ss anchor prompt send failed: %s", e)
+
+
+def maybe_send_anchor_prompt(now_et=None) -> str:
+    """Friday >=6:30pm ET (after that day's SS email is parsed) -> upload prompt;
+    a non-Friday with a stale anchor -> once/day reminder. Throttled once/day via
+    bot_state.ss_last_prompt_date; reminders STOP once an anchor lands (ss_last_anchor_date
+    fresh). Writes ONLY bot_state — never the roster. Returns a short status."""
+    if now_et is None:
+        try:
+            now_et = _et_now()
+        except Exception as e:
+            log.warning("ss anchor prompt: ET tz unavailable (%s) — skipping", e)
+            return "skip:no-tz"
+    today = now_et.date().isoformat()
+    if _get_bot_state(PROMPT_DATE_KEY) == today:
+        return "skip:already-prompted-today"
+
+    last_anchor = _get_bot_state("ss_last_anchor_date")
+    days_stale, anchor_fresh = None, False
+    if last_anchor:
+        try:
+            la = datetime.fromisoformat(last_anchor).date()
+            days_stale = (now_et.date() - la).days
+            anchor_fresh = days_stale < ANCHOR_FRESH_DAYS
+        except Exception:
+            pass
+
+    is_friday = now_et.weekday() == 4
+    after_window = (now_et.hour, now_et.minute) >= (18, 30)   # 6:30pm ET
+
+    if is_friday and after_window:
+        if last_anchor == today:
+            return "skip:anchored-today"
+        if not _ss_email_parsed_today(now_et):
+            return "skip:friday-email-not-parsed-yet"   # wait for the day's delta
+        _send_prompt(_FRIDAY_MSG)
+        _set_bot_state(PROMPT_DATE_KEY, today)
+        return "sent:friday-prompt"
+
+    if not is_friday and not anchor_fresh:
+        n = f"{days_stale} days" if days_stale is not None else "not set"
+        _send_prompt(f"⏰ SS roster anchor is stale ({n}). Upload when you can:\n"
+                     "SS: TICK1 TICK2 ...\nRunning on the last anchor + daily deltas meanwhile.")
+        _set_bot_state(PROMPT_DATE_KEY, today)
+        return "sent:reminder"
+
+    return "skip:nothing-due"

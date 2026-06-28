@@ -236,6 +236,26 @@ if __name__ == "__main__":
     else:
         log.info("MFR watchlist sync disabled (MFR_WATCHLIST_SYNC=false).")
 
+    # Friday SS-roster anchor prompt + stale re-ping (PROMPT ONLY — writes no roster).
+    # Toggle off via SS_ANCHOR_PROMPT=false.
+    if os.getenv("SS_ANCHOR_PROMPT", "true").lower() in ("true", "1", "yes"):
+        def _ss_anchor_prompt_loop():
+            import time
+            from tools.ss_roster import maybe_send_anchor_prompt
+            while True:
+                try:
+                    status = maybe_send_anchor_prompt()
+                    if status.startswith("sent"):
+                        log.info("ss_anchor_prompt: %s", status)
+                except Exception as e:
+                    log.error("ss_anchor_prompt loop error: %s", e)
+                time.sleep(1800)  # check every 30 min
+        threading.Thread(target=_ss_anchor_prompt_loop, daemon=True,
+                         name="ss-anchor-prompt").start()
+        log.info("SS anchor prompt thread started.")
+    else:
+        log.info("SS anchor prompt disabled (SS_ANCHOR_PROMPT=false).")
+
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via
