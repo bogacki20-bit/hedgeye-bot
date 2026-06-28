@@ -256,28 +256,37 @@ if __name__ == "__main__":
     else:
         log.info("SS anchor prompt disabled (SS_ANCHOR_PROMPT=false).")
 
-    # Nightly MFR "to-add" batch (READ-ONLY — tells me what to activate in MFR; no
-    # write, no write token). ~8pm ET, source-agnostic (tools/enrollment_sources.REGISTRY),
-    # quiet on empty nights. Toggle MFR_TOADD_ENABLED=false.
-    if os.getenv("MFR_TOADD_ENABLED", "true").lower() in ("true", "1", "yes"):
-        def _mfr_toadd_loop():
+    # MFR enrollment helpers (READ-ONLY — tell me what to activate in MFR; no write token):
+    #   nightly to-add (go-forward adds, ~8pm ET) + weekly backlog sweep (full catch-up,
+    #   Sun ~7pm ET, once/ISO-week, persisted-flag). Source-agnostic (enrollment_sources.REGISTRY).
+    #   Toggles: MFR_TOADD_ENABLED / MFR_BACKLOG_ENABLED. (On-demand "MFR BACKLOG" via Telegram.)
+    _toadd_on = os.getenv("MFR_TOADD_ENABLED", "true").lower() in ("true", "1", "yes")
+    _backlog_on = os.getenv("MFR_BACKLOG_ENABLED", "true").lower() in ("true", "1", "yes")
+    if _toadd_on or _backlog_on:
+        def _mfr_enroll_loop():
             import time
             from zoneinfo import ZoneInfo
             from datetime import datetime as _dt
             while True:
                 try:
-                    if _dt.now(ZoneInfo("America/New_York")).hour >= 20:  # 8pm ET window
+                    now_et = _dt.now(ZoneInfo("America/New_York"))
+                    if _toadd_on and now_et.hour >= 20:                       # nightly, 8pm ET
                         from tools.enrollment import run_nightly
                         st = run_nightly()
                         if st.startswith("sent"):
                             log.info("mfr_toadd: %s", st)
+                    if _backlog_on and now_et.weekday() == 6 and now_et.hour >= 19:  # weekly, Sun 7pm ET
+                        from tools.enrollment import run_weekly_backlog
+                        st = run_weekly_backlog()
+                        if st.startswith("sent"):
+                            log.info("mfr_backlog: %s", st)
                 except Exception as e:
-                    log.error("mfr_toadd loop error: %s", e)
+                    log.error("mfr_enroll loop error: %s", e)
                 time.sleep(1800)  # check every 30 min
-        threading.Thread(target=_mfr_toadd_loop, daemon=True, name="mfr-toadd").start()
-        log.info("MFR to-add nightly thread started.")
+        threading.Thread(target=_mfr_enroll_loop, daemon=True, name="mfr-enroll").start()
+        log.info("MFR enroll thread started (to-add=%s, backlog=%s).", _toadd_on, _backlog_on)
     else:
-        log.info("MFR to-add nightly disabled (MFR_TOADD_ENABLED=false).")
+        log.info("MFR enroll disabled (MFR_TOADD_ENABLED & MFR_BACKLOG_ENABLED both false).")
 
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route

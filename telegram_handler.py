@@ -319,6 +319,16 @@ def _run_listener(token, allowed_chat_id):
                 if ss_reply is not None:
                     _send_message(token, chat_id, ss_reply)
                     continue
+                # MFR backlog on-demand command (read-only): "MFR BACKLOG" / "/mfrbacklog".
+                try:
+                    from tools.enrollment import handle_backlog_command
+                    bl = handle_backlog_command(text)
+                except Exception as e:
+                    log.error(f"backlog command failed: {e}", exc_info=True)
+                    bl = None
+                if bl is not None:
+                    _send_message(token, chat_id, bl)
+                    continue
                 # Try to parse as a structured decision; fall back to echo if not.
                 decision = parse_decision(text)
                 if decision:

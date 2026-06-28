@@ -11,6 +11,7 @@ tools/enrollment_sources.REGISTRY — THIS job never changes.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime
 
@@ -34,6 +35,16 @@ class TableSource:
             sql += f" AND {self.where}"
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql, (day,))
+            return {r[0].upper() for r in cur.fetchall() if r[0]}
+
+    def current_names(self) -> set:
+        """All currently-on tickers (for the backlog sweep) — WHERE clause only, no date."""
+        import db_pg
+        sql = f"SELECT DISTINCT {self.ticker_col} FROM {self.table}"
+        if self.where:
+            sql += f" WHERE {self.where}"
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(sql)
             return {r[0].upper() for r in cur.fetchall() if r[0]}
 
 
@@ -109,3 +120,104 @@ def run_nightly() -> str:
         return f"error:{e}"
     _set_state(LAST_SENT_KEY, today)
     return f"sent:{len(r['to_add'])}"
+
+
+# ─────────────────────────── Backlog sweep (full catch-up) ───────────────────────────
+# Weekly + on-demand: ALL roster names across sources not yet active in MFR (not just
+# today's adds). Read-only. A lightweight "persisted" guard tracks weeks-seen per
+# un-enrolled ticker so the weekly sweep flags long-stale names instead of silently
+# re-listing them.
+
+BACKLOG_WEEK_KEY = "mfr_backlog_last_week"   # ISO "YYYY-Www" — once/week throttle
+BACKLOG_SEEN_KEY = "mfr_backlog_seen"        # JSON {ticker: weeks_seen_unenrolled}
+PERSIST_WEEKS = 3
+
+
+def _iso_week(d=None) -> str:
+    d = d or _today_et()
+    y, w, _ = d.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def _load_seen() -> dict:
+    v = _get_state(BACKLOG_SEEN_KEY)
+    if not v:
+        return {}
+    try:
+        return json.loads(v)
+    except Exception:
+        return {}
+
+
+def compile_backlog() -> dict:
+    """Read-only. ALL current roster names across registered sources that are NOT active
+    in MFR (minus KNOWN_UNCOVERABLE). The full catch-up set, not just today's adds."""
+    from tools.enrollment_sources import REGISTRY, KNOWN_UNCOVERABLE
+    full, per_source = set(), {}
+    for src in REGISTRY:
+        try:
+            s = src.current_names()
+        except Exception as e:
+            log.warning("backlog source %s failed: %s", getattr(src, "name", "?"), e)
+            s = set()
+        per_source[src.name] = s
+        full |= s
+    active = _mfr_active()
+    to_add = sorted((full - active) - set(KNOWN_UNCOVERABLE))
+    return {"to_add": to_add, "per_source": {k: sorted(v) for k, v in per_source.items()},
+            "full_count": len(full), "active_count": len(active)}
+
+
+def run_weekly_backlog() -> str:
+    """Once/ISO-week. Compile the backlog, bump weeks-seen per still-un-enrolled ticker
+    (drop ones that cleared), and Telegram the list — flagging names persisted
+    >= PERSIST_WEEKS separately ('enroll or dismiss') rather than silently re-listing.
+    Quiet when the backlog is clear. No MFR write."""
+    wk = _iso_week()
+    if _get_state(BACKLOG_WEEK_KEY) == wk:
+        return "skip:already-swept-this-week"
+    r = compile_backlog()
+    to_add = r["to_add"]
+    seen = _load_seen()
+    new_seen = {t: int(seen.get(t, 0)) + 1 for t in to_add}   # +1 for still-listed; cleared ones drop
+    _set_state(BACKLOG_SEEN_KEY, json.dumps(new_seen))
+    _set_state(BACKLOG_WEEK_KEY, wk)
+    if not to_add:
+        return "skip:backlog-clear"
+    persisted = [t for t in to_add if new_seen[t] >= PERSIST_WEEKS]
+    fresh = [t for t in to_add if t not in persisted]
+    prov = ", ".join(f"{k}={len(v)}" for k, v in r["per_source"].items() if v)
+    lines = [f"🧹 MFR backlog ({len(to_add)}) [{prov}] — roster names not yet active in MFR:"]
+    if fresh:
+        lines.append(" ".join(fresh))
+    if persisted:
+        lines.append(f"⚠️ persisted ≥{PERSIST_WEEKS} wks — ENROLL or DISMISS "
+                     f"(add to KNOWN_UNCOVERABLE): " + " ".join(persisted))
+    lines.append("(paste names into MFR → Activate Assets)")
+    try:
+        from notifier import send_telegram
+        send_telegram("MFR backlog", "\n".join(lines), priority=1)
+    except Exception as e:
+        log.warning("backlog send failed: %s", e)
+        return f"error:{e}"
+    return f"sent:{len(to_add)}(persisted={len(persisted)})"
+
+
+def handle_backlog_command(text: str):
+    """On-demand Telegram trigger: 'MFR BACKLOG' / '/mfrbacklog' -> reply with the full
+    backlog now (read-only; no throttle, no weeks-seen bump). Returns None if not the
+    command so the listener falls through to normal handling."""
+    if not text or text.strip().upper() not in ("MFR BACKLOG", "/MFRBACKLOG"):
+        return None
+    r = compile_backlog()
+    to_add = r["to_add"]
+    if not to_add:
+        return "✅ MFR backlog clear — every roster name is active in MFR (excl. known-uncoverable)."
+    seen = _load_seen()
+    persisted = [t for t in to_add if int(seen.get(t, 0)) >= PERSIST_WEEKS]
+    prov = ", ".join(f"{k}={len(v)}" for k, v in r["per_source"].items() if v)
+    lines = [f"🧹 MFR backlog ({len(to_add)}) [{prov}]:", " ".join(to_add)]
+    if persisted:
+        lines.append(f"⚠️ persisted ≥{PERSIST_WEEKS} wks: " + " ".join(persisted))
+    lines.append("(paste into MFR → Activate Assets)")
+    return "\n".join(lines)
