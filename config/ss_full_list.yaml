@@ -14,6 +14,10 @@
 # 78 on 2026-06-24). Operator pastes Keith's current full SS list here and
 # the bot polls EXACTLY these names. Empty list -> fall back to deltas.
 #
+# NOTE: this is a manual snapshot — re-paste when Hedgeye changes the list.
+# Self-updating from daily deltas is the next build (see SIGNAL_STRENGTH_TODO.md
+# Priority 0).
+#
 # Format: one ticker per line under `tickers:`. Whitespace and case
 # are normalized on load. Empty list is fine — the bucket then falls
 # back to the accumulated-deltas-only membership.
@@ -23,83 +27,91 @@
 # membership; the bot treats them as implicit-long by default. If you
 # need explicit short-side handling for SS tickers, add them to
 # operator_watchlist.yaml with a side annotation (future enhancement).
-# Updated 2026-06-24 — Hedgeye Signal Strength: 78 names.
+#
+# Updated 2026-06-26 — Hedgeye Signal Strength: 80 names.
+#   Rebuilt from the 06-24 list (78) + parsed email deltas:
+#     06-25 "80 Stocks (5 Added, 3 Removed)":  +BBWI HD KMX RH SN  / -CASY CAVA FAF
+#     06-26 "80 Stocks (2 Added, 2 Removed)":  +BTI RKT           / -ATZAF RPBPF
+#   Removed names stay enrolled in MFR (enroll-never-remove) — roster edits
+#   write nothing to the MFR account.
 tickers:
+  - ADDYY
+  - AFRM
   - AMAT
-  - RSI
-  - CZR
-  - MAR
+  - APLE
+  - ATRO
+  - AXP
+  - BBWI
+  - BJRI
+  - BRKR
+  - BROS
+  - BRUN
+  - BTI
+  - CAKE
+  - CBRL
+  - CCL
+  - CFG
+  - CHEF
+  - COMP
+  - CRWD
   - CSX
-  - MRVL
-  - LRCX
-  - VIK
-  - HST
+  - CZR
+  - DDOG
+  - DHI
+  - DLTR
+  - ETSY
+  - EXP
   - GLASF
-  - ROK
+  - HD
+  - HLT
+  - HST
+  - ILMN
+  - JPM
+  - KDP
+  - KMX
+  - KTB
+  - KXIAY
   - LAMR
   - LFST
-  - UNH
-  - URI
-  - APLE
-  - DDOG
-  - MNST
-  - PRMB
-  - ATZAF
-  - ATRO
-  - ILMN
-  - RHP
-  - BJRI
-  - HLT
-  - TXG
   - LLY
-  - CHEF
-  - SNOW
-  - CRWD
-  - OKTA
-  - PANW
-  - MGM
-  - WST
-  - DLTR
-  - BROS
-  - CAKE
-  - RRGB
-  - JPM
-  - CFG
-  - KDP
-  - EXP
-  - KTB
-  - SJM
-  - VSXY
-  - ADDYY
-  - BRKR
+  - LRCX
   - LYV
-  - CBRL
-  - ETSY
-  - TGT
-  - CASY
-  - KXIAY
-  - SG
-  - OMF
-  - RPBPF
-  - CAVA
-  - SBUX
-  - BRUN
-  - AXP
-  - SWBI
-  - REAL
-  - SYF
-  - AFRM
-  - XYZ
-  - FAF
-  - COMP
-  - DHI
-  - TOL
-  - OUT
-  - PCAR
+  - MAR
+  - MGM
+  - MNST
+  - MRVL
+  - NVO
   - OC
+  - OKTA
+  - OMF
+  - OUT
+  - PANW
+  - PCAR
+  - PRMB
+  - RCL
+  - REAL
+  - RH
+  - RHP
+  - RKT
+  - ROK
+  - RRGB
+  - RSI
+  - SBUX
+  - SG
+  - SJM
+  - SN
+  - SNOW
+  - SWBI
+  - SYF
+  - TGT
+  - TOL
   - TT
   - TTWO
-  - CCL
-  - RCL
+  - TXG
+  - UNH
+  - URI
+  - VIK
+  - VSXY
   - WRBY
-  - NVO
+  - WST
+  - XYZ

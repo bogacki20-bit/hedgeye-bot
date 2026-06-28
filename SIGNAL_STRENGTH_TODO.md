@@ -13,6 +13,30 @@ five SS-family publications. Two of the five (daily SS Stocks + Position
 Monitors / Founder's Choice) carry their actionable data in PNG images
 that the text parser cannot read.
 
+## Priority 0 (operator request 2026-06-28) — self-updating roster from daily deltas
+
+**Goal.** Stop the manual re-paste of `config/ss_full_list.yaml`. The roster should
+self-update: apply each day's parsed Add/Remove deltas to the authoritative list
+automatically so it tracks Hedgeye without operator intervention. (Motivating event:
+the YAML was set to the 06-24 list of 78; the 06-25 and 06-26 emails changed it to 80,
+and the polling roster stayed frozen at 78 until a manual re-paste on 06-28.)
+
+**Behavior.**
+- Apply `hedgeye_signal_strength` daily deltas on top of the last known full list
+  (rewrite the YAML programmatically, or move the canonical roster into the DB).
+- **Removed names:** drop OFF the alert/polling roster immediately, and write them to a
+  **dated history table** (e.g. `ss_roster_history(ticker, added_on, removed_on)`) so we
+  keep the audit trail of when a name left.
+- **Removed names STAY enrolled in MFR (enroll-never-remove):** dropping from the roster
+  must NOT touch the MFR account or `mfr_snapshots`. Confirmed 2026-06-28 — roster edits
+  write zero to MFR (ATZAF/CASY/CAVA/FAF stayed in the MFR account after leaving the roster).
+- **Drift anchor:** the full list is image-only, so a pure-delta rebuild slowly diverges
+  from Hedgeye's actual list (this is why the YAML exists). Pair with Priority 1 (Vision
+  OCR of the SS PNG) to get a periodic ground-truth full list the deltas apply on top of.
+
+**Why not now.** Did the manual YAML update to Friday's 80 on 2026-06-28 instead; this is
+the next build, and it depends on Priority 1 (Vision) for a drift-free anchor.
+
 ## Priority 1 — Daily SS Stocks PNG → Claude Vision OCR
 
 **Context.** The "Signal Strength Stocks: 85 Stocks (M Added, K Removed)"
