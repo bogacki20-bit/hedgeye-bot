@@ -256,6 +256,29 @@ if __name__ == "__main__":
     else:
         log.info("SS anchor prompt disabled (SS_ANCHOR_PROMPT=false).")
 
+    # Nightly MFR "to-add" batch (READ-ONLY — tells me what to activate in MFR; no
+    # write, no write token). ~8pm ET, source-agnostic (tools/enrollment_sources.REGISTRY),
+    # quiet on empty nights. Toggle MFR_TOADD_ENABLED=false.
+    if os.getenv("MFR_TOADD_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _mfr_toadd_loop():
+            import time
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            while True:
+                try:
+                    if _dt.now(ZoneInfo("America/New_York")).hour >= 20:  # 8pm ET window
+                        from tools.enrollment import run_nightly
+                        st = run_nightly()
+                        if st.startswith("sent"):
+                            log.info("mfr_toadd: %s", st)
+                except Exception as e:
+                    log.error("mfr_toadd loop error: %s", e)
+                time.sleep(1800)  # check every 30 min
+        threading.Thread(target=_mfr_toadd_loop, daemon=True, name="mfr-toadd").start()
+        log.info("MFR to-add nightly thread started.")
+    else:
+        log.info("MFR to-add nightly disabled (MFR_TOADD_ENABLED=false).")
+
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via

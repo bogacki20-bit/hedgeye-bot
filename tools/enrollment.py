@@ -1,0 +1,111 @@
+"""Source-agnostic nightly MFR 'to-add' batch.
+
+READS ONLY — roster tables via db_pg + mfr_client.list_watchlist(); no MFR write,
+no write token. Unions "names added today" across ALL registered EnrollableSources,
+removes anything already active in MFR (and known-uncoverable), and Telegrams a clean
+space-separated to-add list to paste into MFR → Activate Assets. Quiet on empty nights;
+throttled once/night.
+
+Adding a future source (Retail GO, Financials GO, ETF Pro Plus, …) = register it in
+tools/enrollment_sources.REGISTRY — THIS job never changes.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime
+
+log = logging.getLogger(__name__)
+LAST_SENT_KEY = "mfr_toadd_last_sent_date"
+
+
+class TableSource:
+    """An EnrollableSource backed by a table with an add-date per ticker.
+    Implements the uniform interface: names_added_on(day) -> set[str]."""
+
+    def __init__(self, name, table, *, ticker_col="ticker", date_col="added_on",
+                 where="removed_on IS NULL"):
+        self.name, self.table = name, table
+        self.ticker_col, self.date_col, self.where = ticker_col, date_col, where
+
+    def names_added_on(self, day) -> set:
+        import db_pg
+        sql = f"SELECT DISTINCT {self.ticker_col} FROM {self.table} WHERE {self.date_col} = %s"
+        if self.where:
+            sql += f" AND {self.where}"
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, (day,))
+            return {r[0].upper() for r in cur.fetchall() if r[0]}
+
+
+def _today_et() -> date:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).date()
+    except Exception:
+        return datetime.utcnow().date()
+
+
+def _mfr_active() -> set:
+    import mfr_client
+    return {t.upper() for t in (mfr_client.list_watchlist() or [])}
+
+
+def _set_state(key, value):
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO bot_state (key, value, updated_at) VALUES (%s, %s, NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                    (key, value))
+        conn.commit()
+
+
+def _get_state(key):
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT value FROM bot_state WHERE key=%s", (key,))
+        r = cur.fetchone()
+    return r[0] if r and r[0] else None
+
+
+def compile_to_add(day=None) -> dict:
+    """Read-only. Union today's adds across all registered sources, drop names already
+    active in MFR and known-uncoverable ones. Returns a summary dict (no Telegram)."""
+    from tools.enrollment_sources import REGISTRY, KNOWN_UNCOVERABLE
+    day = day or _today_et()
+    added, per_source = set(), {}
+    for src in REGISTRY:
+        try:
+            s = src.names_added_on(day)
+        except Exception as e:
+            log.warning("enroll source %s failed: %s", getattr(src, "name", "?"), e)
+            s = set()
+        per_source[src.name] = s
+        added |= s
+    active = _mfr_active()
+    to_add = sorted((added - active) - set(KNOWN_UNCOVERABLE))
+    return {"day": str(day), "to_add": to_add,
+            "per_source": {k: sorted(v) for k, v in per_source.items()},
+            "added_count": len(added), "active_count": len(active)}
+
+
+def run_nightly() -> str:
+    """Compile + Telegram the to-add list. Once/night (bot_state throttle); quiet when
+    there's nothing to add. Returns a status string. No write to MFR."""
+    today = str(_today_et())
+    if _get_state(LAST_SENT_KEY) == today:
+        return "skip:already-sent-today"
+    r = compile_to_add()
+    if not r["to_add"]:
+        _set_state(LAST_SENT_KEY, today)  # mark done so we stay quiet the rest of the night
+        return "skip:nothing-to-add"
+    prov = ", ".join(f"{k}={len(v)}" for k, v in r["per_source"].items() if v)
+    msg = (f"🆕 MFR to-add ({len(r['to_add'])}) [{prov}]:\n" + " ".join(r["to_add"])
+           + "\n(paste into MFR → Activate Assets)")
+    try:
+        from notifier import send_telegram
+        send_telegram("MFR to-add", msg, priority=1)
+    except Exception as e:
+        log.warning("mfr to-add send failed: %s", e)
+        return f"error:{e}"
+    _set_state(LAST_SENT_KEY, today)
+    return f"sent:{len(r['to_add'])}"
