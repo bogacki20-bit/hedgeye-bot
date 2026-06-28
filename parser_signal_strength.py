@@ -191,6 +191,17 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
         return summary
 
     summary["upsert"] = upsert_deltas(parsed, snapshot_date, message_id)
+
+    # Self-updating roster (step 3): apply deltas to ss_roster_history + count tripwire.
+    # Defensive — a roster-applier failure must NOT break email parsing.
+    try:
+        from tools.ss_roster import apply_deltas, parse_header_count
+        summary["roster"] = apply_deltas(
+            parsed["added"], parsed["removed"], snapshot_date,
+            source_email_id=message_id, header_count=parse_header_count(subject))
+    except Exception as e:
+        log.warning("ss_roster apply_deltas failed (email still parsed): %s", e)
+
     all_tickers = sorted(set(parsed["added"]) | set(parsed["removed"]))
     summary["noted_in_inventory"] = note_in_inventory(all_tickers, message_id)
     stamp_email_parsed(message_id)
