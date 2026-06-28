@@ -454,17 +454,38 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                     log.info("active_slice: ss_full_list.yaml contributes "
                              "%d tickers (manual override)", len(manual_ss))
 
+                # Authoritative roster precedence (self-updating roster, migration 039):
+                #   1. ss_roster_current (DB view) — live, no-redeploy canonical roster
+                #   2. ss_full_list.yaml (manual break-glass override)
+                #   3. delta reconstruction (ss_members) — last resort
+                # ss_roster_current may not exist on a pre-039 env, so probe under a
+                # SAVEPOINT — a missing view must not abort the outer transaction.
+                db_roster = []
+                try:
+                    cur.execute("SAVEPOINT ss_roster")
+                    cur.execute("SELECT ticker FROM ss_roster_current")
+                    db_roster = _dedup_sort([r[0] for r in cur.fetchall() if r[0]])
+                    cur.execute("RELEASE SAVEPOINT ss_roster")
+                except Exception as e:
+                    try:
+                        cur.execute("ROLLBACK TO SAVEPOINT ss_roster")
+                    except Exception:
+                        pass
+                    log.debug("active_slice: ss_roster_current unavailable (%s); "
+                              "falling back to yaml/deltas", e)
+
                 is_stale = (ss_latest is not None
                             and ss_age is not None
                             and ss_age > SOURCE_STALENESS_DAYS["signal_strength"])
-                if manual_ss:
-                    # AUTHORITATIVE override: when the operator maintains the full
-                    # SS list in ss_full_list.yaml it REPLACES the delta
-                    # reconstruction entirely — the SS email's full list is
-                    # image-only, so accumulated Add/Remove deltas drift (held 118
-                    # vs the real 78 on 2026-06-24). With the manual list present
-                    # the bot polls EXACTLY those names; ss_members is ignored.
+                if db_roster:
+                    out["signal_strength"] = db_roster
+                    log.info("active_slice: signal_strength from ss_roster_current "
+                             "(%d, DB authoritative)", len(db_roster))
+                elif manual_ss:
+                    # Break-glass: DB roster empty/unavailable -> operator YAML.
                     out["signal_strength"] = _dedup_sort(manual_ss)
+                    log.info("active_slice: signal_strength from ss_full_list.yaml "
+                             "(%d, DB roster empty)", len(manual_ss))
                 elif is_stale:
                     out["stale_signal_strength"] = ss_members
                     log.info("active_slice: hedgeye_signal_strength "
@@ -473,7 +494,7 @@ def _fetch_db_sources() -> dict[str, list[str]]:
                              ss_latest, int(ss_age),
                              SOURCE_STALENESS_DAYS["signal_strength"])
                 else:
-                    # No manual list — fall back to the delta reconstruction.
+                    # Last resort — delta reconstruction.
                     out["signal_strength"] = ss_members
 
                 # ─── Keith's Signal Longs/Shorts (weekly text product) ──
