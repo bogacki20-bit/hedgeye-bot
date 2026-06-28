@@ -70,8 +70,38 @@ if __name__ == "__main__":
     check_env()
     check_postgres()
 
+    # Boot marker -> bot_state so deploys are verifiable from the DB: which commit
+    # is live + when it booted. RAILWAY_GIT_COMMIT_SHA is set by Railway for GitHub
+    # deploys; fall back to a local git call, else 'unknown'.
+    import subprocess
+    from datetime import datetime, timezone
+    _sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+    if not _sha:
+        try:
+            _sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                                  text=True, timeout=5).stdout.strip() or "unknown"
+        except Exception:
+            _sha = "unknown"
+    _boot_at = datetime.now(timezone.utc).isoformat()
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn:
+            with conn.cursor() as cur:
+                for _k, _v in (("bot_git_sha", _sha), ("bot_boot_at", _boot_at)):
+                    cur.execute(
+                        """INSERT INTO bot_state (key, value, updated_at)
+                           VALUES (%s, %s, NOW())
+                           ON CONFLICT (key) DO UPDATE
+                             SET value = EXCLUDED.value, updated_at = NOW()""",
+                        (_k, _v),
+                    )
+            conn.commit()
+        log.info("boot marker written: sha=%s at=%s", _sha[:12], _boot_at)
+    except Exception as e:
+        log.warning("could not write boot marker to bot_state: %s", e)
+
     from notifier import send_telegram
-    send_telegram("Hedgeye Bot", "Bot started on Railway. Postgres + Telegram OK.")
+    send_telegram("Hedgeye Bot", f"Bot started on Railway (sha {_sha[:12]}). Postgres + Telegram OK.")
     log.info("Startup ping sent.")
 
     from email_parser import run_email_loop
