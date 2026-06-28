@@ -63,6 +63,7 @@ CREATE TABLE ss_roster_history (
     add_source    TEXT NOT NULL,        -- 'seed' | 'anchor' | 'delta'
     remove_source TEXT,                 -- 'anchor' | 'delta'
     anchor_id     BIGINT,
+    source_email_id TEXT,               -- email that drove a delta-add (migration 040)
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

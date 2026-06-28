@@ -308,6 +308,17 @@ def _run_listener(token, allowed_chat_id):
                     continue
 
                 log.info(f"Received from {chat_id}: {text!r}")
+                # SS roster upload flow (sentinel-gated; only acts on SS:/CONFIRM/CANCEL).
+                # A paste only STAGES; nothing is written until CONFIRM.
+                try:
+                    from tools.ss_roster import handle_telegram_text
+                    ss_reply = handle_telegram_text(text)
+                except Exception as e:
+                    log.error(f"ss_roster handler failed: {e}", exc_info=True)
+                    ss_reply = None
+                if ss_reply is not None:
+                    _send_message(token, chat_id, ss_reply)
+                    continue
                 # Try to parse as a structured decision; fall back to echo if not.
                 decision = parse_decision(text)
                 if decision:
