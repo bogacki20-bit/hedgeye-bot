@@ -288,6 +288,30 @@ if __name__ == "__main__":
     else:
         log.info("MFR enroll disabled (MFR_TOADD_ENABLED & MFR_BACKLOG_ENABLED both false).")
 
+    # Quad early-warning (Stage 1, READ-ONLY + Telegram only — never writes the
+    # quad). The daily Macro Show / Early Look tone front-runs the official
+    # monthly/quarterly flip by ~a week; when the thematic quad runs different
+    # from the official stored quad for >= 3 consecutive note-days, send ONE
+    # heads-up per divergence episode. The official flip itself is proposed
+    # inline on a Quads/GIP deck email and applied via the QUAD: bridge.
+    # Toggle: QUAD_EARLYWARN_ENABLED.
+    if os.getenv("QUAD_EARLYWARN_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _quad_earlywarn_loop():
+            import time
+            while True:
+                try:
+                    from tools.quad_detector import run_early_warning
+                    st = run_early_warning()
+                    if st.startswith("sent"):
+                        log.info("quad_earlywarn: %s", st)
+                except Exception as e:
+                    log.error("quad_earlywarn loop error: %s", e)
+                time.sleep(1800)  # check every 30 min; internal once/day + per-episode throttle
+        threading.Thread(target=_quad_earlywarn_loop, daemon=True, name="quad-earlywarn").start()
+        log.info("Quad early-warning thread started.")
+    else:
+        log.info("Quad early-warning disabled (QUAD_EARLYWARN_ENABLED=false).")
+
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via

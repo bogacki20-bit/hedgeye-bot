@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from datetime import date
@@ -218,11 +219,24 @@ def process_email(message_id: str, *, dry_run=False, fan_out=False,
     rn_id = summ["upsert"].get("id")
     # Fix 3 — surface every research note into corpus_documents (RAG/ML).
     summ["corpus"] = sync_to_corpus(product, sd, rec, body, message_id)
-    # Fix 2 — a tilt target means the live regime may need to advance.
+    # Fix 2 — a tilt target USED to auto-advance the live regime. That is now
+    # GATED (2026-06-29, Hedgeye email-only compliance): the dashboard scrape
+    # that silently corrected mis-parsed email quads is gone, so an unguarded
+    # auto-apply would move the canonical regime off a daily Early Look tone
+    # with nothing to undo it. Default: NEVER auto-write. A Quads/GIP DECK tilt
+    # PROPOSES a flip (operator confirms via QUAD:); daily tones feed the
+    # early-warning detector. The QUAD: bridge stays the sole canonical writer.
+    # Re-enable the legacy auto-apply only with QUAD_AUTO_APPLY=1.
     if apply_regime and rec.get("tilt_target_quads"):
         try:
-            from tools.quad_regime import apply_research_note_tilts
-            summ["regime"] = apply_research_note_tilts()
+            if os.getenv("QUAD_AUTO_APPLY") == "1":
+                from tools.quad_regime import apply_research_note_tilts
+                summ["regime"] = apply_research_note_tilts()
+            else:
+                from tools.quad_detector import on_research_note
+                summ["regime"] = on_research_note(
+                    product, rec.get("tilt_target_quads"), sd,
+                    message_id=message_id)
         except Exception as e:
             log.warning("regime update from research note failed: %s", e)
             summ["regime"] = {"error": str(e)}
