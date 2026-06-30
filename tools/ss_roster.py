@@ -216,6 +216,7 @@ def _stage_upload(body: str) -> str:
     needs_replace = bool(current) and (pct_rem > REPLACE_GUARD_PCT or len(upload) < 0.5 * len(current))
     _save_pending({"tickers": sorted(upload), "created_at": _now_iso(),
                    "needs_replace": needs_replace})
+    _set_bot_state("quad_pending", "")   # one pending at a time: staging SS clears any QUAD stage
 
     out = [f"📋 Parsed {len(upload)} tickers"
            + (f" (ignored {len(ignored)}: {ignored[:5]})" if ignored else "") + ".",

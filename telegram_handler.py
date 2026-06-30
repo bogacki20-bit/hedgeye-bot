@@ -319,6 +319,16 @@ def _run_listener(token, allowed_chat_id):
                 if ss_reply is not None:
                     _send_message(token, chat_id, ss_reply)
                     continue
+                # QUAD manual bridge (sentinel-gated; CONFIRM only acts if a QUAD is staged).
+                try:
+                    from tools.quad_manual import handle_quad_command
+                    q_reply = handle_quad_command(text)
+                except Exception as e:
+                    log.error(f"quad command failed: {e}", exc_info=True)
+                    q_reply = None
+                if q_reply is not None:
+                    _send_message(token, chat_id, q_reply)
+                    continue
                 # MFR backlog on-demand command (read-only): "MFR BACKLOG" / "/mfrbacklog".
                 try:
                     from tools.enrollment import handle_backlog_command
