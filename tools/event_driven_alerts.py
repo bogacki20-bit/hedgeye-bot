@@ -303,11 +303,9 @@ def run(dry_run: bool = False) -> int:
     except Exception as e:
         log.debug("keith_trades_with_context refresh skipped: %s", e)
 
-    # Sync Quad regime from env (operator's input path) — inserts a new
-    # quad_regime_history row only when the env vars differ from the
-    # latest history row. Idempotent on every run; gives the rest of the
-    # pipeline (record_alert below, parser writes elsewhere) a fresh
-    # canonical regime to stamp against.
+    # Sync Quad regime from env. GATED (2026-06-29): no-op unless
+    # QUAD_ENV_SYNC=1 — the QUAD: Telegram bridge is the canonical input now, so
+    # env overrides can't silently overwrite an operator QUAD: set at startup.
     try:
         from tools.quad_regime import sync_quad_regime_from_env
         sync_quad_regime_from_env(notes="event_driven_alerts startup")

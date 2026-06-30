@@ -9,8 +9,10 @@ Operator's design (2026-05-28):
       every action, every outcome stamps via this so the regime tag is
       consistent across tables and slow-changing (operator-managed).
     - `sync_quad_regime_from_env()` is called at scanner / launcher
-      startup: if the env-var Quads differ from the latest history row,
-      insert a fresh history row so the timeline reflects the change.
+      startup. GATED as of 2026-06-29 (default OFF, QUAD_ENV_SYNC=1 to
+      re-enable): the QUAD: Telegram bridge is the canonical input now, so
+      env-var overrides no longer auto-insert a history row that could
+      overwrite an operator QUAD: set. The CLI `sync` still works (explicit).
 
 Falls back to (Quad 2, Quad 3) — the operator's stated baseline as of
 2026-05-28 — if both env vars and history are unavailable, with a log
@@ -117,15 +119,26 @@ def current_quad_regime() -> dict[str, Optional[str]]:
 
 # ─────────────────────────── input sync ──────────────────────────────
 
-def sync_quad_regime_from_env(notes: Optional[str] = None) -> dict:
+def sync_quad_regime_from_env(notes: Optional[str] = None,
+                              force: bool = False) -> dict:
     """Compare env-var Quads against quad_regime_history latest; if
     different (or history empty), insert a new history row.
 
     Designed to be called at bot / launcher / scanner startup. Idempotent
     on re-call — only inserts when there's an actual change. Returns a
-    summary dict {action: 'inserted'|'unchanged'|'no-env'|'error',
+    summary dict {action: 'gated'|'inserted'|'unchanged'|'no-env'|'error',
     monthly_quad, quarterly_quad}.
+
+    GATED (2026-06-29, Hedgeye email-only compliance): the QUAD: Telegram bridge
+    is the canonical quad INPUT path now. Env-var overrides
+    (CURRENT_*_QUAD_OVERRIDE) could otherwise insert a fresh history row at
+    scanner/launcher startup and silently overwrite an operator QUAD: set — the
+    exact "my quad didn't stay put" failure. Default OFF: automated callers no-op
+    unless QUAD_ENV_SYNC=1. The explicit CLI `sync` passes force=True.
     """
+    if not force and os.getenv("QUAD_ENV_SYNC") != "1":
+        return {"action": "gated",
+                "monthly_quad": None, "quarterly_quad": None}
     env_m = _normalize(os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE"))
     env_q = _normalize(os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE"))
     if not (env_m and env_q):
@@ -509,7 +522,9 @@ def _cli(argv=None) -> int:
         print(json.dumps(current_quad_regime(), indent=2))
         return 0
     if a.command == "sync":
-        print(json.dumps(sync_quad_regime_from_env(notes=a.notes), indent=2))
+        # CLI is explicit operator intent -> bypass the QUAD_ENV_SYNC gate.
+        print(json.dumps(sync_quad_regime_from_env(notes=a.notes, force=True),
+                         indent=2))
         return 0
     if a.command == "apply-tilts":
         print(json.dumps(apply_research_note_tilts(dry_run=a.dry_run),
