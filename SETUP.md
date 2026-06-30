@@ -1,8 +1,7 @@
 # Hedgeye Bot — Setup Guide
 
 ## What this bot does
-- Scrapes app.hedgeye.com every 15 minutes while you sleep
-- Watches your iCloud inbox for Hedgeye emails
+- Watches your iCloud inbox for Hedgeye emails (email-only — no website scraping)
 - Uses Claude AI to classify every piece of content and extract trade signals
 - Texts you immediately when Keith posts a high-conviction signal
 - Sends you a morning brief at 7am with everything from overnight

@@ -240,17 +240,11 @@ def process_email(message_id: str, *, dry_run=False, fan_out=False,
         except Exception as e:
             log.warning("regime update from research note failed: %s", e)
             summ["regime"] = {"error": str(e)}
-    # Fix 4 — download + text-extract the linked slide deck (best-effort;
-    # never blocks the parser on a 404 / auth failure).
-    if rec.get("full_report_url") and rn_id:
-        try:
-            from tools.download_research_pdf import download_and_ingest
-            summ["pdf"] = download_and_ingest(
-                rn_id, rec["full_report_url"], subject, sd)
-        except Exception as e:
-            log.warning("research-note PDF download failed (id=%s): %s",
-                        rn_id, e)
-            summ["pdf"] = {"status": "error", "error": str(e)}
+    # Slide-deck PDF download REMOVED 2026-06-29 (Hedgeye email-only compliance):
+    # it fetched the deck from a hedgeye.com click-tracker behind the login. The
+    # email itself is still fully parsed/stored above; full_report_url is still
+    # captured as a string (no fetch). Decks already ingested into
+    # corpus_documents (source='hedgeye_research_note_pdf') are unaffected.
     _stamp(message_id)
     return summ
 
