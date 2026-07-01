@@ -329,6 +329,16 @@ def _run_listener(token, allowed_chat_id):
                 if q_reply is not None:
                     _send_message(token, chat_id, q_reply)
                     continue
+                # SCREEN natural-language screener (sentinel-gated; read-only).
+                try:
+                    from tools.screener import handle_screen_command
+                    sc_reply = handle_screen_command(text)
+                except Exception as e:
+                    log.error(f"screen command failed: {e}", exc_info=True)
+                    sc_reply = None
+                if sc_reply is not None:
+                    _send_message(token, chat_id, sc_reply)
+                    continue
                 # MFR backlog on-demand command (read-only): "MFR BACKLOG" / "/mfrbacklog".
                 try:
                     from tools.enrollment import handle_backlog_command
