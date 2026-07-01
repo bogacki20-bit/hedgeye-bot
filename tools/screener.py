@@ -61,9 +61,9 @@ def parse_query(text: str) -> dict:
         q["direction"] = "shorts"
     elif re.search(r"\blongs?\b", s):
         q["direction"] = "longs"
-    if re.search(r"bottom of (?:the )?range|near (?:the )?low|close to (?:the )?bottom|near bottom", s):
+    if re.search(r"bottom of (?:the )?range|near (?:the )?(?:low|bottom)|close to (?:the )?(?:low|bottom)", s):
         q["near"] = "bottom"
-    elif re.search(r"top of (?:the )?range|near (?:the )?high|close to (?:the )?top|near top", s):
+    elif re.search(r"top of (?:the )?range|near (?:the )?(?:high|top)|close to (?:the )?(?:high|top)", s):
         q["near"] = "top"
     if re.search(r"momentum", s):
         q["momentum"] = True
