@@ -89,14 +89,22 @@ def _fetch_tag_slice(sector, buckets):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _is_mfr_only_topidea(r) -> bool:
+    """A top-idea name passing the gate on MFR trend only (no Hedgeye TREND) —
+    kept in results, but direction is lower-confidence and gets a ⚠ marker."""
+    return ((r.get("hedgeye_bucket_0629") or "").startswith("top_idea")
+            and r.get("trend_source") == "mfr")
+
+
 def _fmt_row(r) -> str:
     rp = "  n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
     mom = {True: "yes", False: "no", None: "?"}[r["momentum_ok"]]
     book = "📗own" if r["held"] else "-"
     src = {"hedgeye": "hdg", "mfr": "mfr"}.get(r.get("trend_source"), "")
     trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "")
+    warn = "  ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     return (f"  {r['ticker']:<9} {(r['subsector'] or ''):<20} {trend:<12} "
-            f"rp={rp:<5} mom={mom:<3} {book}")
+            f"rp={rp:<5} mom={mom:<3} {book}{warn}")
 
 
 def run_screen(text: str) -> str:
@@ -147,6 +155,9 @@ def run_screen(text: str) -> str:
     if result:
         lines.append(f"{len(result)} match(es)  [ticker · subsector · trend · range_pos · momentum · book]")
         lines += [_fmt_row(r) for r in result]
+        if any(_is_mfr_only_topidea(r) for r in result):
+            lines.append("⚠ = top idea gated on MFR trend, no Hedgeye TREND published "
+                         "— treat direction as lower-confidence.")
     else:
         # Funnel — show which gate emptied it (never silent).
         near_lbl = f"near_{q['near']}" if q["near"] else "range gate (none)"
