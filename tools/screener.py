@@ -1,5 +1,9 @@
 """SCREEN — natural-language screener over v_screener (ticker_tags + latest
-mfr_snapshots + Hedgeye risk-range TREND). Python owns ALL math/filtering; no LLM.
+mfr_snapshots + TREND). Python owns ALL math/filtering; no LLM.
+
+trend_dir = Hedgeye risk-range TREND (primary), falling back to MFR trend_signal
+(trendBullish/Bearish/Neutral -> BULLISH/BEARISH/NEUTRAL) when Hedgeye has none.
+trend_source ('hdg'/'mfr') is shown per row so it's clear which fired.
 
 Telegram: `SCREEN <sentence>` e.g.
   SCREEN bring up all healthcare longs close to the bottom of the range with bullish momentum
@@ -73,7 +77,7 @@ def _fetch_tag_slice(sector, buckets):
     only — no trend/range/momentum gates yet)."""
     import db_pg
     sql = ("SELECT ticker, subsector, hedgeye_bucket_0629, range_pos, momentum_ok, "
-           "trend_dir, held, has_range FROM v_screener "
+           "trend_dir, trend_source, held, has_range FROM v_screener "
            "WHERE hedgeye_bucket_0629 = ANY(%s)")
     args = [buckets]
     if sector:
@@ -89,7 +93,9 @@ def _fmt_row(r) -> str:
     rp = "  n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
     mom = {True: "yes", False: "no", None: "?"}[r["momentum_ok"]]
     book = "📗own" if r["held"] else "-"
-    return (f"  {r['ticker']:<9} {(r['subsector'] or ''):<20} {r['trend_dir'] or '-':<8} "
+    src = {"hedgeye": "hdg", "mfr": "mfr"}.get(r.get("trend_source"), "")
+    trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "")
+    return (f"  {r['ticker']:<9} {(r['subsector'] or ''):<20} {trend:<12} "
             f"rp={rp:<5} mom={mom:<3} {book}")
 
 
