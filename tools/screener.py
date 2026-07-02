@@ -18,7 +18,9 @@ Rules:
     longs  -> active_long/top_idea_long/long_bench   AND trend_dir='BULLISH'
     shorts -> active_short/top_idea_short/short_bench AND trend_dir='BEARISH'
   Tier markers: ●● active · ● top-idea · · bench.  Sort range_pos ASC (longs)/DESC (shorts).
-A DARK section (passed tag filters, no MFR range) is always appended.
+A DARK section (passed tag filters, no MFR range) is always appended. Names removed
+by the TREND gate show as a one-line breadcrumb by default, or a full ⛔ GATED BY
+TREND section when the query says "show gated" (also "show all" / "include gated").
 """
 from __future__ import annotations
 
@@ -80,6 +82,7 @@ def parse_query(text: str) -> dict:
         q["momentum"] = True
     if re.search(r"in my book|that i own|\bi own\b|\bheld\b|that i hold|that i'?m holding", s):
         q["held"] = True
+    q["show_gated"] = bool(re.search(r"show gated|show all|include gated|with gated|\bgated\b", s))
     return q
 
 
@@ -149,6 +152,13 @@ def _corr_for(tickers) -> dict:
 def _is_mfr_only_topidea(r) -> bool:
     return ((r.get("hedgeye_bucket_0629") or "").startswith("top_idea")
             and r.get("trend_source") == "mfr")
+
+
+def _fmt_gated(r) -> str:
+    src = {"hedgeye": "hdg", "mfr": "mfr"}.get(r.get("trend_source"), "")
+    td = (r["trend_dir"] or "none") + (f"·{src}" if src else "")
+    rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
+    return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp}"
 
 
 def _num(v, sign=False, nd=2) -> str:
@@ -246,6 +256,24 @@ def run_screen(text: str) -> str:
         lines.append(f"0 matches — emptied by: **{culprit}**")
         lines.append("")
         lines += funnel
+
+    # ⛔ gated-by-TREND — matched the tier but failed Rule-1. Shown on demand
+    # ("show gated"); otherwise a one-line breadcrumb so nothing disappears silently.
+    gated = sorted([r for r in ranged if (r["trend_dir"] or "") != req_trend],
+                   key=lambda r: (r["range_pos"] is None,
+                                  float(r["range_pos"]) if r["range_pos"] is not None else 0),
+                   reverse=(q["direction"] == "shorts"))
+    if q["show_gated"]:
+        lines.append("")
+        if gated:
+            lines.append(f"⛔ GATED BY TREND — matched tier, trend != {req_trend} ({len(gated)}):")
+            lines += [_fmt_gated(r) for r in gated]
+        else:
+            lines.append(f"⛔ GATED BY TREND: none — every tag-matched name is {req_trend}.")
+    elif gated:
+        lines.append("")
+        lines.append(f"⛔ {len(gated)} matched but gated by TREND (need {req_trend}) "
+                     f"— add 'show gated' to list them.")
 
     lines.append("")
     if dark:
