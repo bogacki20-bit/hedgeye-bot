@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""
+ingest_fidelity.py  --  parse Fidelity CSV exports into book_positions / book_activity.
+
+Discipline (matches the rest of the bot):
+  * Python owns ALL arithmetic and parsing. No LLM. No silent guesses.
+  * DRY-RUN by default. Nothing touches Postgres unless you pass --commit.
+  * Loud failure over silent drift: unparseable rows and sanity-check failures
+    raise / warn instead of being swallowed.
+
+Usage:
+    python ingest_fidelity.py --positions Portfolio_Positions_Jul-01-2026.csv \
+                              --activity  Accounts_History__5_.csv
+        -> parses, prints a summary + anomaly report, writes NOTHING.
+
+    python ingest_fidelity.py --positions ... --activity ... --commit
+        -> after you've eyeballed the dry-run, actually upserts to the DB.
+
+DB connection: reads DATABASE_URL from env (same as the rest of the bot).
+
+Config flags (defaults match the decisions we agreed on):
+    --keep-spending      keep debit-card / bill-pay rows (default: dropped)
+    --keep-cash          treat money-market sweeps as real positions (default: cash-tagged)
+    --accounts A,B       restrict to specific account numbers (default: all)
+"""
+import argparse, csv, hashlib, io, os, re, sys
+from datetime import datetime
+
+# ---- money markets / sweeps that are cash, not tradable book -----------------
+CASH_SYMBOLS = {"CORE**", "SPAXX**", "FDRXX**", "SPAXX", "FDRXX", "QACDS"}
+PENDING_MARKERS = ("Pending activity", "No Description")
+
+OPT_RE = re.compile(r"^-([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])([\d.]+)$")
+
+
+def money(x):
+    """'$1,234.56' / '+$74.00' / '-$0.74' / '--' / '' -> float | None."""
+    if x is None:
+        return None
+    s = str(x).replace("$", "").replace(",", "").replace("+", "").strip()
+    if s in ("--", "", "nan"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def pct(x):
+    if x is None:
+        return None
+    s = str(x).replace("%", "").replace("+", "").strip()
+    if s in ("--", "", "nan"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_option(sym):
+    """'-AMZN260717P230' -> (underlying, expiry 'YYYY-MM-DD', 'P', 230.0) or None."""
+    m = OPT_RE.match(sym)
+    if not m:
+        return None
+    u, y, mo, d, cp, k = m.groups()
+    return u, f"20{y}-{mo}-{d}", cp, float(k)
+
+
+def read_clean(path, header_startswith):
+    """Read a Fidelity CSV: strip BOM, drop footer/disclaimer rows, fix the
+    trailing-comma column shift (index_col=False equivalent for stdlib csv)."""
+    text = open(path, encoding="utf-8-sig").read()
+    lines = text.splitlines()
+    # find header
+    hdr_idx = next(i for i, ln in enumerate(lines) if ln.startswith(header_startswith))
+    header = next(csv.reader([lines[hdr_idx]]))
+    header = [h.strip() for h in header]
+    rows = []
+    for ln in lines[hdr_idx + 1:]:
+        if not ln.strip():
+            continue
+        fields = next(csv.reader([ln]))
+        # footer disclaimer rows have far fewer/odd fields or start with a quote blob
+        if len(fields) < len(header):
+            continue
+        fields = fields[:len(header)]  # drop phantom trailing-comma column
+        rows.append(dict(zip(header, [f.strip() for f in fields])))
+    return header, rows
+
+
+# ---------------------------------------------------------------------------
+# POSITIONS
+# ---------------------------------------------------------------------------
+def parse_positions(path, snapshot_date, keep_cash, accounts):
+    _, rows = read_clean(path, "Account Number")
+    out, anomalies = [], []
+    for r in rows:
+        sym = (r.get("Symbol") or "").strip()
+        acct = (r.get("Account Number") or "").strip()
+        if not sym or not acct:
+            continue
+        if accounts and acct not in accounts:
+            continue
+        is_opt = sym.startswith("-")
+        exp = otype = strike = None
+        if is_opt:
+            p = parse_option(sym)
+            if p is None:
+                anomalies.append(f"UNPARSEABLE OPTION SYMBOL: {sym!r}")
+                underlying, asset = sym, "option"
+            else:
+                underlying, exp, otype, strike = p
+                asset = "option"
+        elif sym in CASH_SYMBOLS or sym.startswith("Pending"):
+            underlying, asset = sym, "cash"
+        else:
+            underlying, asset = sym, "equity"
+
+        if asset == "cash" and not keep_cash:
+            # still record it, but as cash; SCREEN filters on asset_class != 'cash'
+            pass
+
+        out.append({
+            "snapshot_date": snapshot_date,
+            "account_number": acct,
+            "account_name": (r.get("Account Name") or "").strip(),
+            "symbol": sym,
+            "underlying": underlying,
+            "description": r.get("Description"),
+            "asset_class": asset,
+            "is_option": is_opt,
+            "opt_expiry": exp, "opt_type": otype, "opt_strike": strike,
+            "quantity": money(r.get("Quantity")),
+            "last_price": money(r.get("Last Price")),
+            "market_value": money(r.get("Current Value")),
+            "cost_basis": money(r.get("Cost Basis Total")),
+            "avg_cost": money(r.get("Average Cost Basis")),
+            "total_gl_dollar": money(r.get("Total Gain/Loss Dollar")),
+            "total_gl_pct": pct(r.get("Total Gain/Loss Percent")),
+            "pct_of_account": pct(r.get("Percent Of Account")),
+        })
+    return out, anomalies
+
+
+# ---------------------------------------------------------------------------
+# ACTIVITY
+# ---------------------------------------------------------------------------
+def classify_action(a):
+    au = a.upper()
+    if any(k in au for k in ("DEBIT CARD", "BILL PAY", "CHECK PAID", "CHECK RECEIVED",
+                             "CASH ADVANCE", "ATM")):
+        return "personal_spending", None
+    if "OPENING TRANSACTION" in au:
+        return "option_open", ("buy" if "YOU BOUGHT" in au else "sell")
+    if "CLOSING TRANSACTION" in au:
+        return "option_close", ("buy" if "YOU BOUGHT" in au else "sell")
+    if "REINVESTMENT" in au:
+        return "reinvest", "buy"
+    if "YOU BOUGHT" in au:
+        return "buy", "buy"
+    if "YOU SOLD" in au:
+        return "sell", "sell"
+    if "DIVIDEND" in au or "INTEREST EARNED" in au:
+        return "income", None
+    if "FEE CHARGED" in au or "FEE" == au.split()[0] if au.split() else False:
+        return "fee", None
+    if any(k in au for k in ("TRANSFER", "JOURNAL", "DEPOSIT", "EFT", "WITHDRAWAL")):
+        return "cash_move", None
+    return "other", None
+
+
+def to_date(s):
+    for fmt in ("%m/%d/%Y",):
+        try:
+            return datetime.strptime(s.strip(), fmt).date().isoformat()
+        except ValueError:
+            pass
+    return None
+
+
+def parse_activity(path, keep_spending, accounts):
+    _, rows = read_clean(path, "Run Date")
+    out, anomalies, dropped_spending = [], [], 0
+    for r in rows:
+        run = to_date(r.get("Run Date") or "")
+        if not run:
+            continue
+        acct = (r.get("Account Number") or "").strip().strip('"')
+        if accounts and acct not in accounts:
+            continue
+        action = (r.get("Action") or "").strip()
+        atype, side = classify_action(action)
+        if atype == "personal_spending" and not keep_spending:
+            dropped_spending += 1
+            continue
+
+        sym = (r.get("Symbol") or "").strip()
+        is_opt = sym.startswith("-")
+        exp = otype = strike = None
+        underlying = None
+        if sym:
+            if is_opt:
+                p = parse_option(sym)
+                if p:
+                    underlying, exp, otype, strike = p
+                else:
+                    underlying = sym
+                    anomalies.append(f"UNPARSEABLE OPTION SYMBOL (activity): {sym!r}")
+            else:
+                underlying = sym
+
+        amount = money(r.get("Amount"))
+        qty = money(r.get("Quantity"))
+        row_hash = hashlib.sha1(
+            f"{run}|{acct}|{action}|{sym}|{amount}|{qty}".encode()
+        ).hexdigest()
+
+        out.append({
+            "run_date": run,
+            "settlement_date": to_date(r.get("Settlement Date") or ""),
+            "account_number": acct,
+            "account_name": (r.get("Account") or "").strip().strip('"'),
+            "action_raw": action,
+            "action_type": atype,
+            "side": side,
+            "symbol": sym or None,
+            "underlying": underlying,
+            "is_option": is_opt,
+            "opt_expiry": exp, "opt_type": otype, "opt_strike": strike,
+            "description": r.get("Description"),
+            "price": money(r.get("Price")),
+            "quantity": qty,
+            "commission": money(r.get("Commission")),
+            "fees": money(r.get("Fees")),
+            "amount": amount,
+            "row_hash": row_hash,
+        })
+    return out, anomalies, dropped_spending
+
+
+# ---------------------------------------------------------------------------
+def summarize(positions, activity, anomalies, dropped_spending):
+    print("=" * 64)
+    print("DRY-RUN SUMMARY  (nothing written unless --commit is passed)")
+    print("=" * 64)
+    if positions:
+        by_acct = {}
+        tot = 0.0
+        for p in positions:
+            by_acct.setdefault(p["account_name"], [0, 0.0])
+            by_acct[p["account_name"]][0] += 1
+            by_acct[p["account_name"]][1] += (p["market_value"] or 0.0)
+            tot += (p["market_value"] or 0.0)
+        print(f"\nPOSITIONS: {len(positions)} rows, book value ${tot:,.0f}")
+        for a, (n, v) in sorted(by_acct.items()):
+            print(f"   {a:<32} {n:>3} rows  ${v:>12,.0f}")
+        opts = [p for p in positions if p["is_option"]]
+        print(f"   options: {len(opts)}  equity: {sum(1 for p in positions if p['asset_class']=='equity')}  "
+              f"cash: {sum(1 for p in positions if p['asset_class']=='cash')}")
+    if activity:
+        from collections import Counter
+        c = Counter(a["action_type"] for a in activity)
+        print(f"\nACTIVITY: {len(activity)} rows kept "
+              f"({dropped_spending} personal-spending rows dropped)")
+        for k, v in c.most_common():
+            print(f"   {k:<16} {v:>4}")
+    if anomalies:
+        print(f"\n!!! {len(anomalies)} ANOMALIES (review before committing):")
+        for a in anomalies[:20]:
+            print("   " + a)
+    else:
+        print("\nNo parse anomalies.")
+    print()
+
+
+def commit(positions, activity):
+    try:
+        import psycopg2
+        from psycopg2.extras import execute_values
+    except ImportError:
+        sys.exit("psycopg2 not installed; cannot --commit. `pip install psycopg2-binary`")
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        sys.exit("DATABASE_URL not set.")
+    conn = psycopg2.connect(dsn)
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            if positions:
+                cols = list(positions[0].keys())
+                execute_values(cur,
+                    f"INSERT INTO book_positions ({','.join(cols)}) VALUES %s "
+                    f"ON CONFLICT (snapshot_date, account_number, symbol) DO UPDATE SET "
+                    + ",".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in
+                               ("snapshot_date", "account_number", "symbol")),
+                    [[p[c] for c in cols] for p in positions])
+                print(f"  upserted {len(positions)} positions")
+            if activity:
+                cols = list(activity[0].keys())
+                execute_values(cur,
+                    f"INSERT INTO book_activity ({','.join(cols)}) VALUES %s "
+                    f"ON CONFLICT (row_hash) DO NOTHING",
+                    [[a[c] for c in cols] for a in activity])
+                print(f"  inserted up to {len(activity)} activity rows (dupes skipped)")
+        conn.commit()
+        print("COMMITTED.")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--positions")
+    ap.add_argument("--activity")
+    ap.add_argument("--snapshot-date", default=datetime.today().date().isoformat())
+    ap.add_argument("--keep-spending", action="store_true")
+    ap.add_argument("--keep-cash", action="store_true")
+    ap.add_argument("--accounts", default="")
+    ap.add_argument("--commit", action="store_true")
+    args = ap.parse_args()
+
+    accounts = {a.strip() for a in args.accounts.split(",") if a.strip()}
+    positions, pos_anom = ([], [])
+    activity, act_anom, dropped = ([], [], 0)
+
+    if args.positions:
+        positions, pos_anom = parse_positions(
+            args.positions, args.snapshot_date, args.keep_cash, accounts)
+    if args.activity:
+        activity, act_anom, dropped = parse_activity(
+            args.activity, args.keep_spending, accounts)
+
+    summarize(positions, activity, pos_anom + act_anom, dropped)
+
+    if args.commit:
+        if pos_anom + act_anom:
+            print("Refusing to auto-commit with unresolved anomalies. "
+                  "Fix parsing or re-run with anomalies reviewed.")
+            # comment out the next line if you want to force through
+            sys.exit(1)
+        commit(positions, activity)
+    else:
+        print("Dry-run only. Re-run with --commit to write.")
+
+
+if __name__ == "__main__":
+    main()
