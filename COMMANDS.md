@@ -10,10 +10,31 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 ## 🟢 Read-only commands (never touch the DB)
 
 ### `SCREEN`
-- **Syntax:** `SCREEN <plain-english screen>`
-- **Purpose:** Natural-language screener over your tagged universe (range position, TREND gate, momentum, in-book).
-- **Example:** `SCREEN healthcare longs near the bottom of the range with momentum`
-- **Writes DB?** No. *(handler: `tools/screener.py → handle_screen_command`)*
+- **Syntax:** `SCREEN <plain-english screen>` — natural-language screener over your tagged universe.
+- **Example:** `SCREEN energy shorts top of range` · `SCREEN healthcare longs near the bottom with momentum`
+- **Writes DB?** No — read-only. *(handler: `tools/screener.py → handle_screen_command`)*
+
+**Direction is required** (the TREND gate is tied to it): say `longs` or `shorts`.
+
+**Phrases it understands (mix freely):**
+| Phrase | Effect |
+|--------|--------|
+| `longs` / `shorts` | direction + Rule-1 TREND gate (BULLISH / BEARISH) |
+| any GICS sector — `healthcare`, `tech`, `energy`, `financials`, `staples`, `discretionary`, `industrials`, `materials`, `utilities`, `real estate`/`reits`, `communication(s)`, `digital assets`/`crypto` | sector filter |
+| `bottom of range` / `near the low` | `near_bottom` (range_pos ≤ 0.20) |
+| `top of range` / `near the high` | `near_top` (range_pos ≥ 0.80) |
+| `momentum` / `with momentum` | require bullish MFR momentum |
+| `in my book` / `that I own` / `held` | only names you hold |
+| `show gated` / `show all` / `include gated` | list the names Rule-1 dropped (see below) |
+
+**All three tiers are screenable**, each row marked: `●● active` · `● top-idea` · `· bench`.
+
+**Per-row columns:** `trend·src` (hdg=Hedgeye / mfr=MFR fallback) · `rp` range position · `mom` (BULL/BEAR/NEUT, from MFR — no history wait) · `h` Hurst (>0.5 trending) · `iv rv ivpd` (MFR vol, authoritative) · `cSPY cUUP` (bot-**computed** Pearson vs SPY/UUP daily returns — labeled *calc*, `?` when <20 days). Flags: `⚡DIV(...)` trade-vs-momentum divergence (exhaustion-fade), `📗own` held, `⚠mfr-only` top-idea gated on MFR trend only.
+
+**Nothing disappears silently:**
+- `🌑 DARK` — matched your filters but has no MFR range.
+- `⛔ GATED BY TREND` — matched the tier but failed Rule-1 (wrong trend). Shown in full with `show gated`, else a one-line count.
+- On an empty result, a **funnel** names the first stage that hit 0 (tag match → has-range → TREND → near → …).
 
 ### `MFR BACKLOG`
 - **Syntax:** `MFR BACKLOG` (also `/mfrbacklog`)
