@@ -1276,7 +1276,36 @@ def _parse_and_validate(text: str, ctx: Optional[dict] = None) -> dict:
 NOTIFIER_MODEL = os.environ.get("DECISION_ENGINE_MODEL", "claude-haiku-4-5-20251001")
 
 
-def _compute_source_label(flags: list[str], rr_trend: str | None = None) -> str:
+def _in_ss_roster_current(ticker: str) -> bool:
+    """SOURCE GATE for [Signal Strength]: True only if the ticker has an active
+    row in ss_roster_current. Read-only. Prevents borrowing the Signal Strength
+    name for another product (e.g. Keith's Signal Longs/Shorts)."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM ss_roster_current WHERE ticker = %s LIMIT 1", (ticker,))
+            return cur.fetchone() is not None
+    except Exception as e:
+        log.debug("ss_roster_current check failed for %s: %s", ticker, e)
+        return False
+
+
+def _ticker_bucket(ticker: str) -> str | None:
+    """Direction bucket from ticker_tags.hedgeye_bucket_0629 (read-only), or None.
+    Rendered as a separate 'bucket:' field — never fused into the source label."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT hedgeye_bucket_0629 FROM ticker_tags WHERE ticker = %s LIMIT 1", (ticker,))
+            r = cur.fetchone()
+            return r[0] if r and r[0] else None
+    except Exception as e:
+        log.debug("ticker_tags bucket lookup failed for %s: %s", ticker, e)
+        return None
+
+
+def _compute_source_label(flags: list[str], rr_trend: str | None = None,
+                          ss_member: bool = False) -> str:
     """Deterministic [SourceLabel] prefix derived from source_flags.
 
     2026-06-10 operator architectural directive: Hedgeye is the north star;
@@ -1284,7 +1313,7 @@ def _compute_source_label(flags: list[str], rr_trend: str | None = None) -> str:
     last-resort fallback. Cascade reordered:
 
       [Risk Range Bullish/Bearish/Neutral] — top priority when RR is present
-      [Signal Strength Short/Long/...]     — secondary
+      [Keith's Signals]                    — secondary (side rendered separately)
       [Portfolio Solutions]                — tertiary
       [ETF Pro Short/Long]                 — quaternary
       [Investing Ideas]                    — quinary
@@ -1312,17 +1341,19 @@ def _compute_source_label(flags: list[str], rr_trend: str | None = None) -> str:
         if t in ("bearish", "down"):  return "[Risk Range Bearish]"
         return "[Risk Range Neutral]"
     cascade = [
-        # Tier 2 — Signal Strength explicit-side (Keith's weekly Best Idea
-        # Longs/Shorts text)
-        ("signal_strength_short", "[Signal Strength Short]"),
-        ("signal_strength_long",  "[Signal Strength Long]"),
+        # Tier 2 — Keith's Signal Longs/Shorts (hedgeye_keiths_signals). A
+        # DIFFERENT product from the Signal Strength roster — labeled by its true
+        # origin, never "[Signal Strength]". The side is a stored fact rendered
+        # SEPARATELY by the caller ("keith's side: ..."), never fused here.
+        ("signal_strength_short", "[Keith's Signals]"),
+        ("signal_strength_long",  "[Keith's Signals]"),
         # Tier 3 — Portfolio Solutions (Keith holds it = long bias)
         ("portfolio_solutions",   "[Portfolio Solutions]"),
         # Tier 4 — ETF Pro explicit-side (Monday weekly publication)
         ("etf_pro_short",         "[ETF Pro Short]"),
         ("etf_pro_long",          "[ETF Pro Long]"),
-        # Tier 5 — daily SS Stocks bucket (implicit long via delta-based
-        # membership; ranked after explicit-side products)
+        # Tier 5 — Signal Strength roster. SOURCE-GATED: only a genuine
+        # ss_roster_current member may carry this label (see ss_member).
         ("signal_strength",       "[Signal Strength]"),
         # Tier 6 — Investing Ideas (Top-21 long leaderboard)
         ("investing_ideas",       "[Investing Ideas]"),
@@ -1332,6 +1363,8 @@ def _compute_source_label(flags: list[str], rr_trend: str | None = None) -> str:
     ]
     for key, label in cascade:
         if key in fset:
+            if key == "signal_strength" and not ss_member:
+                continue  # SOURCE GATE — [Signal Strength] needs ss_roster_current membership
             return label
     return ""
 
@@ -2313,13 +2346,24 @@ def decide_notifier(
     # whatever bracket Haiku emitted and prepend the Python-computed one.
     # 2026-06-10: pass rr_trend so [Risk Range Bullish/Bearish/Neutral]
     # surfaces Keith's direction in the label, not just the source.
+    _fset = set(source_flags or [])
+    _ss_member = _in_ss_roster_current(ticker) if "signal_strength" in _fset else False
     deterministic_label = _compute_source_label(
-        source_flags, rr_trend=rr_trend_val,
+        source_flags, rr_trend=rr_trend_val, ss_member=_ss_member,
     )
-    if deterministic_label:
-        final_line = f"{deterministic_label} {payload}"
-    else:
-        final_line = payload
+    _base = f"{deterministic_label} {payload}" if deterministic_label else payload
+    # Direction/side rendered as SEPARATE fields — never fused into the source
+    # label. "keith's side" is a stored fact from hedgeye_keiths_signals; "bucket"
+    # is from ticker_tags. Each omitted when absent.
+    _fields = []
+    if "signal_strength_short" in _fset:
+        _fields.append("keith's side: short")
+    elif "signal_strength_long" in _fset:
+        _fields.append("keith's side: long")
+    _bucket = _ticker_bucket(ticker)
+    if _bucket:
+        _fields.append(f"bucket: {_bucket}")
+    final_line = _base + (("  (" + " · ".join(_fields) + ")") if _fields else "")
     if final_line != line.lstrip():
         log.info("notifier: replaced Haiku label with deterministic '%s' for "
                  "%s (flags=%s)", deterministic_label or "(none)",
