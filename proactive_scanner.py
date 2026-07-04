@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -53,6 +54,14 @@ ACTIONABLE_ACTIONS     = {"BUY", "SELL", "SHORT", "COVER",
                           "HOLD", "WATCH", "AVOID",
                           "ADD", "TRIM"}
 DEFAULT_DEDUP_HOURS    = 4
+
+# Range-position filter (2026-07) — cut mid-range WATCH noise. Only bottom-edge
+# (<= LOW) and top-edge (>= HIGH) names alert; a WATCH whose MFR range-position
+# sits strictly between LOW and HIGH is suppressed. Uses the SAME MFR range shown
+# in the alert text (decision['pct_mfr']). Read once at import; the active values
+# are logged at each scan() start. Missing range data -> the alert passes through.
+ALERT_RANGE_LOW  = float(os.getenv("ALERT_RANGE_LOW",  "0.20"))
+ALERT_RANGE_HIGH = float(os.getenv("ALERT_RANGE_HIGH", "0.80"))
 
 
 # ─────────────────────────── Watchlist resolution ───────────────────────────
@@ -473,6 +482,20 @@ def _quad_alignment(ticker: str, direction: Optional[str]) -> str:
         return "neutral"
 
 
+def _range_position(decision: dict) -> Optional[float]:
+    """MFR position-in-range (0..1) from decision['pct_mfr'] — the exact MFR range
+    already shown in the alert text ((price - range_low)/(range_high - range_low)).
+    Returns None when the MFR range/price is unavailable; the caller then lets the
+    alert through rather than dropping it for missing data."""
+    pm = decision.get("pct_mfr")
+    if pm is None:
+        return None
+    try:
+        return float(pm) / 100.0
+    except (TypeError, ValueError):
+        return None
+
+
 def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
               dedup_hours: int,
               prior_source_flags: dict[str, list[str]] | None = None,
@@ -569,6 +592,21 @@ def _scan_one(ticker: str, *, dry_run: bool, refresh: bool,
         result["deduped"] = True
         return result
 
+    # Range-position filter — PROACTIVE WATCH alerts only. Cut mid-range noise:
+    # only bottom-edge (<= LOW) / top-edge (>= HIGH) names alert. Missing MFR
+    # range -> let through (never drop for missing data). No DB writes — we just
+    # skip persist + send. (SCREEN, confirmation flows, and roster notifications
+    # don't pass through here, so they're never affected.)
+    if action == "WATCH":
+        pos = _range_position(decision)
+        if pos is not None and ALERT_RANGE_LOW < pos < ALERT_RANGE_HIGH:
+            result["suppressed_range"] = True
+            result["skipped_reason"] = f"mid_range MFR pos {pos:.2f}"
+            log.debug("scanner: range-filter suppressed mid-range WATCH %s "
+                      "(position=%.2f, band %.2f-%.2f)",
+                      ticker, pos, ALERT_RANGE_LOW, ALERT_RANGE_HIGH)
+            return result
+
     if dry_run:
         return result
 
@@ -647,7 +685,10 @@ def scan(tickers: Optional[list[str]] = None,
 
     per_ticker: list = [None] * len(watchlist)
     counts = {"actionable": 0, "alerted": 0, "deduped": 0,
-              "errors": 0, "skipped_quiet": 0}
+              "errors": 0, "skipped_quiet": 0, "suppressed_range": 0}
+    log.info("scanner: range filter active — suppress WATCH when %.2f < MFR "
+             "position < %.2f (ALERT_RANGE_LOW / ALERT_RANGE_HIGH)",
+             ALERT_RANGE_LOW, ALERT_RANGE_HIGH)
 
     if max_workers and max_workers > 1 and watchlist:
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -679,6 +720,8 @@ def scan(tickers: Optional[list[str]] = None,
                 if r["error"]:      counts["errors"] += 1
                 if r.get("skipped_reason") and not r["deduped"]:
                     counts["skipped_quiet"] += 1
+                if r.get("suppressed_range"):
+                    counts["suppressed_range"] += 1
     else:
         for i, ticker in enumerate(watchlist):
             log.info("scanner: [%d/%d] %s", i + 1, len(watchlist), ticker)
@@ -693,6 +736,8 @@ def scan(tickers: Optional[list[str]] = None,
             if r["error"]:      counts["errors"] += 1
             if r.get("skipped_reason") and not r["deduped"]:
                 counts["skipped_quiet"] += 1
+            if r.get("suppressed_range"):
+                counts["suppressed_range"] += 1
             if throttle_seconds and i < len(watchlist) - 1:
                 time.sleep(throttle_seconds)
 
@@ -702,6 +747,10 @@ def scan(tickers: Optional[list[str]] = None,
     if flags_state_out and not dry_run:
         _save_last_source_flags(flags_state_out)
 
+    if counts["suppressed_range"]:
+        log.info("scanner: range-filter suppressed %d mid-range WATCH alert(s) "
+                 "this cycle (band %.2f-%.2f)",
+                 counts["suppressed_range"], ALERT_RANGE_LOW, ALERT_RANGE_HIGH)
     summary = {
         "started_at":   started_at.isoformat(),
         "finished_at":  datetime.now(timezone.utc).isoformat(),
