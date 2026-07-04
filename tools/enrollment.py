@@ -48,6 +48,33 @@ class TableSource:
             return {r[0].upper() for r in cur.fetchall() if r[0]}
 
 
+class BookSource:
+    """EnrollableSource over the Fidelity book (book_positions). Current names = the
+    latest snapshot's non-cash underlyings (options resolve to the underlying); a name
+    is 'added' on the day it FIRST appears in any snapshot. So held book holdings feed
+    the MFR enrollment backlog just like a roster does — cash/money-market excluded."""
+
+    name = "book"
+    _BASE = ("FROM book_positions WHERE asset_class <> 'cash' "
+             "AND COALESCE(quantity, 0) <> 0")
+
+    def current_names(self) -> set:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT DISTINCT underlying {self._BASE} "
+                "AND snapshot_date = (SELECT max(snapshot_date) FROM book_positions)")
+            return {r[0].upper() for r in cur.fetchall() if r[0]}
+
+    def names_added_on(self, day) -> set:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT underlying {self._BASE} "
+                "GROUP BY underlying HAVING min(snapshot_date) = %s", (day,))
+            return {r[0].upper() for r in cur.fetchall() if r[0]}
+
+
 def _today_et() -> date:
     try:
         from zoneinfo import ZoneInfo
@@ -196,23 +223,62 @@ def run_weekly_backlog() -> str:
     lines.append("(paste names into MFR → Activate Assets)")
     try:
         from notifier import send_telegram
-        send_telegram("MFR backlog", "\n".join(lines), priority=1)
+        send_telegram("MFR backlog", "\n".join(lines) + dark_footer(), priority=1)
     except Exception as e:
         log.warning("backlog send failed: %s", e)
         return f"error:{e}"
     return f"sent:{len(to_add)}(persisted={len(persisted)})"
 
 
+# ─────────────────────────── DARK footer (enrollment-gap reminder) ──────────────────
+# STANDING RULE: every MFR-context Telegram command appends the live "not yet enrolled"
+# set so the gap stays visible until it's closed. Distinct from the backlog to-add list:
+# the footer is the SCREENER truth — every held/tagged name that currently has no MFR
+# range — computed live, book AND tagged, read-only.
+
+def live_dark_names() -> dict:
+    """v_screener names with NO MFR range, split into book holdings and tagged-only.
+    Read-only. Empty lists if v_screener is unavailable."""
+    import db_pg
+    try:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT ticker, held FROM v_screener WHERE NOT has_range ORDER BY ticker")
+            rows = cur.fetchall()
+    except Exception as e:
+        log.warning("live_dark_names failed: %s", e)
+        return {"book": [], "tagged": []}
+    return {"book":   [t for t, held in rows if held],
+            "tagged": [t for t, held in rows if not held]}
+
+
+def dark_footer() -> str:
+    """The 'not yet enrolled' footer appended to every MFR command. Returns '' only if
+    nothing is dark (rare)."""
+    d = live_dark_names()
+    book, tagged = d["book"], d["tagged"]
+    if not book and not tagged:
+        return "\n\n🌑 Not yet enrolled: none — every held/tagged name has an MFR range."
+    lines = [f"\n\n🌑 Not yet enrolled — no MFR range ({len(book) + len(tagged)}):"]
+    if book:
+        lines.append(f"  📗 book ({len(book)}): " + " ".join(book))
+    if tagged:
+        lines.append(f"  🏷 tagged ({len(tagged)}): " + " ".join(tagged))
+    lines.append("  → enroll on the MFR site; ranges arrive via the nightly fan-out.")
+    return "\n".join(lines)
+
+
 def handle_backlog_command(text: str):
     """On-demand Telegram trigger: 'MFR BACKLOG' / '/mfrbacklog' -> reply with the full
-    backlog now (read-only; no throttle, no weeks-seen bump). Returns None if not the
-    command so the listener falls through to normal handling."""
+    backlog now (read-only; no throttle, no weeks-seen bump). Always appends the live
+    DARK 'not yet enrolled' footer. Returns None if not the command so the listener
+    falls through to normal handling."""
     if not text or text.strip().upper() not in ("MFR BACKLOG", "/MFRBACKLOG"):
         return None
     r = compile_backlog()
     to_add = r["to_add"]
     if not to_add:
-        return "✅ MFR backlog clear — every roster name is active in MFR (excl. known-uncoverable)."
+        return ("✅ MFR backlog clear — every roster name is active in MFR "
+                "(excl. known-uncoverable)." + dark_footer())
     seen = _load_seen()
     persisted = [t for t in to_add if int(seen.get(t, 0)) >= PERSIST_WEEKS]
     prov = ", ".join(f"{k}={len(v)}" for k, v in r["per_source"].items() if v)
@@ -220,4 +286,4 @@ def handle_backlog_command(text: str):
     if persisted:
         lines.append(f"⚠️ persisted ≥{PERSIST_WEEKS} wks: " + " ".join(persisted))
     lines.append("(paste into MFR → Activate Assets)")
-    return "\n".join(lines)
+    return "\n".join(lines) + dark_footer()
