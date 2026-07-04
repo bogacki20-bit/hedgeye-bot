@@ -92,6 +92,32 @@ def read_clean(path, header_startswith):
 # ---------------------------------------------------------------------------
 # POSITIONS
 # ---------------------------------------------------------------------------
+def _agg_lots(rows):
+    """Collapse multiple Fidelity lot rows for one (account, symbol) into a single
+    book position. Sums quantity / market_value / cost_basis / total_gl_dollar /
+    pct_of_account; recomputes avg_cost (= cost_basis/quantity) and total_gl_pct;
+    preserves the Type breakdown as lot_types (e.g. 'Cash+Margin'). Python owns all
+    arithmetic. Single-lot positions pass through unchanged but still get lot_types."""
+    def _sum(key):
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return sum(vals) if vals else None
+    base = dict(rows[0])
+    types = sorted({(r.get("_lot_type") or "").strip()
+                    for r in rows if (r.get("_lot_type") or "").strip()})
+    if len(rows) > 1:
+        qty, cb, gl = _sum("quantity"), _sum("cost_basis"), _sum("total_gl_dollar")
+        base["quantity"]        = qty
+        base["market_value"]    = _sum("market_value")
+        base["cost_basis"]      = cb
+        base["total_gl_dollar"] = gl
+        base["pct_of_account"]  = _sum("pct_of_account")
+        base["avg_cost"]        = (cb / qty) if (cb is not None and qty not in (None, 0)) else None
+        base["total_gl_pct"]    = (gl / cb * 100.0) if (gl is not None and cb not in (None, 0)) else None
+    base["lot_types"] = "+".join(types) if types else None
+    base.pop("_lot_type", None)
+    return base
+
+
 def parse_positions(path, snapshot_date, keep_cash, accounts):
     _, rows = read_clean(path, "Account Number")
     out, anomalies = [], []
@@ -139,8 +165,14 @@ def parse_positions(path, snapshot_date, keep_cash, accounts):
             "total_gl_dollar": money(r.get("Total Gain/Loss Dollar")),
             "total_gl_pct": pct(r.get("Total Gain/Loss Percent")),
             "pct_of_account": pct(r.get("Percent Of Account")),
+            "_lot_type": (r.get("Type") or "").strip() or None,
         })
-    return out, anomalies
+    # Collapse Fidelity lot rows (Cash / Margin / Short) into one position per
+    # (account, symbol). Type breakdown preserved as lot_types (decision-relevant).
+    groups: dict = {}
+    for p in out:
+        groups.setdefault((p["account_number"], p["symbol"]), []).append(p)
+    return [_agg_lots(g) for g in groups.values()], anomalies
 
 
 # ---------------------------------------------------------------------------
