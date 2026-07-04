@@ -86,7 +86,8 @@ def _tier(bucket) -> str:
     b = bucket or ""
     if b.startswith("active"):   return "●●"   # active
     if b.startswith("top_idea"): return "●"    # top idea
-    return "·"                                 # bench
+    if b:                        return "·"    # bench
+    return "—"                                 # untagged (book-only, e.g. an ETF)
 
 
 def parse_query(text: str) -> dict:
@@ -260,21 +261,43 @@ def _corr_for(tickers) -> dict:
     return out
 
 
-def _fetch_tag_slice(sector, buckets):
-    """All v_screener rows in the requested sector + direction buckets (tag filters
-    only — no trend/range/momentum gates yet)."""
+_SLICE_COLS = ("SELECT ticker, subsector, hedgeye_bucket_0629, range_pos, momentum_ok, "
+               "momentum_dir, divergence, hurst, iv, rv, ivpd, trend_dir, trend_source, "
+               "held, has_range FROM v_screener")
+
+
+def _rows(sql, args):
     import db_pg
-    sql = ("SELECT ticker, subsector, hedgeye_bucket_0629, range_pos, momentum_ok, "
-           "momentum_dir, divergence, hurst, iv, rv, ivpd, trend_dir, trend_source, "
-           "held, has_range FROM v_screener WHERE hedgeye_bucket_0629 = ANY(%s)")
-    args = [buckets]
-    if sector:
-        sql += " AND gics_sector = %s"
-        args.append(sector)
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql, args)
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _fetch_tag_slice(sector, buckets):
+    """All v_screener rows in the requested sector + direction buckets (tag filters
+    only — no trend/range/momentum gates yet)."""
+    sql = _SLICE_COLS + " WHERE hedgeye_bucket_0629 = ANY(%s)"
+    args = [buckets]
+    if sector:
+        sql += " AND gics_sector = %s"
+        args.append(sector)
+    return _rows(sql, args)
+
+
+def _fetch_book_slice(sector):
+    """The 'my book' universe: every held name (book_positions underlyings, latest
+    snapshot — cash/zero-qty already excluded in the view), NOT bucket-filtered, so
+    untagged holdings (sector ETFs like XLV) are included. Direction is enforced
+    downstream by the mandatory TREND gate, not by bucket. Sector filter still applies
+    where a name is tagged (untagged ETFs have NULL sector and drop out of a sector
+    screen, as intended)."""
+    sql = _SLICE_COLS + " WHERE held = true"
+    args = []
+    if sector:
+        sql += " AND gics_sector = %s"
+        args.append(sector)
+    return _rows(sql, args)
 
 
 def _is_mfr_only_topidea(r) -> bool:
@@ -305,7 +328,7 @@ def _fmt_row(r, corr) -> str:
     div = f" ⚡DIV({r['divergence']})" if r.get("divergence") else ""
     book = " 📗own" if r["held"] else ""
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
-    return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} {trend:<11} "
+    return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<5} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
             f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{warn}")
@@ -317,15 +340,14 @@ def run_screen_q(q: dict) -> str:
     rows display (Hedgeye primary, MFR fallback)."""
     buckets, req_trend = _DIR_BUCKETS[q["direction"]]
     try:
-        slice_all = _fetch_tag_slice(q["sector"], buckets)
+        # "my book" swaps the base universe from the tagged single-name roster to the
+        # book holdings (incl. untagged ETFs like XLV). Direction is then enforced by
+        # the mandatory TREND gate, not by bucket. Everything — results, dark, gated —
+        # is book-scoped, so a book query never leaks non-book names into its tails.
+        slice_ = _fetch_book_slice(q["sector"]) if q["held"] else _fetch_tag_slice(q["sector"], buckets)
     except Exception as e:
         log.exception("screen query failed")
         return f"🛑 SCREEN error: {e}"
-
-    # "my book" is a base-universe restriction (like sector), NOT a late gate: scope
-    # EVERYTHING — results, dark, and gated tails — to the book, so a book query never
-    # leaks non-book names into its ⛔/🌑 sections.
-    slice_ = [r for r in slice_all if r["held"]] if q["held"] else slice_all
 
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
@@ -369,19 +391,18 @@ def run_screen_q(q: dict) -> str:
                      "? = <20 overlapping days.")
     else:
         near_lbl = f"near_{q['near']}" if q["near"] else "range gate (none)"
+        base_lbl = "book holdings" if q["held"] else "tag match (sector+bucket)"
         funnel = [
-            f"tag match (sector+bucket): {len(slice_all)}",
-            (f"→ in-book:                 {len(slice_)}" if q["held"] else None),
+            f"{base_lbl}: {len(slice_)}",
             f"→ has MFR range:           {len(ranged)}",
             f"→ TREND={req_trend} (Rule-1): {len(after_trend)}",
             f"→ {near_lbl}:              {len(after_near)}",
             (f"→ momentum_ok:             {len(after_mom)}" if q["momentum"] else None),
         ]
         funnel = [f for f in funnel if f]
-        # FIRST funnel stage that hit 0 — in-book scoping comes right after tag match.
-        stages = [("tag match", len(slice_all))]
-        if q["held"]:     stages.append(("in-book", len(slice_)))
-        stages += [("has-range", len(ranged)), (f"TREND={req_trend}", len(after_trend))]
+        # FIRST funnel stage that hit 0.
+        stages = [(base_lbl, len(slice_)), ("has-range", len(ranged)),
+                  (f"TREND={req_trend}", len(after_trend))]
         if q["near"]:     stages.append((near_lbl, len(after_near)))
         if q["momentum"]: stages.append(("momentum_ok", len(after_mom)))
         culprit = next((name for name, n in stages if n == 0), "unknown")
@@ -409,11 +430,15 @@ def run_screen_q(q: dict) -> str:
 
     lines.append("")
     if dark:
-        lines.append(f"🌑 DARK — passed tag filters, NO MFR range ({len(dark)}):")
+        dark_hdr = ("held, NO MFR range" if q["held"]
+                    else "passed tag filters, NO MFR range")
+        lines.append(f"🌑 DARK — {dark_hdr} ({len(dark)}):")
         lines += [f"  {_tier(r['hedgeye_bucket_0629'])} {r['ticker']:<9} "
-                  f"{(r['subsector'] or '')} [{r['hedgeye_bucket_0629']}]" for r in dark]
+                  f"{(r['subsector'] or '—')} [{r['hedgeye_bucket_0629'] or 'book'}]"
+                  for r in dark]
     else:
-        lines.append("🌑 DARK: none — every tag-matched name has an MFR range.")
+        base = "held" if q["held"] else "tag-matched"
+        lines.append(f"🌑 DARK: none — every {base} name has an MFR range.")
     return "\n".join(lines)
 
 
