@@ -332,7 +332,7 @@ def _run_listener(token, allowed_chat_id):
                 # SCREEN natural-language screener (sentinel-gated; read-only).
                 try:
                     from tools.screener import handle_screen_command
-                    sc_reply = handle_screen_command(text)
+                    sc_reply = handle_screen_command(text, chat_id)
                 except Exception as e:
                     log.error(f"screen command failed: {e}", exc_info=True)
                     sc_reply = None
