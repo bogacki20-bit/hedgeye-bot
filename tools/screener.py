@@ -54,14 +54,18 @@ _SECTOR_NAMES = [canon for _, canon in _SECTORS]
 
 _NEAR_BOTTOM = r"bottom of (?:the )?range|near (?:the )?(?:low|bottom)|close to (?:the )?(?:low|bottom)"
 _NEAR_TOP    = r"top of (?:the )?range|near (?:the )?(?:high|top)|close to (?:the )?(?:high|top)"
-_HELD        = r"in my book|that i own|\bi own\b|\bheld\b|that i hold|that i'?m holding"
+# "book" is filter-vocabulary (removed from _FILLER): my book / the book /
+# book longs/shorts / bare "book" all flag held, alongside the ownership verbs.
+_HELD        = (r"in my book|\bmy book\b|\bthe book\b|book\s+(?:longs?|shorts?)|\bbook\b"
+                r"|that i own|\bi own\b|\bi hold\b|\bheld\b|that i hold"
+                r"|that i'?m holding|\bholding\b")
 _GATED       = r"show gated|show all|include gated|with gated|\bgated\b"
 
 # Words that legitimately appear in a screen sentence but aren't screen tokens —
 # excluded from the "unrecognized" check so we don't flag connective/position words.
 _FILLER = {
     "all", "the", "a", "an", "of", "in", "my", "to", "for", "me", "up", "and", "or",
-    "with", "that", "i", "own", "book", "hold", "holding", "range", "list", "them",
+    "with", "that", "i", "range", "list", "them",   # own/book/hold/holding -> _HELD vocab
     "show", "near", "close", "top", "bottom", "low", "high", "at", "on", "side",
     "most", "down", "bring", "give", "screen", "please", "bullish", "bearish",
     "tickers", "names", "stocks", "im", "are", "is", "be", "want", "see",
@@ -313,10 +317,15 @@ def run_screen_q(q: dict) -> str:
     rows display (Hedgeye primary, MFR fallback)."""
     buckets, req_trend = _DIR_BUCKETS[q["direction"]]
     try:
-        slice_ = _fetch_tag_slice(q["sector"], buckets)
+        slice_all = _fetch_tag_slice(q["sector"], buckets)
     except Exception as e:
         log.exception("screen query failed")
         return f"🛑 SCREEN error: {e}"
+
+    # "my book" is a base-universe restriction (like sector), NOT a late gate: scope
+    # EVERYTHING — results, dark, and gated tails — to the book, so a book query never
+    # leaks non-book names into its ⛔/🌑 sections.
+    slice_ = [r for r in slice_all if r["held"]] if q["held"] else slice_all
 
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
@@ -332,10 +341,9 @@ def run_screen_q(q: dict) -> str:
     else:
         after_near = after_trend
     after_mom = [r for r in after_near if r["momentum_ok"] is True] if q["momentum"] else after_near
-    after_held = [r for r in after_mom if r["held"]] if q["held"] else after_mom
 
     result = sorted(
-        after_held,
+        after_mom,   # held already applied at the base scope above
         key=lambda r: (r["range_pos"] is None, float(r["range_pos"]) if r["range_pos"] is not None else 0),
         reverse=(q["direction"] == "shorts"),
     )
@@ -362,20 +370,20 @@ def run_screen_q(q: dict) -> str:
     else:
         near_lbl = f"near_{q['near']}" if q["near"] else "range gate (none)"
         funnel = [
-            f"tag match (sector+bucket): {len(slice_)}",
+            f"tag match (sector+bucket): {len(slice_all)}",
+            (f"→ in-book:                 {len(slice_)}" if q["held"] else None),
             f"→ has MFR range:           {len(ranged)}",
             f"→ TREND={req_trend} (Rule-1): {len(after_trend)}",
             f"→ {near_lbl}:              {len(after_near)}",
             (f"→ momentum_ok:             {len(after_mom)}" if q["momentum"] else None),
-            (f"→ in-book:                 {len(after_held)}" if q["held"] else None),
         ]
         funnel = [f for f in funnel if f]
-        # FIRST funnel stage that hit 0 (tag match / has-range / trend / near / ...).
-        stages = [("tag match", len(slice_)), ("has-range", len(ranged)),
-                  (f"TREND={req_trend}", len(after_trend))]
+        # FIRST funnel stage that hit 0 — in-book scoping comes right after tag match.
+        stages = [("tag match", len(slice_all))]
+        if q["held"]:     stages.append(("in-book", len(slice_)))
+        stages += [("has-range", len(ranged)), (f"TREND={req_trend}", len(after_trend))]
         if q["near"]:     stages.append((near_lbl, len(after_near)))
         if q["momentum"]: stages.append(("momentum_ok", len(after_mom)))
-        if q["held"]:     stages.append(("in-book", len(after_held)))
         culprit = next((name for name, n in stages if n == 0), "unknown")
         lines.append(f"0 matches — emptied by: **{culprit}**")
         lines.append("")
