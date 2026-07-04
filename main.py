@@ -312,6 +312,30 @@ if __name__ == "__main__":
     else:
         log.info("Quad early-warning disabled (QUAD_EARLYWARN_ENABLED=false).")
 
+    # Morning quad-staleness ping (~6:00am ET). If the quad hasn't been confirmed in
+    # QUAD_CONFIRM_MAX_AGE_DAYS (default 1), Telegram a reminder — reply OK to
+    # confirm (stamps last-confirmed; does NOT change the quad) or QUAD: to change.
+    # Never infers/auto-sets the quad. Toggle: QUAD_CONFIRM_ENABLED.
+    if os.getenv("QUAD_CONFIRM_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _quad_confirm_loop():
+            import time
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            while True:
+                try:
+                    if _dt.now(ZoneInfo("America/New_York")).hour >= 6:   # ~6am ET onward
+                        from tools.quad_confirm import run_morning_ping
+                        st = run_morning_ping()
+                        if st.startswith("sent"):
+                            log.info("quad_confirm ping: %s", st)
+                except Exception as e:
+                    log.error("quad_confirm loop error: %s", e)
+                time.sleep(1800)  # check every 30 min; internal once/day throttle
+        threading.Thread(target=_quad_confirm_loop, daemon=True, name="quad-confirm").start()
+        log.info("Quad morning-ping thread started.")
+    else:
+        log.info("Quad morning-ping disabled (QUAD_CONFIRM_ENABLED=false).")
+
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via

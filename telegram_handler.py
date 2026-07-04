@@ -339,6 +339,27 @@ def _run_listener(token, allowed_chat_id):
                 if sc_reply is not None:
                     _send_message(token, chat_id, sc_reply)
                     continue
+                # Quad confirm reply — "OK" acts ONLY when a morning ping is pending
+                # (stamps last-confirmed; never changes the quad value).
+                try:
+                    from tools.quad_confirm import handle_quad_confirm_reply
+                    qc_reply = handle_quad_confirm_reply(text)
+                except Exception as e:
+                    log.error(f"quad confirm reply failed: {e}", exc_info=True)
+                    qc_reply = None
+                if qc_reply is not None:
+                    _send_message(token, chat_id, qc_reply)
+                    continue
+                # MOVES — Position Monitor bucket transitions (read-only).
+                try:
+                    from tools.bucket_history import handle_moves_command
+                    mv_reply = handle_moves_command(text)
+                except Exception as e:
+                    log.error(f"moves command failed: {e}", exc_info=True)
+                    mv_reply = None
+                if mv_reply is not None:
+                    _send_message(token, chat_id, mv_reply)
+                    continue
                 # MFR backlog on-demand command (read-only): "MFR BACKLOG" / "/mfrbacklog".
                 try:
                     from tools.enrollment import handle_backlog_command
