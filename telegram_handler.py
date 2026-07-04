@@ -10,6 +10,8 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
+
 import requests
 
 log = logging.getLogger("telegram")
@@ -19,6 +21,9 @@ LONG_POLL_TIMEOUT = 30
 HTTP_TIMEOUT = LONG_POLL_TIMEOUT + 5
 GENERAL_ERROR_SLEEP = 5
 CONFLICT_SLEEP = 30
+TG_MAX_CHARS = 4096                       # Telegram hard cap per message
+HEARTBEAT_INTERVAL = 60                    # min seconds between bot_state heartbeat writes
+LISTENER_HEARTBEAT_KEY = "telegram_listener_heartbeat"   # doctor reads this
 
 
 def _api_get(token, method, params=None, timeout=HTTP_TIMEOUT):
@@ -28,17 +33,44 @@ def _api_get(token, method, params=None, timeout=HTTP_TIMEOUT):
     return response.json()
 
 
+def _chunk_message(text, limit=TG_MAX_CHARS):
+    """Split a reply into <=limit-char parts on line boundaries so long SCREEN
+    output is delivered in pieces instead of being rejected (HTTP 400) and lost."""
+    if text is None:
+        return []
+    if len(text) <= limit:
+        return [text]
+    chunks, cur = [], ""
+    for line in text.split("\n"):
+        if len(line) > limit:                     # pathological single long line
+            if cur:
+                chunks.append(cur); cur = ""
+            for i in range(0, len(line), limit):
+                chunks.append(line[i:i + limit])
+            continue
+        if cur and len(cur) + 1 + len(line) > limit:
+            chunks.append(cur); cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 def _send_message(token, chat_id, text):
-    try:
-        _api_get(
-            token,
-            "sendMessage",
-            params={"chat_id": chat_id, "text": text},
-            timeout=10,
-        )
-        log.info(f"Sent reply to chat {chat_id}: {text!r}")
-    except Exception as e:
-        log.error(f"sendMessage failed: {e}")
+    """Send a reply, chunking to Telegram's 4096-char limit. Send failures are LOUD
+    (log status + response body) but never raise — one bad chunk must not abort the
+    listener loop."""
+    parts = _chunk_message(text)
+    for idx, chunk in enumerate(parts):
+        tag = f" [{idx + 1}/{len(parts)}]" if len(parts) > 1 else ""
+        try:
+            _api_get(token, "sendMessage",
+                     params={"chat_id": chat_id, "text": chunk}, timeout=10)
+            log.info(f"Sent reply to chat {chat_id}{tag} ({len(chunk)} chars).")
+        except Exception as e:
+            body = getattr(getattr(e, "response", None), "text", "")
+            log.error(f"sendMessage failed{tag} ({len(chunk)} chars): {e} {body}".strip())
 
 
 def _delete_webhook(token):
@@ -258,14 +290,80 @@ def handle_decision(decision: dict) -> str:
     )
 
 
+def _dispatch_message(token, chat_id, text):
+    """Route one whitelisted text message through the handler chain. First handler to
+    return non-None OWNS the message and replies. Each handler is individually guarded
+    so one handler's bug can't block the others (every message is offered to all of
+    them) — but a handler that RAISES is remembered, and if nothing ends up handling
+    the message the error is surfaced as a reply instead of masquerading as a plain
+    echo. The whole call is also wrapped by the caller (crash containment)."""
+    errors = []
+
+    def run(name, fn):
+        try:
+            return fn()
+        except Exception as e:
+            log.error(f"{name} handler failed: {e}", exc_info=True)
+            errors.append(f"{name}: {e}")
+            return None
+
+    # (name, thunk) in priority order; imports inside the thunk so an import error is
+    # caught too. Sentinel-gated handlers return None to decline.
+    def _ss():   from tools.ss_roster import handle_telegram_text;        return handle_telegram_text(text)
+    def _quad(): from tools.quad_manual import handle_quad_command;       return handle_quad_command(text)
+    def _scr():  from tools.screener import handle_screen_command;        return handle_screen_command(text, chat_id)
+    def _qc():   from tools.quad_confirm import handle_quad_confirm_reply; return handle_quad_confirm_reply(text)
+    def _mv():   from tools.bucket_history import handle_moves_command;   return handle_moves_command(text)
+    def _bl():   from tools.enrollment import handle_backlog_command;     return handle_backlog_command(text)
+
+    for name, fn in (("ss_roster", _ss), ("quad", _quad), ("screen", _scr),
+                     ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl)):
+        reply = run(name, fn)
+        if reply is not None:
+            _send_message(token, chat_id, reply)
+            return
+
+    # Structured trade decision, else echo. If a handler errored above and nothing
+    # claimed the message, surface the error rather than a benign echo.
+    decision = parse_decision(text)
+    if decision:
+        reply = run("decision", lambda: handle_decision(decision))
+        _send_message(token, chat_id, reply if reply is not None
+                      else f"Decision parsing error: {errors[-1] if errors else 'unknown'}")
+    elif errors:
+        _send_message(token, chat_id, f"🛑 handler error: {errors[0]}")
+    else:
+        _send_message(token, chat_id, f"Got it: {text}")
+
+
+def _write_listener_heartbeat():
+    """Stamp bot_state so the doctor can detect a dead listener even while the process
+    stays 'healthy'. Best-effort; never raises into the loop."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute(
+                "INSERT INTO bot_state (key,value,updated_at) VALUES (%s,%s,NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                (LISTENER_HEARTBEAT_KEY, datetime.now(timezone.utc).isoformat()))
+            c.commit()
+    except Exception as e:
+        log.warning(f"listener heartbeat write failed: {e}")
+
+
 def _run_listener(token, allowed_chat_id):
     _delete_webhook(token)
     offset = _drain_pending_updates(token)
+    last_heartbeat = 0.0
 
     log.info(f"Telegram listener started. Whitelisted chat_id: {allowed_chat_id}")
 
     while True:
         try:
+            now = time.time()
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                _write_listener_heartbeat()
+                last_heartbeat = now
             params = {"timeout": LONG_POLL_TIMEOUT}
             if offset is not None:
                 params["offset"] = offset
@@ -308,87 +406,62 @@ def _run_listener(token, allowed_chat_id):
                     continue
 
                 log.info(f"Received from {chat_id}: {text!r}")
-                # SS roster upload flow (sentinel-gated; only acts on SS:/CONFIRM/CANCEL).
-                # A paste only STAGES; nothing is written until CONFIRM.
+                # Crash containment: ANY failure handling one message logs a traceback,
+                # replies an error to the chat, and the loop continues to the next
+                # update. A single poisoned command can never kill the listener. The
+                # offset was already advanced above, so a message that reliably throws
+                # is acked (won't be re-fetched forever).
                 try:
-                    from tools.ss_roster import handle_telegram_text
-                    ss_reply = handle_telegram_text(text)
+                    _dispatch_message(token, chat_id, text)
                 except Exception as e:
-                    log.error(f"ss_roster handler failed: {e}", exc_info=True)
-                    ss_reply = None
-                if ss_reply is not None:
-                    _send_message(token, chat_id, ss_reply)
-                    continue
-                # QUAD manual bridge (sentinel-gated; CONFIRM only acts if a QUAD is staged).
-                try:
-                    from tools.quad_manual import handle_quad_command
-                    q_reply = handle_quad_command(text)
-                except Exception as e:
-                    log.error(f"quad command failed: {e}", exc_info=True)
-                    q_reply = None
-                if q_reply is not None:
-                    _send_message(token, chat_id, q_reply)
-                    continue
-                # SCREEN natural-language screener (sentinel-gated; read-only).
-                try:
-                    from tools.screener import handle_screen_command
-                    sc_reply = handle_screen_command(text, chat_id)
-                except Exception as e:
-                    log.error(f"screen command failed: {e}", exc_info=True)
-                    sc_reply = None
-                if sc_reply is not None:
-                    _send_message(token, chat_id, sc_reply)
-                    continue
-                # Quad confirm reply — "OK" acts ONLY when a morning ping is pending
-                # (stamps last-confirmed; never changes the quad value).
-                try:
-                    from tools.quad_confirm import handle_quad_confirm_reply
-                    qc_reply = handle_quad_confirm_reply(text)
-                except Exception as e:
-                    log.error(f"quad confirm reply failed: {e}", exc_info=True)
-                    qc_reply = None
-                if qc_reply is not None:
-                    _send_message(token, chat_id, qc_reply)
-                    continue
-                # MOVES — Position Monitor bucket transitions (read-only).
-                try:
-                    from tools.bucket_history import handle_moves_command
-                    mv_reply = handle_moves_command(text)
-                except Exception as e:
-                    log.error(f"moves command failed: {e}", exc_info=True)
-                    mv_reply = None
-                if mv_reply is not None:
-                    _send_message(token, chat_id, mv_reply)
-                    continue
-                # MFR backlog on-demand command (read-only): "MFR BACKLOG" / "/mfrbacklog".
-                try:
-                    from tools.enrollment import handle_backlog_command
-                    bl = handle_backlog_command(text)
-                except Exception as e:
-                    log.error(f"backlog command failed: {e}", exc_info=True)
-                    bl = None
-                if bl is not None:
-                    _send_message(token, chat_id, bl)
-                    continue
-                # Try to parse as a structured decision; fall back to echo if not.
-                decision = parse_decision(text)
-                if decision:
-                    try:
-                        reply = handle_decision(decision)
-                    except Exception as e:
-                        log.error(f"handle_decision failed: {e}", exc_info=True)
-                        reply = f"Decision parsing error: {e}"
-                    _send_message(token, chat_id, reply)
-                else:
-                    _send_message(token, chat_id, f"Got it: {text}")
+                    log.error(f"dispatch failed for {text!r}: {e}", exc_info=True)
+                    _send_message(token, chat_id, f"🛑 handler error: {e}")
 
         except Exception as e:
             log.error(f"Listener loop error: {e}. Sleeping {GENERAL_ERROR_SLEEP}s.")
             time.sleep(GENERAL_ERROR_SLEEP)
 
 
+def _alert_listener_down(token, chat_id, reason, next_retry_s):
+    """Loud death: alert both via the priority notifier (Pushover, if wired) and a
+    direct Telegram sendMessage, so a dead listener is never silent."""
+    msg = f"🚨 Telegram listener DOWN ({reason}). Restarting in {next_retry_s}s."
+    try:
+        from notifier import send_telegram as _notify
+        _notify("Listener down", msg, priority=1)
+    except Exception as e:
+        log.error(f"listener-down notifier alert failed: {e}")
+    try:
+        _api_get(token, "sendMessage",
+                 params={"chat_id": chat_id, "text": msg}, timeout=10)
+    except Exception as e:
+        log.error(f"listener-down direct alert failed: {e}")
+
+
+def _listener_supervisor(token, chat_id):
+    """Never let the process stay 'healthy' with a dead command interface. Run the
+    listener; if it returns or crashes, log CRITICAL, alert, and restart with
+    exponential backoff (reset after a healthy run)."""
+    backoff = 5
+    while True:
+        started = time.time()
+        try:
+            _run_listener(token, chat_id)
+            log.critical("telegram listener returned unexpectedly; restarting.")
+            reason = "listener returned"
+        except Exception as e:
+            log.critical(f"telegram listener CRASHED: {e}", exc_info=True)
+            reason = f"crash: {e}"
+        # Reset backoff if it had been running healthily; otherwise escalate.
+        backoff = 5 if (time.time() - started) > 120 else min(backoff * 2, 300)
+        _alert_listener_down(token, chat_id, reason, backoff)
+        time.sleep(backoff)
+
+
 def start_telegram_listener():
-    """Spawn the Telegram listener as a daemon background thread."""
+    """Spawn the supervised Telegram listener as a daemon background thread. The
+    supervisor restarts the listener on death so the command interface can't die
+    silently while the process stays up."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -398,11 +471,11 @@ def start_telegram_listener():
         return None
 
     thread = threading.Thread(
-        target=_run_listener,
+        target=_listener_supervisor,
         args=(token, chat_id),
-        name="telegram-listener",
+        name="telegram-listener-supervisor",
         daemon=True,
     )
     thread.start()
-    log.info("Telegram listener thread launched.")
+    log.info("Telegram listener (supervised) thread launched.")
     return thread
