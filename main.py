@@ -336,6 +336,30 @@ if __name__ == "__main__":
     else:
         log.info("Quad morning-ping disabled (QUAD_CONFIRM_ENABLED=false).")
 
+    # Monday-evening operator-duties ping (~6:00pm ET). Reminder only — assembles
+    # from live table state; every action routes through the existing gated commands
+    # (SS:, QUAD:, PM loader CONFIRM, book ingest). Toggle: OPERATOR_PING_ENABLED.
+    if os.getenv("OPERATOR_PING_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _operator_ping_loop():
+            import time
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            while True:
+                try:
+                    now_et = _dt.now(ZoneInfo("America/New_York"))
+                    if now_et.weekday() == 0 and now_et.hour >= 18:   # Monday, ~6pm ET
+                        from tools.operator_checklist import run_operator_ping
+                        st = run_operator_ping()
+                        if st == "sent":
+                            log.info("operator_ping: sent")
+                except Exception as e:
+                    log.error("operator_ping loop error: %s", e)
+                time.sleep(1800)  # check every 30 min; internal once/day throttle
+        threading.Thread(target=_operator_ping_loop, daemon=True, name="operator-ping").start()
+        log.info("Operator-ping thread started.")
+    else:
+        log.info("Operator-ping disabled (OPERATOR_PING_ENABLED=false).")
+
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via
