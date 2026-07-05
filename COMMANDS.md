@@ -11,7 +11,7 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 
 ### `SCREEN`
 - **Syntax:** `SCREEN <plain-english screen>` — natural-language screener over your tagged universe.
-- **Example:** `SCREEN energy shorts top of range` · `SCREEN healthcare longs near the bottom with momentum`
+- **Example:** `SCREEN energy shorts top of range` · `SCREEN etf pro shorts` · `SCREEN keiths longs near the bottom` · `SCREEN signal strength longs`
 - **Writes DB?** No — read-only. *(handler: `tools/screener.py → handle_screen_command`)*
 
 **Direction is required** (the TREND gate is tied to it): say `longs` or `shorts`.
@@ -20,6 +20,7 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 | Phrase | Effect |
 |--------|--------|
 | `longs` / `shorts` | direction + Rule-1 TREND gate (BULLISH / BEARISH) |
+| **source lens** — `etf pro`, `portfolio solutions`, `investing ideas`, `keith's signals`/`keiths`, `signal strength`, `position monitor` | screen a whole signal source (not just the tagged roster). No source = tagged roster (`in my book` = your holdings). Header names the source, e.g. `SHORTS · ETF Pro`. |
 | any GICS sector — `healthcare`, `tech`, `energy`, `financials`, `staples`, `discretionary`, `industrials`, `materials`, `utilities`, `real estate`/`reits`, `communication(s)`, `digital assets`/`crypto` | sector filter |
 | `bottom of range` / `near the low` | `near_bottom` (range_pos ≤ 0.20) |
 | `top of range` / `near the high` | `near_top` (range_pos ≥ 0.80) |
@@ -27,7 +28,9 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 | `in my book` / `that I own` / `held` | only names you hold |
 | `show gated` / `show all` / `include gated` | list the names Rule-1 dropped (see below) |
 
-**All three tiers are screenable**, each row marked: `●● active` · `● top-idea` · `· bench`.
+**All three tiers are screenable**, each row marked: `●● active` · `● top-idea` · `· bench` · `—` untagged (a source name not in the tagged roster).
+
+**Source lenses** are composable with everything (`SCREEN etf pro shorts top of range in my book`). A source shows its WHOLE membership — names not in the tagged roster appear untagged (`—`) and, if un-ranged, in `🌑 DARK`. **Sided sources** carry a stored side rendered as `side:short` per row: `keiths` filters on Keith's stored long/short **and** the TREND gate (`SCREEN keiths shorts` = Keith's short book that's also BEARISH); `etf pro` gains the same once its bias column lands.
 
 **Per-row columns:** `trend·src` (hdg=Hedgeye / mfr=MFR fallback) · `rp` range position · `mom` (BULL/BEAR/NEUT, from MFR — no history wait) · `h` Hurst (>0.5 trending) · `iv rv ivpd` (MFR vol, authoritative) · `cSPY cUUP` (bot-**computed** Pearson vs SPY/UUP daily returns — labeled *calc*, `?` when <20 days). Flags: `⚡DIV(...)` trade-vs-momentum divergence (exhaustion-fade), `📗own` held, `⚠mfr-only` top-idea gated on MFR trend only.
 

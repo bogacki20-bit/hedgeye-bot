@@ -81,6 +81,31 @@ _DIR_BUCKETS = {
 # long-running thread, so a module dict persists across messages within the process).
 _PENDING: dict = {}
 
+# Source phrases (etf pro / portfolio solutions / signal strength / …) -> registry tag,
+# longest phrase first so "signal strength" wins over "strength". 'book' is intentionally
+# excluded — it's handled by _HELD as a filter, not a base source.
+_SOURCE_PHRASES = None
+
+
+def _source_phrase_list():
+    global _SOURCE_PHRASES
+    if _SOURCE_PHRASES is None:
+        from tools.source_registry import REGISTRY
+        pairs = []
+        for src in REGISTRY:
+            if src.tag == "book":
+                continue
+            for alias in [src.tag] + list(src.aliases):
+                pairs.append((alias, src.tag))
+        _SOURCE_PHRASES = sorted(pairs, key=lambda p: -len(p[0]))
+    return _SOURCE_PHRASES
+
+
+def _source_label(tag) -> str:
+    from tools.source_registry import BY_TAG
+    s = BY_TAG.get(tag)
+    return s.name if s else (tag or "")
+
 
 def _tier(bucket) -> str:
     b = bucket or ""
@@ -96,9 +121,18 @@ def parse_query(text: str) -> dict:
     q['unrecognized'] so the handler can reply instead of silently ignoring them."""
     s = " " + (text or "").lower() + " "
     q: dict = {"sector": None, "direction": None, "near": None, "momentum": False,
-               "held": False, "show_gated": False, "unrecognized": [],
+               "held": False, "show_gated": False, "source": None, "unrecognized": [],
                "raw": (text or "").strip()}
     consumed: list = []   # (start, end) spans of matched screen tokens
+
+    # Source lens (etf pro / keiths / portfolio solutions / …). Consumed here so its
+    # words never trip the unrecognized-token guard (the "signal strength" failure).
+    for alias, tag in _source_phrase_list():
+        m = re.search(r"\b" + re.escape(alias) + r"\b", s)
+        if m:
+            q["source"] = tag
+            consumed.append(m.span())
+            break
 
     for pat, canon in _SECTORS:
         m = re.search(pat, s)
@@ -143,7 +177,8 @@ def parse_query(text: str) -> dict:
 
 def _has_signal(q: dict) -> bool:
     return bool(q.get("sector") or q.get("direction") or q.get("near")
-                or q.get("momentum") or q.get("held") or q.get("show_gated"))
+                or q.get("momentum") or q.get("held") or q.get("show_gated")
+                or q.get("source"))
 
 
 def _is_modifier_only(q: dict) -> bool:
@@ -183,6 +218,7 @@ def _merge(pend: dict, fu: dict) -> dict:
     if fu.get("momentum"):  q["momentum"] = True
     if fu.get("held"):      q["held"] = True
     if fu.get("show_gated"): q["show_gated"] = True
+    if fu.get("source"):    q["source"] = fu["source"]
     q["unrecognized"] = []
     q["raw"] = (f"{pend.get('raw','')} {fu.get('raw','')}").strip()
     return q
@@ -191,6 +227,7 @@ def _merge(pend: dict, fu: dict) -> dict:
 def _describe(q: dict) -> str:
     bits = []
     if q.get("direction"): bits.append(q["direction"].upper())
+    if q.get("source"):    bits.append(_source_label(q["source"]))
     if q.get("sector"):    bits.append(q["sector"])
     if q.get("near"):      bits.append(f"near_{q['near']}")
     if q.get("momentum"):  bits.append("momentum")
@@ -300,6 +337,98 @@ def _fetch_book_slice(sector):
     return _rows(sql, args)
 
 
+# v_screener's column logic, but over an ARBITRARY member list (a source can hold names
+# that aren't in ticker_tags or the book — those still show, untagged/DARK, per the
+# migration-050 pattern). Base is unnest(members) so EVERY member appears.
+_SOURCE_SLICE_SQL = """
+WITH mem AS (SELECT DISTINCT unnest(%(members)s::text[]) AS ticker),
+     latest_mfr AS (
+        SELECT DISTINCT ON (ticker) ticker, price, range_low, range_high,
+               trend_signal, momentum_signal, hurst, iv, rv,
+               (full_payload->>'ivpd')::numeric AS ivpd
+        FROM mfr_snapshots WHERE ticker = ANY(%(members)s)
+        ORDER BY ticker, snapshot_date DESC),
+     hedgeye_trend AS (
+        SELECT DISTINCT ON (ticker) ticker, trend FROM hedgeye_risk_ranges
+        WHERE ticker = ANY(%(members)s) ORDER BY ticker, signal_date DESC),
+     held AS (
+        SELECT DISTINCT underlying AS ticker FROM book_positions
+        WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
+          AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0)
+SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
+       (lm.price - lm.range_low) / NULLIF(lm.range_high - lm.range_low, 0) AS range_pos,
+       (lm.momentum_signal = 'momentumBullish') AS momentum_ok,
+       CASE lm.momentum_signal WHEN 'momentumBullish' THEN 'BULLISH'
+            WHEN 'momentumBearish' THEN 'BEARISH' WHEN 'momentumNeutral' THEN 'NEUTRAL'
+            WHEN 'momentumNeutralDanger' THEN 'NEUTRAL' END AS momentum_dir,
+       CASE WHEN lm.trend_signal='trendBullish' AND lm.momentum_signal='momentumBearish' THEN 'bull-trade/bear-mom'
+            WHEN lm.trend_signal='trendBearish' AND lm.momentum_signal='momentumBullish' THEN 'bear-trade/bull-mom' END AS divergence,
+       lm.hurst, lm.iv, lm.rv, lm.ivpd,
+       COALESCE(ht.trend, CASE lm.trend_signal WHEN 'trendBullish' THEN 'BULLISH'
+            WHEN 'trendBearish' THEN 'BEARISH' WHEN 'trendNeutral' THEN 'NEUTRAL' END) AS trend_dir,
+       CASE WHEN ht.trend IS NOT NULL THEN 'hedgeye'
+            WHEN lm.trend_signal IN ('trendBullish','trendBearish','trendNeutral') THEN 'mfr' END AS trend_source,
+       (h.ticker IS NOT NULL) AS held,
+       (lm.range_low IS NOT NULL) AS has_range,
+       tt.gics_sector
+FROM mem m
+LEFT JOIN ticker_tags    tt ON tt.ticker = m.ticker
+LEFT JOIN latest_mfr     lm ON lm.ticker = m.ticker
+LEFT JOIN hedgeye_trend  ht ON ht.ticker = m.ticker
+LEFT JOIN held           h  ON h.ticker  = m.ticker
+"""
+
+
+def _reg_members(tag) -> set:
+    from tools.source_registry import BY_TAG
+    s = BY_TAG.get(tag)
+    return s.members() if s else set()
+
+
+def _fetch_source_slice(members, sector):
+    """The 'source=' universe: every member of the source, joined to v_screener's
+    computed columns (range/trend/tags where they exist). Members not in ticker_tags/
+    book still appear (untagged '—', un-ranged -> DARK). Sector filter drops untagged
+    names (they have no gics_sector), matching the book-universe behavior."""
+    if not members:
+        return []
+    sql = _SOURCE_SLICE_SQL
+    args = {"members": sorted(members)}
+    if sector:
+        sql += " WHERE tt.gics_sector = %(sector)s"
+        args["sector"] = sector
+    return _rows(sql, args)
+
+
+def _source_sides(tag) -> dict:
+    """{ticker: 'long'|'short'} for SIDED sources: keiths (stored side, latest signal_date)
+    and etfpro (bias column — only once it exists; guarded). {} for unsided sources."""
+    import db_pg
+    out = {}
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            if tag == "keiths":
+                cur.execute("SELECT ticker, side FROM hedgeye_keiths_signals "
+                            "WHERE signal_date=(SELECT max(signal_date) FROM hedgeye_keiths_signals)")
+                for t, sd in cur.fetchall():
+                    if t and sd:
+                        out[t.strip().upper()] = sd.strip().lower()
+            elif tag == "etfpro":
+                cur.execute("SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='hedgeye_etf_pro_ranges' AND column_name='bias'")
+                if cur.fetchone():
+                    cur.execute("SELECT DISTINCT ON (ticker) ticker, bias "
+                                "FROM hedgeye_etf_pro_ranges "
+                                "WHERE week_of=(SELECT max(week_of) FROM hedgeye_etf_pro_ranges) "
+                                "ORDER BY ticker, week_of DESC")
+                    for t, b in cur.fetchall():
+                        if t and b:
+                            out[t.strip().upper()] = b.strip().lower()
+    except Exception as e:
+        log.warning("source sides lookup failed for %s: %s", tag, e)
+    return out
+
+
 def _is_mfr_only_topidea(r) -> bool:
     return ((r.get("hedgeye_bucket_0629") or "").startswith("top_idea")
             and r.get("trend_source") == "mfr")
@@ -327,11 +456,12 @@ def _fmt_row(r, corr) -> str:
     cs, cu = corr.get(r["ticker"], (None, None))
     div = f" ⚡DIV({r['divergence']})" if r.get("divergence") else ""
     book = " 📗own" if r["held"] else ""
+    side = f" side:{r['_side']}" if r.get("_side") else ""
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<5} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
-            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{warn}")
+            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{side}{warn}")
 
 
 def run_screen_q(q: dict) -> str:
@@ -339,15 +469,33 @@ def run_screen_q(q: dict) -> str:
     funnel stage that hit 0. The TREND gate reads the same COALESCEd trend_dir the
     rows display (Hedgeye primary, MFR fallback)."""
     buckets, req_trend = _DIR_BUCKETS[q["direction"]]
+    src = q.get("source")
     try:
-        # "my book" swaps the base universe from the tagged single-name roster to the
-        # book holdings (incl. untagged ETFs like XLV). Direction is then enforced by
-        # the mandatory TREND gate, not by bucket. Everything — results, dark, gated —
-        # is book-scoped, so a book query never leaks non-book names into its tails.
-        slice_ = _fetch_book_slice(q["sector"]) if q["held"] else _fetch_tag_slice(q["sector"], buckets)
+        # Base universe: source= (whole source, incl. names not in ticker_tags/book)
+        # > my book (book holdings) > default (tagged roster, bucket-filtered). Direction
+        # is enforced by the mandatory TREND gate; bucket filtering only applies to the
+        # tagged universe (default / posmon). posmon == the default tagged universe.
+        if src and src != "posmon":
+            slice_ = _fetch_source_slice(_reg_members(src), q["sector"])
+            if q["held"]:                        # source ∩ book (composable)
+                slice_ = [r for r in slice_ if r["held"]]
+        elif q["held"]:
+            slice_ = _fetch_book_slice(q["sector"])
+        else:
+            slice_ = _fetch_tag_slice(q["sector"], buckets)
     except Exception as e:
         log.exception("screen query failed")
         return f"🛑 SCREEN error: {e}"
+
+    # Sided sources (keiths always; etfpro once the bias column exists): scope the slice
+    # to the direction's stored side up front — "keiths shorts" = keiths' short book —
+    # then the BEARISH TREND gate still applies on top. Side is rendered per row.
+    sides = _source_sides(src) if (src and src != "posmon") else {}
+    if sides:
+        want = "short" if q["direction"] == "shorts" else "long"
+        slice_ = [r for r in slice_ if sides.get(r["ticker"]) == want]
+    for r in slice_:
+        r["_side"] = sides.get(r["ticker"]) if sides else None
 
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
@@ -372,6 +520,7 @@ def run_screen_q(q: dict) -> str:
     corr = _corr_for([r["ticker"] for r in result]) if result else {}
 
     filt = [q["direction"].upper()]
+    if src:           filt.append(_source_label(src))
     if q["sector"]:   filt.append(q["sector"])
     if q["near"]:     filt.append(f"near_{q['near']}")
     if q["momentum"]: filt.append("momentum_ok")
@@ -391,7 +540,12 @@ def run_screen_q(q: dict) -> str:
                      "? = <20 overlapping days.")
     else:
         near_lbl = f"near_{q['near']}" if q["near"] else "range gate (none)"
-        base_lbl = "book holdings" if q["held"] else "tag match (sector+bucket)"
+        if src and src != "posmon":
+            base_lbl = _source_label(src) + (" (in book)" if q["held"] else "")
+        elif q["held"]:
+            base_lbl = "book holdings"
+        else:
+            base_lbl = "tag match (sector+bucket)"
         funnel = [
             f"{base_lbl}: {len(slice_)}",
             f"→ has MFR range:           {len(ranged)}",
@@ -429,15 +583,18 @@ def run_screen_q(q: dict) -> str:
                      f"— reply 'show gated' to list them.")
 
     lines.append("")
+    src_noun = _source_label(src) if (src and src != "posmon") else None
     if dark:
-        dark_hdr = ("held, NO MFR range" if q["held"]
+        dark_hdr = (f"{src_noun}, NO MFR range" if src_noun
+                    else "held, NO MFR range" if q["held"]
                     else "passed tag filters, NO MFR range")
+        tag_fallback = src if (src and src != "posmon") else "book"
         lines.append(f"🌑 DARK — {dark_hdr} ({len(dark)}):")
         lines += [f"  {_tier(r['hedgeye_bucket_0629'])} {r['ticker']:<9} "
-                  f"{(r['subsector'] or '—')} [{r['hedgeye_bucket_0629'] or 'book'}]"
+                  f"{(r['subsector'] or '—')} [{r['hedgeye_bucket_0629'] or tag_fallback}]"
                   for r in dark]
     else:
-        base = "held" if q["held"] else "tag-matched"
+        base = src_noun or ("held" if q["held"] else "tag-matched")
         lines.append(f"🌑 DARK: none — every {base} name has an MFR range.")
     return "\n".join(lines)
 
