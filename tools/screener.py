@@ -60,6 +60,10 @@ _HELD        = (r"in my book|\bmy book\b|\bthe book\b|book\s+(?:longs?|shorts?)|
                 r"|that i own|\bi own\b|\bi hold\b|\bheld\b|that i hold"
                 r"|that i'?m holding|\bholding\b")
 _GATED       = r"show gated|show all|include gated|with gated|\bgated\b"
+# Cloud = the MFR long-term / trend range (the yellow band). Price vs that band.
+_CLOUD_ABOVE = r"above (?:the )?cloud|above (?:the )?trend range|over (?:the )?cloud"
+_CLOUD_BELOW = r"below (?:the )?cloud|below (?:the )?trend range|under (?:the )?cloud"
+_CLOUD_IN    = r"in (?:the )?cloud|inside (?:the )?cloud|in (?:the )?trend range"
 
 # Words that legitimately appear in a screen sentence but aren't screen tokens —
 # excluded from the "unrecognized" check so we don't flag connective/position words.
@@ -121,8 +125,8 @@ def parse_query(text: str) -> dict:
     q['unrecognized'] so the handler can reply instead of silently ignoring them."""
     s = " " + (text or "").lower() + " "
     q: dict = {"sector": None, "direction": None, "near": None, "momentum": False,
-               "held": False, "show_gated": False, "source": None, "unrecognized": [],
-               "raw": (text or "").strip()}
+               "held": False, "show_gated": False, "source": None, "cloud": None,
+               "unrecognized": [], "raw": (text or "").strip()}
     consumed: list = []   # (start, end) spans of matched screen tokens
 
     # Source lens (etf pro / keiths / portfolio solutions / …). Consumed here so its
@@ -163,6 +167,10 @@ def parse_query(text: str) -> dict:
     m = re.search(_GATED, s)
     if m:
         q["show_gated"] = True; consumed.append(m.span())
+    for pat, val in ((_CLOUD_ABOVE, "above"), (_CLOUD_BELOW, "below"), (_CLOUD_IN, "in")):
+        m = re.search(pat, s)
+        if m:
+            q["cloud"] = val; consumed.append(m.span()); break
 
     # Whatever meaningful words are left after blanking the matched spans are unknown.
     chars = list(s)
@@ -178,7 +186,7 @@ def parse_query(text: str) -> dict:
 def _has_signal(q: dict) -> bool:
     return bool(q.get("sector") or q.get("direction") or q.get("near")
                 or q.get("momentum") or q.get("held") or q.get("show_gated")
-                or q.get("source"))
+                or q.get("source") or q.get("cloud"))
 
 
 def _is_modifier_only(q: dict) -> bool:
@@ -219,6 +227,7 @@ def _merge(pend: dict, fu: dict) -> dict:
     if fu.get("held"):      q["held"] = True
     if fu.get("show_gated"): q["show_gated"] = True
     if fu.get("source"):    q["source"] = fu["source"]
+    if fu.get("cloud"):     q["cloud"] = fu["cloud"]
     q["unrecognized"] = []
     q["raw"] = (f"{pend.get('raw','')} {fu.get('raw','')}").strip()
     return q
@@ -230,6 +239,7 @@ def _describe(q: dict) -> str:
     if q.get("source"):    bits.append(_source_label(q["source"]))
     if q.get("sector"):    bits.append(q["sector"])
     if q.get("near"):      bits.append(f"near_{q['near']}")
+    if q.get("cloud"):     bits.append(f"{q['cloud']}-cloud")
     if q.get("momentum"):  bits.append("momentum")
     if q.get("held"):      bits.append("in-book")
     if q.get("show_gated"): bits.append("show-gated")
@@ -429,6 +439,45 @@ def _source_sides(tag) -> dict:
     return out
 
 
+def _lt_ranges(tickers) -> dict:
+    """{ticker: (price, lt_low, lt_high)} from the latest mfr_snapshot's ltRangeData —
+    the MFR trend range (the 'cloud'/yellow band). Read-only; {} on none."""
+    if not tickers:
+        return {}
+    import db_pg
+    out = {}
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT ON (ticker) ticker, price::float, "
+            "(full_payload->'ltRangeData'->>'lowerRange')::float, "
+            "(full_payload->'ltRangeData'->>'upperRange')::float "
+            "FROM mfr_snapshots WHERE ticker = ANY(%s) ORDER BY ticker, snapshot_date DESC",
+            (list(tickers),))
+        for t, px, lo, hi in cur.fetchall():
+            out[t] = (px, lo, hi)
+    return out
+
+
+def _attach_cloud(rows):
+    """Annotate rows in place with _cloud ('above'/'in'/'below'/None) and _ltp (position
+    within the LT band when inside), from the latest ltRangeData."""
+    lt = _lt_ranges([r["ticker"] for r in rows])
+    for r in rows:
+        px, lo, hi = lt.get(r["ticker"], (None, None, None))
+        r["_cloud"] = None
+        r["_ltp"] = None
+        if px is None or lo is None or hi is None:
+            continue
+        if px > hi:
+            r["_cloud"] = "above"
+        elif px < lo:
+            r["_cloud"] = "below"
+        else:
+            r["_cloud"] = "in"
+            if hi > lo:
+                r["_ltp"] = (px - lo) / (hi - lo)
+
+
 def _is_mfr_only_topidea(r) -> bool:
     return ((r.get("hedgeye_bucket_0629") or "").startswith("top_idea")
             and r.get("trend_source") == "mfr")
@@ -456,12 +505,18 @@ def _fmt_row(r, corr) -> str:
     cs, cu = corr.get(r["ticker"], (None, None))
     div = f" ⚡DIV({r['divergence']})" if r.get("divergence") else ""
     book = " 📗own" if r["held"] else ""
+    if r.get("_cloud") == "in" and r.get("_ltp") is not None:
+        cloud = f" lt:in={float(r['_ltp']):.2f}"
+    elif r.get("_cloud"):
+        cloud = f" lt:{r['_cloud']}"
+    else:
+        cloud = ""
     side = f" side:{r['_side']}" if r.get("_side") else ""
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<5} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
-            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{side}{warn}")
+            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{warn}")
 
 
 def run_screen_q(q: dict) -> str:
@@ -497,6 +552,10 @@ def run_screen_q(q: dict) -> str:
     for r in slice_:
         r["_side"] = sides.get(r["ticker"]) if sides else None
 
+    # Cloud position (price vs the MFR trend range) — annotate every slice row, then
+    # optionally filter on above/in/below.
+    _attach_cloud(slice_)
+
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
 
@@ -511,9 +570,10 @@ def run_screen_q(q: dict) -> str:
     else:
         after_near = after_trend
     after_mom = [r for r in after_near if r["momentum_ok"] is True] if q["momentum"] else after_near
+    after_cloud = [r for r in after_mom if r.get("_cloud") == q["cloud"]] if q["cloud"] else after_mom
 
     result = sorted(
-        after_mom,   # held already applied at the base scope above
+        after_cloud,   # held already applied at the base scope above
         key=lambda r: (r["range_pos"] is None, float(r["range_pos"]) if r["range_pos"] is not None else 0),
         reverse=(q["direction"] == "shorts"),
     )
@@ -523,6 +583,7 @@ def run_screen_q(q: dict) -> str:
     if src:           filt.append(_source_label(src))
     if q["sector"]:   filt.append(q["sector"])
     if q["near"]:     filt.append(f"near_{q['near']}")
+    if q["cloud"]:    filt.append(f"{q['cloud']}-cloud")
     if q["momentum"]: filt.append("momentum_ok")
     if q["held"]:     filt.append("in-book")
     head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
@@ -552,6 +613,7 @@ def run_screen_q(q: dict) -> str:
             f"→ TREND={req_trend} (Rule-1): {len(after_trend)}",
             f"→ {near_lbl}:              {len(after_near)}",
             (f"→ momentum_ok:             {len(after_mom)}" if q["momentum"] else None),
+            (f"→ {q['cloud']}-cloud:            {len(after_cloud)}" if q["cloud"] else None),
         ]
         funnel = [f for f in funnel if f]
         # FIRST funnel stage that hit 0.
@@ -559,6 +621,7 @@ def run_screen_q(q: dict) -> str:
                   (f"TREND={req_trend}", len(after_trend))]
         if q["near"]:     stages.append((near_lbl, len(after_near)))
         if q["momentum"]: stages.append(("momentum_ok", len(after_mom)))
+        if q["cloud"]:    stages.append((f"{q['cloud']}-cloud", len(after_cloud)))
         culprit = next((name for name, n in stages if n == 0), "unknown")
         lines.append(f"0 matches — emptied by: **{culprit}**")
         lines.append("")

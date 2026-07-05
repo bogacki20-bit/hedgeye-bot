@@ -24,6 +24,7 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 | any GICS sector — `healthcare`, `tech`, `energy`, `financials`, `staples`, `discretionary`, `industrials`, `materials`, `utilities`, `real estate`/`reits`, `communication(s)`, `digital assets`/`crypto` | sector filter |
 | `bottom of range` / `near the low` | `near_bottom` (range_pos ≤ 0.20) |
 | `top of range` / `near the high` | `near_top` (range_pos ≥ 0.80) |
+| `above the cloud` / `in the cloud` / `below the cloud` (aliases: `above/below trend range`) | price vs the MFR **trend range** (the yellow "cloud" band, `ltRangeData`). Rendered per row as `lt:above` / `lt:in=0.42` / `lt:below`. |
 | `momentum` / `with momentum` | require bullish MFR momentum |
 | `in my book` / `that I own` / `held` | only names you hold |
 | `show gated` / `show all` / `include gated` | list the names Rule-1 dropped (see below) |
