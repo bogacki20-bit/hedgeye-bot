@@ -171,19 +171,20 @@ def upsert_rows(rows: list[dict], week_of: date, source_email_id: str | None) ->
                         """
                         INSERT INTO hedgeye_etf_pro_ranges
                             (ticker, week_of, range_low, range_high,
-                             description, source_email_id, parsed_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                             description, bias, source_email_id, parsed_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (ticker, week_of) DO UPDATE
                             SET range_low       = EXCLUDED.range_low,
                                 range_high      = EXCLUDED.range_high,
                                 description     = EXCLUDED.description,
+                                bias            = EXCLUDED.bias,
                                 source_email_id = EXCLUDED.source_email_id,
                                 parsed_at       = NOW()
                         """,
                         (
                             r["ticker"], week_of,
                             r["range_low"], r["range_high"],
-                            desc, source_email_id,
+                            desc, (r["bias"] or "").lower() or None, source_email_id,
                         ),
                     )
                     written += 1
