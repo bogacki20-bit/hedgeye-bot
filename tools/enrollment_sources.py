@@ -6,9 +6,29 @@ job never changes.
 """
 from tools.enrollment import TableSource, BookSource
 
-# Tickers MFR cannot activate (OTC/foreign it rejects) — excluded so they don't recur
-# in the nightly to-add list. Seed: RPBPF (confirmed un-activatable). Add more as found.
-KNOWN_UNCOVERABLE = {"RPBPF"}
+# Tickers to EXCLUDE from the enrollment backlog + DARK footer — can't/shouldn't be
+# activated in MFR. Curated 2026-07-05 from the 61-name backlog triage.
+KNOWN_UNCOVERABLE = {
+    "RPBPF",                        # original seed (OTC, un-activatable)
+    # Foreign local listings — not tradeable from the US
+    "005930.KS", "1913.HK", "2331.HK", "2408.TW", "2513.HK", "285A.T", "3998.HK",
+    "ABX.TO", "ADS.DE", "ATD.TO", "ATZ.TO", "CFR.SW", "DTG.DE", "EL.PA", "GRGD.TO",
+    "HAYPP.ST", "JD.L", "LISN.SW", "LTMC.MI", "PUM.DE", "RI.PA", "RMS.PA", "RPI.L",
+    "VOLV-B.ST",
+    "EXPN",                         # Experian London line (US ADR EXPGY = future alias work)
+    # US but untradeable / defunct
+    "NKLA",                         # Nikola — Chapter 11, delisted
+    "FDRXX",                        # Fidelity Govt Cash Reserves — money-market fund, no range
+    "MICC", "OFRM", "YSWY",         # unresolved / stale-or-unrecognized tickers
+}
+
+# Crypto names PARKED for the future BTC Quant source — NOT uncoverable, just not
+# enrolled in MFR here. The backlog + DARK footer skip them, but they stay findable
+# for the btcquant parser when it lands. Kept separate from KNOWN_UNCOVERABLE on
+# purpose: these are "route elsewhere", not "can't cover".
+PARKED_FOR_SOURCE = {
+    "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "AVAXUSD", "RUNEUSD", "TRXUSD",
+}
 
 REGISTRY = [
     # Signal Strength — live today (ss_roster_history exists).

@@ -183,11 +183,11 @@ def compile_backlog() -> dict:
     (not just signal_strength + book) means names like the Portfolio Solutions holding
     PAVE are no longer invisible to enrollment."""
     from tools.source_registry import full_universe
-    from tools.enrollment_sources import KNOWN_UNCOVERABLE
+    from tools.enrollment_sources import KNOWN_UNCOVERABLE, PARKED_FOR_SOURCE
     fu = full_universe()
     full = fu["universe"]
     active = _mfr_active()
-    to_add = sorted((full - active) - set(KNOWN_UNCOVERABLE))
+    to_add = sorted((full - active) - set(KNOWN_UNCOVERABLE) - set(PARKED_FOR_SOURCE))
     return {"to_add": to_add, "per_source": fu["per_source"],
             "full_count": len(full), "active_count": len(active)}
 
@@ -235,7 +235,10 @@ def run_weekly_backlog() -> str:
 
 def live_dark_names() -> dict:
     """v_screener names with NO MFR range, split into book holdings and tagged-only.
-    Read-only. Empty lists if v_screener is unavailable."""
+    Excludes KNOWN_UNCOVERABLE (foreign/untradeable) and PARKED_FOR_SOURCE (crypto ->
+    btcquant) so the footer nags only about genuinely-enrollable gaps. Read-only."""
+    from tools.enrollment_sources import KNOWN_UNCOVERABLE, PARKED_FOR_SOURCE
+    skip = set(KNOWN_UNCOVERABLE) | set(PARKED_FOR_SOURCE)
     import db_pg
     try:
         with db_pg.get_conn() as conn, conn.cursor() as cur:
@@ -244,8 +247,8 @@ def live_dark_names() -> dict:
     except Exception as e:
         log.warning("live_dark_names failed: %s", e)
         return {"book": [], "tagged": []}
-    return {"book":   [t for t, held in rows if held],
-            "tagged": [t for t, held in rows if not held]}
+    return {"book":   [t for t, held in rows if held and t not in skip],
+            "tagged": [t for t, held in rows if not held and t not in skip]}
 
 
 def dark_footer() -> str:
