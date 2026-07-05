@@ -142,7 +142,16 @@ def parse_body(html_body: str) -> list[dict]:
 # ─────────────────────────── Week-of helper ───────────────────────────
 
 def _monday_of(d: date) -> date:
-    return d - timedelta(days=d.weekday())
+    """Monday of the report's trading week. Hedgeye publishes the ETF Pro weekly on
+    SUNDAY for the week ahead, so a weekend-received report (Sat/Sun) belongs to the
+    UPCOMING Monday — snap it forward. The old `d - d.weekday()` dated a Sunday report
+    to the PRIOR Monday, so each Sunday weekly overwrote the previous week's rows
+    (PK = ticker, week_of) instead of advancing, freezing max(week_of) a week behind.
+    Weekday reports (Mon–Fri) still map to that week's Monday, unchanged."""
+    wd = d.weekday()          # Mon=0 … Sat=5, Sun=6
+    if wd >= 5:               # weekend -> next Monday (the week the report covers)
+        return d + timedelta(days=7 - wd)
+    return d - timedelta(days=wd)
 
 
 # ─────────────────────────── Persistence ───────────────────────────
