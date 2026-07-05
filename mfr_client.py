@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,6 +34,42 @@ log = logging.getLogger(__name__)
 MFR_BASE = "https://myfractalrange.com/v2/asset"
 MFR_USER_AGENT = "Mozilla/5.0 (HedgeyeBot/1.0)"  # MFR returns 403 to default urllib UA
 MFR_TIMEOUT = 20
+MFR_MAX_RETRIES = 3               # retry transient failures (timeout / 5xx) this many times
+MFR_BACKOFF = (1, 3, 7)           # seconds between attempts
+# Inter-request spacing for BULK sweeps. Single probes never fail; the ~119/569 nightly
+# misses are MFR throttling the burst cadence — pacing is the primary fix, retries the
+# safety net. Env-tunable (raise if misses persist, lower to speed up a clean run).
+MFR_REQUEST_SPACING = float(os.environ.get("MFR_REQUEST_SPACING_SEC", "0.34"))  # ~3 req/s
+FANOUT_MIN_PCT = 0.95             # squawk if a watchlist fan-out covers less than this
+FANOUT_PCT_KEY = "mfr_fanout_last_pct"
+
+
+def _http_get_json(url, *, timeout=MFR_TIMEOUT, retries=MFR_MAX_RETRIES):
+    """GET a URL, returning (status, parsed_json_or_None, err_or_None).
+
+    Retries ONLY on transient failures — request timeout, connection reset, or HTTP
+    5xx — with backoff. Permanent outcomes (401/403/404, non-JSON 200) return
+    immediately (retrying them just wastes time). status is None when every attempt
+    raised (e.g. persistent timeout — the ~119/569 nightly misses)."""
+    last = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": MFR_USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            try:
+                return 200, json.loads(body), None
+            except json.JSONDecodeError:
+                return 200, None, f"non-json: {body[:120]}"    # not retried
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403, 404):
+                return e.code, None, f"http {e.code}"           # permanent — no retry
+            last = f"http {e.code}"                              # 5xx — retry
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"                    # timeout / reset — retry
+        if attempt < retries - 1:
+            time.sleep(MFR_BACKOFF[min(attempt, len(MFR_BACKOFF) - 1)])
+    return None, None, last
 
 
 def _resolve_token() -> str | None:
@@ -60,17 +97,10 @@ def list_watchlist() -> list[str]:
         log.warning("MFR_API_TOKEN not set; cannot list watchlist")
         return []
     url = f"{MFR_BASE}?token={token}"
-    req = urllib.request.Request(url, headers={"User-Agent": MFR_USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=MFR_TIMEOUT) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        log.warning("MFR watchlist fetch failed: %s", e)
-        return []
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        log.warning("MFR watchlist returned non-JSON: %s", body[:200])
+    # Retries transient timeouts — one 20s blip used to no-op the ENTIRE fan-out.
+    status, data, err = _http_get_json(url)
+    if data is None:
+        log.warning("MFR watchlist fetch failed (status=%s): %s", status, err)
         return []
     items = data.get("data") if isinstance(data, dict) else data
     if not isinstance(items, list):
@@ -87,21 +117,60 @@ def list_watchlist() -> list[str]:
     return sorted(out)
 
 
-def refresh_watchlist() -> dict:
-    """Pull the operator's MFR watchlist and fetch+save a snapshot for
-    every ticker. Logs `mfr_fanout: pulled N tickers from MFR watchlist`.
+def _report_fanout_completeness(ok: int, total: int, missing: list) -> None:
+    """Persist coverage % to bot_state and squawk if a run is materially incomplete —
+    kills the silent ~20% drop. Best-effort; never raises into the fan-out."""
+    pct = ok / total if total else 0.0
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO bot_state (key, value, updated_at) VALUES (%s, %s, NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                        (FANOUT_PCT_KEY, f"{pct:.3f}"))
+            conn.commit()
+    except Exception as e:
+        log.warning("could not persist %s: %s", FANOUT_PCT_KEY, e)
+    if pct < FANOUT_MIN_PCT:
+        try:
+            from notifier import send_telegram
+            tail = " …" if len(missing) > 20 else ""
+            send_telegram("MFR fan-out",
+                          f"⚠️ fan-out incomplete: {ok}/{total} ({pct:.0%}). "
+                          f"Still-missing ({len(missing)}): {' '.join(missing[:20])}{tail}",
+                          priority=2)
+        except Exception as e:
+            log.warning("fan-out completeness squawk failed: %s", e)
 
-    Idempotent — `fetch_and_save` upserts on (ticker, snapshot_date) so
-    re-running on the same day overwrites without duplicating rows.
-    Returns the same shape as `refresh_for_tickers`."""
+
+def refresh_watchlist() -> dict:
+    """Pull the operator's MFR watchlist, fetch+save every ticker (paced to avoid MFR's
+    bulk-cadence throttling), RE-SWEEP any that still failed, and report completeness.
+
+    Idempotent — `fetch_and_save` upserts on (ticker, snapshot_date) so re-running on
+    the same day overwrites without duplicating rows. Returns the refresh summary plus
+    `reswept`/`recovered`, and persists coverage % to bot_state (squawks if < 95%)."""
     watchlist = list_watchlist()
     log.info("mfr_fanout: pulled %d tickers from MFR watchlist", len(watchlist))
     if not watchlist:
-        return {"tickers": 0, "ok": 0, "skip": 0, "fail": 0, "source": "mfr_watchlist"}
+        return {"tickers": 0, "ok": 0, "skip": 0, "fail": 0, "failed": [],
+                "source": "mfr_watchlist"}
     summary = refresh_for_tickers(watchlist)
+    # Re-sweep: one more paced pass over names that still failed — catches tickers MFR
+    # briefly throttled/timed-out during the main pass.
+    missing = list(summary.get("failed", []))
+    if missing:
+        log.info("mfr_fanout: re-sweeping %d still-failed tickers", len(missing))
+        resweep = refresh_for_tickers(missing)
+        summary["reswept"] = len(missing)
+        summary["recovered"] = resweep["ok"]
+        summary["ok"] += resweep["ok"]
+        summary["fail"] = resweep["fail"]
+        summary["failed"] = resweep["failed"]
     summary["source"] = "mfr_watchlist"
-    log.info("mfr_fanout: refresh complete — ok=%d fail=%d (of %d)",
-             summary.get("ok", 0), summary.get("fail", 0), summary.get("tickers", 0))
+    _report_fanout_completeness(summary["ok"], len(watchlist), summary.get("failed", []))
+    log.info("mfr_fanout: refresh complete — ok=%d fail=%d (of %d) reswept=%d recovered=%d",
+             summary["ok"], summary["fail"], len(watchlist),
+             summary.get("reswept", 0), summary.get("recovered", 0))
     return summary
 
 
@@ -177,47 +246,33 @@ def fetch_raw(ticker: str) -> dict | None:
         # pair separator, not an encoded sub-path).
         cand_quoted = urllib.parse.quote(cand, safe='/')
         url = f"{MFR_BASE}/{cand_quoted}?token={token}"
-        req = urllib.request.Request(url, headers={"User-Agent": MFR_USER_AGENT})
-        try:
-            with urllib.request.urlopen(req, timeout=MFR_TIMEOUT) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-            try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                last_err = f"non-json response: {body[:200]}"
-                continue
-            # MFR returns either {"success": false} (legacy) or — current
-            # production shape — {"id": "...", "payload": {ticker, latestPrice,
-            # rangeData, trendSignal, ...}}. Older code expected {"data": {...}}.
-            # Unwrap whichever envelope is present so downstream extractors see
-            # the asset fields at the top level.
-            if isinstance(data, dict) and data.get("success") is False:
-                last_err = f"success=false ({cand})"
-                continue
-            # The MFR API double-wraps: {"data": {"id": ..., "payload": {asset_fields}}}.
-            # Peel both levels so downstream extractors see latestPrice, hurst,
-            # rangeData etc at the top level. Tolerant of single-wrap legacy
-            # shapes too.
-            payload = data
-            if isinstance(payload, dict) and "data" in payload and isinstance(payload["data"], dict):
-                payload = payload["data"]
-            if isinstance(payload, dict) and "payload" in payload and isinstance(payload["payload"], dict):
-                payload = payload["payload"]
-            if not isinstance(payload, dict):
-                last_err = "unexpected shape"
-                continue
-            payload.setdefault("_mfr_ticker_used", cand)
-            return payload
-        except urllib.error.HTTPError as e:
-            last_err = f"http {e.code} ({cand})"
-            if e.code in (401, 403):
-                # Auth error means token is wrong; no point trying other variants.
-                log.error("MFR auth error for %s: %s", cand, e)
-                return None
+        # Retries transient timeouts/5xx internally; 401/403/404 come back fast.
+        status, data, err = _http_get_json(url)
+        if status in (401, 403):
+            # Auth error means token is wrong; no point trying other variants.
+            log.error("MFR auth error for %s: http %s", cand, status)
+            return None
+        if data is None:
+            last_err = err or f"status {status} ({cand})"
             continue
-        except Exception as e:
-            last_err = f"{type(e).__name__}: {e}"
+        # MFR returns either {"success": false} (legacy) or — current production
+        # shape — {"id": ..., "payload": {ticker, latestPrice, rangeData, ...}}.
+        if isinstance(data, dict) and data.get("success") is False:
+            last_err = f"success=false ({cand})"
             continue
+        # The MFR API double-wraps: {"data": {"id": ..., "payload": {asset_fields}}}.
+        # Peel both levels so downstream extractors see latestPrice, hurst,
+        # rangeData etc at the top level. Tolerant of single-wrap legacy shapes.
+        payload = data
+        if isinstance(payload, dict) and "data" in payload and isinstance(payload["data"], dict):
+            payload = payload["data"]
+        if isinstance(payload, dict) and "payload" in payload and isinstance(payload["payload"], dict):
+            payload = payload["payload"]
+        if not isinstance(payload, dict):
+            last_err = "unexpected shape"
+            continue
+        payload.setdefault("_mfr_ticker_used", cand)
+        return payload
 
     log.info("MFR fetch failed for %s after %d candidate(s); last error: %s",
              ticker, len(candidates), last_err)
@@ -482,21 +537,29 @@ def refresh_for_tickers(tickers: list[str]) -> dict:
     signal — refresh MFR for every mentioned ticker so the corpus is fresh
     when the bot reasons over the alert.
     """
-    summary = {"tickers": len(tickers), "ok": 0, "skip": 0, "fail": 0}
+    summary = {"tickers": len(tickers), "ok": 0, "skip": 0, "fail": 0, "failed": []}
     seen = set()
+    first = True
     for t in tickers:
         if not t or t in seen:
             continue
         seen.add(t)
+        # Pace the burst — MFR throttles rapid bulk cadence (single calls are fine).
+        # Space BETWEEN requests, not before the first.
+        if not first and MFR_REQUEST_SPACING > 0:
+            time.sleep(MFR_REQUEST_SPACING)
+        first = False
         try:
             res = fetch_and_save(t)
             if res:
                 summary["ok"] += 1
             else:
                 summary["fail"] += 1
+                summary["failed"].append(t)
         except Exception as e:
             log.exception("MFR refresh failed for %s: %s", t, e)
             summary["fail"] += 1
+            summary["failed"].append(t)
     return summary
 
 
