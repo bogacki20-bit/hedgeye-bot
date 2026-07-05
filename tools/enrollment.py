@@ -177,21 +177,18 @@ def _load_seen() -> dict:
 
 
 def compile_backlog() -> dict:
-    """Read-only. ALL current roster names across registered sources that are NOT active
-    in MFR (minus KNOWN_UNCOVERABLE). The full catch-up set, not just today's adds."""
-    from tools.enrollment_sources import REGISTRY, KNOWN_UNCOVERABLE
-    full, per_source = set(), {}
-    for src in REGISTRY:
-        try:
-            s = src.current_names()
-        except Exception as e:
-            log.warning("backlog source %s failed: %s", getattr(src, "name", "?"), e)
-            s = set()
-        per_source[src.name] = s
-        full |= s
+    """Read-only. ALL current members across EVERY signal source (tools.source_registry:
+    etfpro / portsol / ideas / keiths / sigstr / posmon / book) that are NOT active in
+    MFR, minus KNOWN_UNCOVERABLE. The full catch-up set. Diffing the canonical universe
+    (not just signal_strength + book) means names like the Portfolio Solutions holding
+    PAVE are no longer invisible to enrollment."""
+    from tools.source_registry import full_universe
+    from tools.enrollment_sources import KNOWN_UNCOVERABLE
+    fu = full_universe()
+    full = fu["universe"]
     active = _mfr_active()
     to_add = sorted((full - active) - set(KNOWN_UNCOVERABLE))
-    return {"to_add": to_add, "per_source": {k: sorted(v) for k, v in per_source.items()},
+    return {"to_add": to_add, "per_source": fu["per_source"],
             "full_count": len(full), "active_count": len(active)}
 
 

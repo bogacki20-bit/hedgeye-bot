@@ -315,9 +315,11 @@ def _dispatch_message(token, chat_id, text):
     def _qc():   from tools.quad_confirm import handle_quad_confirm_reply; return handle_quad_confirm_reply(text)
     def _mv():   from tools.bucket_history import handle_moves_command;   return handle_moves_command(text)
     def _bl():   from tools.enrollment import handle_backlog_command;     return handle_backlog_command(text)
+    def _src():  from tools.source_registry import handle_sources_command; return handle_sources_command(text)
 
     for name, fn in (("ss_roster", _ss), ("quad", _quad), ("screen", _scr),
-                     ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl)):
+                     ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
+                     ("sources", _src)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)
