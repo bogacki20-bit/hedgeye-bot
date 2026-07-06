@@ -116,6 +116,15 @@ def build_checklist() -> str:
     elif (today - book).days > BOOK_STALE_DAYS:
         todos.append(f"💼 Book — snapshot {book} is {(today - book).days}d old; re-upload the Fidelity export")
 
+    # • Unmapped wrappers — single-name/index wrapper ETFs in the book with no linkage.
+    try:
+        from tools.wrapper_links import detector_summary_line
+        wl_line = detector_summary_line()
+        if wl_line:
+            todos.append(wl_line)
+    except Exception as e:
+        log.warning("operator_checklist: wrapper detector failed: %s", e)
+
     # • Doctor — any currently-active warnings (dormant until the doctor persists them).
     dw = _get(DOCTOR_WARN_KEY)
     if dw:

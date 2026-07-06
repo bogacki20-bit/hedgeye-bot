@@ -46,6 +46,11 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 - **Example:** `MFR BACKLOG`
 - **Writes DB?** No. *(handler: `tools/enrollment.py → handle_backlog_command`)*
 
+### `WRAP` — wrapper-ETF linkage
+- **Syntax:** `WRAP` / `WRAP LIST` (list unmapped wrappers) · `WRAP OK <tkr> [underlying] [inverse|long]` · `WRAP NO <tkr>`
+- **Purpose:** The detector flags single-name/index wrapper ETFs in the book (inverse/levered, e.g. `METD→META`) with no linkage row — shown in each Fidelity ingest summary and the Monday operator check. `WRAP OK` confirms the proposed mapping (or override it); `WRAP NO` dismisses (own-exposure baskets stop nagging). Confirmed links drive underlying-trend screening/flip-watch.
+- **Writes DB?** `WRAP OK`/`WRAP NO` write (`wrapper_links` / `wrapper_no_mapping`); `WRAP LIST` read-only. *(handler: `tools/wrapper_links.py → handle_wrapper_command`)*
+
 ---
 
 ## 🔴 Write commands (change the DB — gated)

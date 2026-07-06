@@ -303,6 +303,15 @@ def summarize(positions, activity, anomalies, dropped_spending):
             print("   " + a)
     else:
         print("\nNo parse anomalies.")
+    # Unmapped-wrapper detector (read-only): flag single-name/index wrapper ETFs in this
+    # export with no linkage row. Proposes; never auto-writes (operator CONFIRMs via WRAP).
+    try:
+        from tools.wrapper_links import detector_summary_line
+        line = detector_summary_line([(p.get("symbol"), p.get("description")) for p in positions])
+        if line:
+            print("\n" + line)
+    except Exception as e:
+        print(f"\n(wrapper detector skipped: {e})")
     print()
 
 
