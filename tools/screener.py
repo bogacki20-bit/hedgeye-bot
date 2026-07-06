@@ -1,8 +1,10 @@
 """SCREEN v2 — natural-language screener over v_screener (ticker_tags + latest
 mfr_snapshots + TREND). Python owns ALL math/filtering; no LLM.
 
-trend_dir = COALESCE(Hedgeye risk-range TREND, MFR trend_signal) — the SAME field
-the gate and the display both read. trend_source ('hdg'/'mfr') shown per row.
+trend_dir = COALESCE(Hedgeye RR, BTC Quant [crypto names only], MFR trend_signal) — the
+SAME field the gate and display read. trend_source ('hdg'/'btcq'/'mfr') shown per row.
+For crypto names BTC Quant is the trend authority (operator doctrine), ranked between
+Hedgeye RR and MFR.
 
 Telegram: `SCREEN <sentence>` e.g. `SCREEN energy shorts top of range`. Follow-up
 replies (a bare direction like "longs", or a modifier like "show gated") merge into
@@ -471,6 +473,41 @@ def _lt_ranges(tickers) -> dict:
     return out
 
 
+def _btcquant_trends() -> dict:
+    """{canonical_ticker: BULLISH|BEARISH|NEUTRAL} — latest BTC Quant sentiment per name
+    (hedgeye_crypto_quant), coin tokens normalized to *USD. The crypto trend authority
+    for Rule-1, ranked between Hedgeye RR and MFR. Read-only."""
+    import db_pg
+    from tools.source_registry import BTCQ_NORM
+    m = {"bullish": "BULLISH", "bearish": "BEARISH", "neutral": "NEUTRAL"}
+    out = {}
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT DISTINCT ON (asset) asset, sentiment FROM hedgeye_crypto_quant "
+                        "WHERE sentiment IS NOT NULL ORDER BY asset, signal_date DESC")
+            for a, sd in cur.fetchall():
+                if a and sd and sd.strip().lower() in m:
+                    out[BTCQ_NORM.get(a.strip().upper(), a.strip().upper())] = m[sd.strip().lower()]
+    except Exception as e:
+        log.warning("btcquant trends lookup failed: %s", e)
+    return out
+
+
+def _apply_btcquant_trend(rows):
+    """Rule-1 doctrine (operator-ruled): for crypto names BTC Quant is the trend
+    authority, ranked Hedgeye RR > BTC Quant > MFR. Override trend_dir with the BTC
+    Quant call wherever the row isn't already on a Hedgeye risk range; tag trend_source
+    'btcq' so it's visible which names gate on it."""
+    bt = _btcquant_trends()
+    if not bt:
+        return
+    for r in rows:
+        td = bt.get(r["ticker"])
+        if td and r.get("trend_source") != "hedgeye":
+            r["trend_dir"] = td
+            r["trend_source"] = "btcq"
+
+
 def _attach_cloud(rows):
     """Annotate rows in place with _cloud ('above'/'in'/'below'/None) and _ltp (position
     within the LT band when inside), from the latest ltRangeData."""
@@ -497,7 +534,7 @@ def _is_mfr_only_topidea(r) -> bool:
 
 
 def _fmt_gated(r) -> str:
-    src = {"hedgeye": "hdg", "mfr": "mfr"}.get(r.get("trend_source"), "")
+    src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq"}.get(r.get("trend_source"), "")
     td = (r["trend_dir"] or "none") + (f"·{src}" if src else "")
     rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
     return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp}"
@@ -513,7 +550,7 @@ def _fmt_row(r, corr) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
     rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
-    src = {"hedgeye": "hdg", "mfr": "mfr"}.get(r.get("trend_source"), "")
+    src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq"}.get(r.get("trend_source"), "")
     trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "")
     cs, cu = corr.get(r["ticker"], (None, None))
     div = f" ⚡DIV({r['divergence']})" if r.get("divergence") else ""
@@ -564,6 +601,10 @@ def run_screen_q(q: dict) -> str:
         slice_ = [r for r in slice_ if sides.get(r["ticker"]) == want]
     for r in slice_:
         r["_side"] = sides.get(r["ticker"]) if sides else None
+
+    # Rule-1: BTC Quant is the crypto trend authority (RR > BTC Quant > MFR) — override
+    # trend_dir for crypto names BEFORE the gate, on every screen.
+    _apply_btcquant_trend(slice_)
 
     # Cloud position (price vs the MFR trend range) — annotate every slice row, then
     # optionally filter on above/in/below.
