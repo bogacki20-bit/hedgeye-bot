@@ -1,10 +1,10 @@
 """SCREEN v2 — natural-language screener over v_screener (ticker_tags + latest
 mfr_snapshots + TREND). Python owns ALL math/filtering; no LLM.
 
-trend_dir = COALESCE(Hedgeye RR, BTC Quant [crypto names only], MFR trend_signal) — the
-SAME field the gate and display read. trend_source ('hdg'/'btcq'/'mfr') shown per row.
-For crypto names BTC Quant is the trend authority (operator doctrine), ranked between
-Hedgeye RR and MFR.
+trend_dir = COALESCE(Hedgeye RR, MFR trend_signal), OVERRIDDEN by BTC Quant for crypto
+names — the SAME field the gate and display read. trend_source ('hdg'/'btcq'/'mfr')
+shown per row. For crypto names BTC Quant is THE trend authority (operator doctrine):
+BTC Quant > Hedgeye RR > MFR.
 
 Telegram: `SCREEN <sentence>` e.g. `SCREEN energy shorts top of range`. Follow-up
 replies (a bare direction like "longs", or a modifier like "show gated") merge into
@@ -494,16 +494,17 @@ def _btcquant_trends() -> dict:
 
 
 def _apply_btcquant_trend(rows):
-    """Rule-1 doctrine (operator-ruled): for crypto names BTC Quant is the trend
-    authority, ranked Hedgeye RR > BTC Quant > MFR. Override trend_dir with the BTC
-    Quant call wherever the row isn't already on a Hedgeye risk range; tag trend_source
-    'btcq' so it's visible which names gate on it."""
+    """Rule-1 doctrine (operator-ruled): for crypto names BTC Quant is THE trend
+    authority — it overrides both Hedgeye RR and MFR (BTC Quant > RR > MFR for crypto).
+    Override trend_dir with the BTC Quant call for any name it designates; tag
+    trend_source 'btcq' so it's visible which names gate on it. Non-crypto names (no
+    btcquant entry) are untouched."""
     bt = _btcquant_trends()
     if not bt:
         return
     for r in rows:
         td = bt.get(r["ticker"])
-        if td and r.get("trend_source") != "hedgeye":
+        if td:
             r["trend_dir"] = td
             r["trend_source"] = "btcq"
 
