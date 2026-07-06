@@ -22,12 +22,16 @@ KNOWN_UNCOVERABLE = {
     "MICC", "OFRM", "YSWY",         # unresolved / stale-or-unrecognized tickers
 }
 
-# Crypto names PARKED for the future BTC Quant source — NOT uncoverable, just not
-# enrolled in MFR here. The backlog + DARK footer skip them, but they stay findable
-# for the btcquant parser when it lands. Kept separate from KNOWN_UNCOVERABLE on
-# purpose: these are "route elsewhere", not "can't cover".
+# Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.
+# btcquant is now live on the existing hedgeye_crypto_quant feed (source_registry).
+# Data-backed routing (2026-07-05, from 184 rows of trend sentiment):
+#   PROMOTED (now live under btcquant, removed here): BTCUSD, ETHUSD, SOLUSD, XRPUSD,
+#     AVAXUSD — all 5 majors carry trend designations (the parser splits slash-lists
+#     like "COIN/SOL/AVAX/XRP=NEUTRAL", so ETH/SOL/AVAX are covered).
+#   STILL PARKED: RUNEUSD, TRXUSD — never designated by the product; no live source yet.
+# No name is promoted without a signal backing it.
 PARKED_FOR_SOURCE = {
-    "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "AVAXUSD", "RUNEUSD", "TRXUSD",
+    "RUNEUSD", "TRXUSD",
 }
 
 REGISTRY = [

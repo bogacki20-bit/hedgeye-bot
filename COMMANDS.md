@@ -20,7 +20,7 @@ just gets echoed back (`Got it: <text>`) — no side effects.
 | Phrase | Effect |
 |--------|--------|
 | `longs` / `shorts` | direction + Rule-1 TREND gate (BULLISH / BEARISH) |
-| **source lens** — `etf pro`, `portfolio solutions`, `investing ideas`, `keith's signals`/`keiths`, `signal strength`, `position monitor` | screen a whole signal source (not just the tagged roster). No source = tagged roster (`in my book` = your holdings). Header names the source, e.g. `SHORTS · ETF Pro`. |
+| **source lens** — `etf pro`, `portfolio solutions`, `investing ideas`, `keith's signals`/`keiths`, `signal strength`, `position monitor`, `btc quant`/`bitcoin quant` | screen a whole signal source (not just the tagged roster). No source = tagged roster (`in my book` = your holdings). Header names the source, e.g. `SHORTS · ETF Pro`. `btc quant` = Hedgeye's CRYPTO QUANT trend calls on crypto coins + equities (sided: bullish→long / bearish→short). |
 | any GICS sector — `healthcare`, `tech`, `energy`, `financials`, `staples`, `discretionary`, `industrials`, `materials`, `utilities`, `real estate`/`reits`, `communication(s)`, `digital assets`/`crypto` | sector filter |
 | `bottom of range` / `near the low` | `near_bottom` (range_pos ≤ 0.20) |
 | `top of range` / `near the high` | `near_top` (range_pos ≥ 0.80) |

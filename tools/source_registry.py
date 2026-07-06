@@ -62,6 +62,19 @@ def _book() -> set:
                     "WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions) "
                     "AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0")
 
+# BTC Quant coins carry the *USD suffix elsewhere (ticker_tags/mfr); equities/ETFs are
+# as-is. Normalizes the bare tokens the CRYPTO QUANT parser stores.
+BTCQ_NORM = {"BTC": "BTCUSD", "ETH": "ETHUSD", "SOL": "SOLUSD",
+             "XRP": "XRPUSD", "AVAX": "AVAXUSD"}
+
+
+def _btcquant() -> set:
+    # Source of truth is hedgeye_crypto_quant (the existing CRYPTO QUANT parser, already
+    # wired into email_parser + 184 rows). Members = names ever given a trend sentiment,
+    # normalized to the canonical ticker (carry-forward; enroll-never-remove).
+    raw = _members("SELECT DISTINCT asset FROM hedgeye_crypto_quant WHERE sentiment IS NOT NULL")
+    return {BTCQ_NORM.get(t, t) for t in raw}
+
 
 class Source:
     def __init__(self, tag, name, lookup, aliases, freshness_sql=None):
@@ -115,6 +128,9 @@ REGISTRY = [
     Source("book",    "My Book",             _book,
            ["book", "my book", "held", "holdings"],
            "SELECT max(snapshot_date) FROM book_positions"),
+    Source("btcquant", "BTC Quant",          _btcquant,
+           ["btc quant", "btcquant", "bitcoin quant", "btc"],   # NOT bare "crypto" (= sector)
+           "SELECT max(signal_date) FROM hedgeye_crypto_quant WHERE sentiment IS NOT NULL"),
 ]
 BY_TAG = {s.tag: s for s in REGISTRY}
 

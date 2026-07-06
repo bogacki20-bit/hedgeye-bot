@@ -434,6 +434,19 @@ def _source_sides(tag) -> dict:
                     for t, b in cur.fetchall():
                         if t and b:
                             out[t.strip().upper()] = b.strip().lower()
+            elif tag == "btcquant":
+                # BTC Quant sentiment (bullish/bearish/neutral) from hedgeye_crypto_quant,
+                # normalized to long/short so the shared sided filter works (neutral maps
+                # to neither, dropping from a longs/shorts screen). Coin tokens get the
+                # *USD suffix to match the canonical ticker.
+                from tools.source_registry import BTCQ_NORM
+                cur.execute("SELECT DISTINCT ON (asset) asset, sentiment FROM hedgeye_crypto_quant "
+                            "WHERE sentiment IS NOT NULL ORDER BY asset, signal_date DESC")
+                _map = {"bullish": "long", "bearish": "short", "neutral": "neutral"}
+                for a, sd in cur.fetchall():
+                    if a and sd:
+                        tk = BTCQ_NORM.get(a.strip().upper(), a.strip().upper())
+                        out[tk] = _map.get(sd.strip().lower(), sd.strip().lower())
     except Exception as e:
         log.warning("source sides lookup failed for %s: %s", tag, e)
     return out
@@ -562,6 +575,10 @@ def run_screen_q(q: dict) -> str:
     # TREND gate — evaluates COALESCE(hedgeye, mfr) via v_screener.trend_dir, the
     # identical field _fmt_row displays. An MFR-bullish name with no Hedgeye RR
     # passes a LONGS gate (and shows ·mfr).
+    # DOCTRINE (open, operator's call): should a BTC Quant trend call feed this gate for
+    # crypto names — i.e. extend v_screener.trend_dir's COALESCE to include btcquant the
+    # way Hedgeye RR is authoritative for equities? NOT wired today: btcquant side is a
+    # SEPARATE, filterable field (side:...), never gate-eligible. Flip only after ruling.
     after_trend = [r for r in ranged if (r["trend_dir"] or "") == req_trend]
     if q["near"] == "bottom":
         after_near = [r for r in after_trend if r["range_pos"] is not None and float(r["range_pos"]) <= 0.20]
