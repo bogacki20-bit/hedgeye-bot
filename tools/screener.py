@@ -509,6 +509,48 @@ def _apply_btcquant_trend(rows):
             r["trend_source"] = "btcq"
 
 
+def _underlying_trends(tickers) -> dict:
+    """{ticker: trend_dir} for wrapper underlyings — the underlying's own signal stack
+    (Hedgeye RR > BTC Quant > MFR). Read-only."""
+    tickers = [t for t in set(tickers) if t]
+    if not tickers:
+        return {}
+    rows = _rows(_SLICE_COLS + " WHERE ticker = ANY(%s)", [tickers])
+    _apply_btcquant_trend(rows)   # crypto underlyings carry the btcquant trend too
+    return {r["ticker"]: r["trend_dir"] for r in rows}
+
+
+_INV = {"BULLISH": "BEARISH", "BEARISH": "BULLISH", "NEUTRAL": "NEUTRAL"}
+
+
+def _apply_wrapper_trend(rows):
+    """Wrapper ETFs (METD->META inverse, SQQQ->QQQ …): the Rule-1 gate signal is the
+    UNDERLYING's trend, INVERTED where the linkage is inverse — so METD reads BULLISH
+    exactly when META = BEARISH (short-META thesis intact). Overrides the wrapper's own
+    (thin) trend; tags trend_source 'undr' and stashes the underlying detail for
+    rendering. If the underlying carries no trend, the wrapper keeps its own and is
+    flagged uncovered."""
+    from tools.wrapper_links import get_links
+    try:
+        links = get_links()
+    except Exception as e:
+        log.warning("wrapper links lookup failed: %s", e)
+        return
+    present = {r["ticker"] for r in rows} & set(links)
+    if not present:
+        return
+    ut = _underlying_trends([links[w]["underlying"] for w in present])
+    for r in rows:
+        lk = links.get(r["ticker"])
+        if not lk:
+            continue
+        utd = ut.get(lk["underlying"])
+        r["_wrap"] = {"underlying": lk["underlying"], "u_trend": utd, "inverse": lk["inverse"]}
+        if utd:
+            r["trend_dir"] = _INV[utd] if lk["inverse"] else utd
+            r["trend_source"] = "undr"
+
+
 def _attach_cloud(rows):
     """Annotate rows in place with _cloud ('above'/'in'/'below'/None) and _ltp (position
     within the LT band when inside), from the latest ltRangeData."""
@@ -535,7 +577,7 @@ def _is_mfr_only_topidea(r) -> bool:
 
 
 def _fmt_gated(r) -> str:
-    src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq"}.get(r.get("trend_source"), "")
+    src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
     td = (r["trend_dir"] or "none") + (f"·{src}" if src else "")
     rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
     return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp}"
@@ -551,7 +593,7 @@ def _fmt_row(r, corr) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
     rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
-    src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq"}.get(r.get("trend_source"), "")
+    src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
     trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "")
     cs, cu = corr.get(r["ticker"], (None, None))
     div = f" ⚡DIV({r['divergence']})" if r.get("divergence") else ""
@@ -563,11 +605,17 @@ def _fmt_row(r, corr) -> str:
     else:
         cloud = ""
     side = f" side:{r['_side']}" if r.get("_side") else ""
+    if r.get("_wrap"):
+        wd = r["_wrap"]
+        ut = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(wd["u_trend"], "?")
+        wrap = f" u:{wd['underlying']}·{ut}" + ("↯inv" if wd["inverse"] else "")
+    else:
+        wrap = ""
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<5} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
-            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{warn}")
+            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{warn}")
 
 
 def run_screen_q(q: dict) -> str:
@@ -606,6 +654,8 @@ def run_screen_q(q: dict) -> str:
     # Rule-1: BTC Quant is the crypto trend authority (RR > BTC Quant > MFR) — override
     # trend_dir for crypto names BEFORE the gate, on every screen.
     _apply_btcquant_trend(slice_)
+    # Wrapper ETFs gate on their UNDERLYING's trend (inverted where inverse).
+    _apply_wrapper_trend(slice_)
 
     # Cloud position (price vs the MFR trend range) — annotate every slice row, then
     # optionally filter on above/in/below.
