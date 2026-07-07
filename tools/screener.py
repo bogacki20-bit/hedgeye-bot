@@ -511,11 +511,12 @@ def _apply_btcquant_trend(rows):
 
 def _underlying_trends(tickers) -> dict:
     """{ticker: trend_dir} for wrapper underlyings — the underlying's own signal stack
-    (Hedgeye RR > BTC Quant > MFR). Read-only."""
+    (Hedgeye RR > BTC Quant > MFR). Computed over _fetch_source_slice so underlyings with
+    MFR data but NOT in v_screener (FXE/FXY currency proxies) still resolve. Read-only."""
     tickers = [t for t in set(tickers) if t]
     if not tickers:
         return {}
-    rows = _rows(_SLICE_COLS + " WHERE ticker = ANY(%s)", [tickers])
+    rows = _fetch_source_slice(tickers, None)   # trend over ANY ticker with MFR/RR data
     _apply_btcquant_trend(rows)   # crypto underlyings carry the btcquant trend too
     return {r["ticker"]: r["trend_dir"] for r in rows}
 

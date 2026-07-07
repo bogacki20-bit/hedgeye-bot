@@ -171,9 +171,15 @@ def _bs_set(key, val):
 
 
 def _underlying_trend(u) -> str | None:
-    """The underlying's current trend_dir from v_screener (Hedgeye RR > MFR). Read-only."""
-    r = _q("SELECT trend_dir FROM v_screener WHERE ticker=%s", (u,))
-    return r[0][0] if r and r[0][0] else None
+    """The underlying's trend from the full signal stack (Hedgeye RR > BTC Quant > MFR),
+    via the screener helper so it matches the gate and covers names not in v_screener
+    (FXE/FXY). Read-only."""
+    try:
+        from tools.screener import _underlying_trends
+        return _underlying_trends([u]).get((u or "").upper())
+    except Exception as e:
+        log.warning("underlying trend lookup failed for %s: %s", u, e)
+        return None
 
 
 def check_wrapper_flips(persist=True) -> list:
