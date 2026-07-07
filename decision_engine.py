@@ -231,7 +231,7 @@ def _get_etf_pro_range(ticker: str) -> Optional[dict]:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT ticker, week_of, range_low, range_high, description
+                    SELECT ticker, week_of, range_low, range_high, description, bias
                       FROM hedgeye_etf_pro_ranges
                      WHERE ticker = %s
                      ORDER BY week_of DESC
@@ -1940,6 +1940,22 @@ def decide_notifier(
     else:
         prange_lo, prange_hi, prange_src = None, None, None
 
+    # Effective directional authority — the Hedgeye trend that drives the gate,
+    # side and guards. Mirrors the levels precedence: a fresh RR uses Keith's
+    # RR trend; when the RR is stale/absent but ETF Pro Plus is fresh, ETF Pro
+    # Plus IS the Hedgeye directional call for that name (its bias is an
+    # explicit long/short trade rec), so its bias drives the alert — an ETF Pro
+    # name at an edge fires a real BUY/SELL, not a WATCH. MFR alone still never
+    # supplies direction (the NVDA-class guard). long→BULLISH / short→BEARISH.
+    _ep_bias = (ep.get("bias") or "").strip().lower() if ep else ""
+    ep_trend = {"long": "BULLISH", "short": "BEARISH"}.get(_ep_bias)
+    if prange_src == "RR":
+        eff_trend = rr.get("trend")
+    elif prange_src == "ETF Pro":
+        eff_trend = ep_trend
+    else:
+        eff_trend = None
+
     # Dated breadcrumb for a stale RR — informational only, never a live range
     # or a percentage. Appended to the range-position line / mid_range reason
     # so the operator can see the last RR without it decorating the alert as
@@ -2232,9 +2248,16 @@ def decide_notifier(
     trend_dir    = _normalize_mfr_signal(trend)
     momentum_dir = _normalize_mfr_signal(momentum)
     rr_trend_val = (rr.get("trend") if isinstance(rr, dict) else None)
-    side         = _ticker_side(source_flags, rr_trend=rr_trend_val)
+    # ETF Pro Plus names (RR stale/absent, ETF Pro fresh): the ETF Pro bias is
+    # the Hedgeye trend authority, so it drives the gate's trend slot in place
+    # of MFR trend — an ETF Pro Long at its bottom edge with confirming MFR
+    # momentum fires BUY. Fresh-RR names keep the existing MFR-trend gate +
+    # RR-trend veto (untouched). `eff_trend` also feeds side + the guards below.
+    gate_trend_dir = (_normalize_mfr_signal(eff_trend)
+                      if prange_src == "ETF Pro" else trend_dir)
+    side         = _ticker_side(source_flags, rr_trend=eff_trend)
     gated_action, gated_ctx_initial = _trend_momentum_gate(
-        zone, side, trend_dir, momentum_dir
+        zone, side, gate_trend_dir, momentum_dir
     )
 
     # 2026-06-10 — RR-trend guards (operator architectural directive):
@@ -2245,8 +2268,12 @@ def decide_notifier(
     #       fired ADD on a ticker Keith had no opinion on.
     #   (c) counter-trend BUY/ADD/SHORT: downgrade to WATCH. Exits
     #       (SELL/TRIM/COVER) always allowed.
+    # Guard on the effective authority (RR trend, else ETF Pro Plus bias) so an
+    # ETF Pro name is NOT force-WATCHed by guard (b) for lacking an RR trend —
+    # ETF Pro Plus supplies the direction. MFR-only names still have eff_trend
+    # None → guard (b) forces WATCH (the NVDA-class protection is intact).
     gated_action, gated_ctx_initial = _apply_rr_trend_guards(
-        ticker, zone, rr_trend_val, gated_action, gated_ctx_initial
+        ticker, zone, eff_trend, gated_action, gated_ctx_initial
     )
 
     # SG framing back into the prompt 2026-06-10 — DETERMINISTIC ONLY.
