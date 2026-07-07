@@ -152,6 +152,87 @@ def dismiss(ticker, reason="own exposure / not a single-name wrapper") -> None:
        (ticker.upper(), reason), fetch=False)
 
 
+# ─────────────────────────── flip-watch (held wrappers, underlying trend) ───────────
+
+_FLIP_LASTRUN_KEY = "wrapper_flip_lastrun"     # ET date — once/day throttle
+_UTREND_KEY = "wrapper_utrend:"                # + wrapper -> last-seen underlying trend
+_INV = {"BULLISH": "BEARISH", "BEARISH": "BULLISH", "NEUTRAL": "NEUTRAL"}
+
+
+def _bs_get(key):
+    r = _q("SELECT value FROM bot_state WHERE key=%s", (key,))
+    return r[0][0] if r and r[0][0] else None
+
+
+def _bs_set(key, val):
+    _q("INSERT INTO bot_state (key,value,updated_at) VALUES (%s,%s,NOW()) "
+       "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+       (key, val), fetch=False)
+
+
+def _underlying_trend(u) -> str | None:
+    """The underlying's current trend_dir from v_screener (Hedgeye RR > MFR). Read-only."""
+    r = _q("SELECT trend_dir FROM v_screener WHERE ticker=%s", (u,))
+    return r[0][0] if r and r[0][0] else None
+
+
+def check_wrapper_flips(persist=True) -> list:
+    """For each HELD wrapper, compare its underlying's trend now vs last-seen; return a
+    flip event when it changed. Inverted-adjusted for the wrapper. Persists the new
+    trend (so a flip fires once) when persist=True."""
+    links = get_links()
+    if not links:
+        return []
+    held = {r[0].upper() for r in _q(
+        "SELECT DISTINCT symbol FROM book_positions "
+        "WHERE snapshot_date=(SELECT max(snapshot_date) FROM book_positions) "
+        "AND asset_class <> 'cash'")}
+    events = []
+    for w, lk in links.items():
+        if w not in held:
+            continue
+        u, inv = lk["underlying"], lk["inverse"]
+        now = _underlying_trend(u)
+        if not now:
+            continue
+        last = _bs_get(_UTREND_KEY + w)
+        if last and last != now:
+            eff = _INV[now] if inv else now
+            events.append({"wrapper": w, "underlying": u, "inverse": inv,
+                           "from": last, "to": now, "wrapper_trend": eff,
+                           "msg": (f"🔄 {u} trend {last}→{now} → {w}"
+                                   f"{' (inverse)' if inv else ''} now {eff}"
+                                   + (f" — short-{u} thesis {'confirmed' if eff=='BULLISH' else 'weakening'}"
+                                      if inv else ""))})
+        if persist and now != last:
+            _bs_set(_UTREND_KEY + w, now)
+    return events
+
+
+def run_flip_watch(force=False) -> str:
+    """Once/day (ET) — squawk any held-wrapper underlying-trend flips. No writes but the
+    throttle + the per-wrapper last-trend. Caller (main.py daemon) gates on the hour."""
+    import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    except Exception:
+        today = datetime.datetime.utcnow().date().isoformat()
+    if not force and _bs_get(_FLIP_LASTRUN_KEY) == today:
+        return "skip:ran-today"
+    _bs_set(_FLIP_LASTRUN_KEY, today)
+    events = check_wrapper_flips(persist=True)
+    if not events:
+        return "skip:no-flips"
+    try:
+        from notifier import send_telegram
+        send_telegram("Wrapper flip", "\n".join(e["msg"] for e in events), priority=2)
+    except Exception as e:
+        log.warning("wrapper flip squawk failed: %s", e)
+        return f"error:{e}"
+    return f"sent:{len(events)}"
+
+
 def handle_wrapper_command(text):
     """Telegram: WRAP [LIST] / WRAP OK <tkr> [underlying] [inverse|long] / WRAP NO <tkr>.
     Confirms or dismisses a detector proposal. Returns None if not a WRAP command."""

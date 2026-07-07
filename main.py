@@ -360,6 +360,29 @@ if __name__ == "__main__":
     else:
         log.info("Operator-ping disabled (OPERATOR_PING_ENABLED=false).")
 
+    # Wrapper flip-watch (~7am ET daily). Alerts when a HELD wrapper ETF's underlying
+    # trend flips (inverted for the wrapper) — e.g. META flips BEARISH so METD's
+    # short-META thesis confirms. Additive; reads wrapper_links + the underlying trend.
+    if os.getenv("WRAPPER_FLIP_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _wrapper_flip_loop():
+            import time
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            while True:
+                try:
+                    if _dt.now(ZoneInfo("America/New_York")).hour >= 7:   # ~7am ET onward
+                        from tools.wrapper_links import run_flip_watch
+                        st = run_flip_watch()
+                        if st.startswith("sent"):
+                            log.info("wrapper_flip: %s", st)
+                except Exception as e:
+                    log.error("wrapper_flip loop error: %s", e)
+                time.sleep(1800)  # check every 30 min; internal once/day throttle
+        threading.Thread(target=_wrapper_flip_loop, daemon=True, name="wrapper-flip").start()
+        log.info("Wrapper flip-watch thread started.")
+    else:
+        log.info("Wrapper flip-watch disabled (WRAPPER_FLIP_ENABLED=false).")
+
     # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via
