@@ -18,7 +18,7 @@ import os
 import json
 import logging
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import psycopg2
 import psycopg2.extras
@@ -426,10 +426,91 @@ def mark_email_classified(message_id: str, classified_as: str,
         conn.commit()
 
 
+# ─────────────────────────── Risk Range staleness gate ─────────────────────
+#
+# HARD RULE (operator, 2026-07-06): a Risk Range row older than
+# RR_MAX_AGE_DAYS *trading* days must NEVER be presented as a live/current
+# range — no percent-of-RR math, no zone, no narrative, no divergence flag.
+# Older rows may only be omitted or rendered explicitly dated
+# ("last RR 6/8: $163-$174 (stale)").
+#
+# Why here: Keith's daily RR email is the source; when a name drops out of
+# his rotation (or the parser silently drops a section — see the FX/commodity
+# cohort frozen at 2026-02-26) its last row would otherwise be served forever
+# as "current" by every ORDER BY signal_date DESC LIMIT 1 reader. This gate is
+# the single chokepoint db_pg exposes; `_gate_rr_row` is default-deny — it
+# BLANKS buy_trade/sell_trade/trend on a stale row (so a consumer that forgets
+# to check the flag still cannot run live math on it) and stashes the raw
+# values under stale_* for dated rendering.
+
+def rr_max_age_tdays() -> int:
+    """Freshness window for Risk Ranges, in trading days. env RR_MAX_AGE_DAYS
+    (default 5)."""
+    try:
+        return max(1, int(os.environ.get("RR_MAX_AGE_DAYS", "5")))
+    except (TypeError, ValueError):
+        return 5
+
+
+def trading_days_between(d0, d1) -> int:
+    """Trading days (Mon-Fri; holidays ignored) from d0 to d1. Signed:
+    negative when d1 < d0. A weekend-only span is 0. Accepts date or
+    datetime for either arg."""
+    if d0 is None or d1 is None:
+        return 0
+    if isinstance(d0, datetime):
+        d0 = d0.date()
+    if isinstance(d1, datetime):
+        d1 = d1.date()
+    lo, hi, sign = (d0, d1, 1) if d0 <= d1 else (d1, d0, -1)
+    days = 0
+    cur = lo
+    one = timedelta(days=1)
+    while cur < hi:
+        cur += one
+        if cur.weekday() < 5:      # 0-4 = Mon-Fri
+            days += 1
+    return days * sign
+
+
+def risk_range_age(signal_date, as_of=None):
+    """(age_tdays, is_stale) for a Risk Range signal_date. is_stale is True
+    when the row is strictly older than rr_max_age_tdays() trading days.
+    Returns (None, False) when signal_date is None — an undated row cannot be
+    aged, so it is treated as not-stale (callers still see age_tdays=None)."""
+    if signal_date is None:
+        return (None, False)
+    if as_of is None:
+        as_of = date.today()
+    age = trading_days_between(signal_date, as_of)
+    return (age, age > rr_max_age_tdays())
+
+
+def _gate_rr_row(row, as_of=None):
+    """Default-deny staleness gate for a single Risk Range dict. Always stamps
+    `age_tdays` + `stale`. When stale, blanks buy_trade/sell_trade/trend and
+    moves the raw values to stale_buy_trade/stale_sell_trade/stale_trend so the
+    composer can render an explicitly-dated breadcrumb but no consumer can run
+    live math. Returns the same dict (mutated) for chaining; None passes through."""
+    if not row:
+        return row
+    age, stale = risk_range_age(row.get("signal_date"), as_of)
+    row["age_tdays"] = age
+    row["stale"] = stale
+    if stale:
+        row["stale_buy_trade"] = row.get("buy_trade")
+        row["stale_sell_trade"] = row.get("sell_trade")
+        row["stale_trend"] = row.get("trend")
+        row["buy_trade"] = None
+        row["sell_trade"] = None
+        row["trend"] = None
+    return row
+
+
 # ─────────────────────────── Risk Range queries ───────────────────────────
 
 def get_latest_risk_range(ticker: str):
-    """Return the most recent Risk Range row for a ticker."""
+    """Return the most recent Risk Range row for a ticker (staleness-gated)."""
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(
@@ -442,11 +523,13 @@ def get_latest_risk_range(ticker: str):
                 (ticker,),
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            return _gate_rr_row(dict(row)) if row else None
 
 
 def get_active_risk_ranges(as_of: date | None = None):
-    """Return the most recent Risk Range per ticker as of a given date (default today)."""
+    """Return the most recent Risk Range per ticker as of a given date (default
+    today), each staleness-gated (stale rows keep their identity but have blank
+    buy_trade/sell_trade/trend + stale_* breadcrumbs)."""
     if as_of is None:
         as_of = date.today()
     with get_conn() as conn:
@@ -460,7 +543,7 @@ def get_active_risk_ranges(as_of: date | None = None):
                 """,
                 (as_of,),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [_gate_rr_row(dict(r), as_of) for r in cur.fetchall()]
 
 
 # ─────────────────────────── Alerts ───────────────────────────

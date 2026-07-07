@@ -188,7 +188,15 @@ def _static_framework_block() -> str:
 
 def _get_risk_range(ticker: str) -> Optional[dict]:
     """Most recent Hedgeye Risk Range row for the ticker, as dict.
-    Includes buy_trade, sell_trade, trend, prev_close, signal_date."""
+    Includes buy_trade, sell_trade, trend, prev_close, signal_date.
+
+    Staleness-gated (2026-07-06): the row is passed through
+    db_pg._gate_rr_row, which stamps `age_tdays` + `stale` and — when the row
+    is older than RR_MAX_AGE_DAYS trading days — BLANKS buy_trade/sell_trade/
+    trend (moving the raw values to stale_buy_trade/stale_sell_trade/
+    stale_trend). Downstream percent-of-RR math, zone, side/narrative and the
+    RR/MFR divergence flag therefore all see a stale range as absent — never
+    as a live/current range. See db_pg._gate_rr_row for the HARD RULE."""
     try:
         import db_pg
         import psycopg2.extras
@@ -206,7 +214,7 @@ def _get_risk_range(ticker: str) -> Optional[dict]:
                     (ticker.upper(),),
                 )
                 row = cur.fetchone()
-                return dict(row) if row else None
+                return db_pg._gate_rr_row(dict(row)) if row else None
     except Exception as e:
         log.warning("decision_engine: risk-range fetch failed for %s: %s", ticker, e)
         return None
@@ -1899,15 +1907,53 @@ def decide_notifier(
         return None
 
     # Pull the minimal context the notifier needs.
-    rr  = _get_risk_range(ticker)  or {}
+    rr  = _get_risk_range(ticker)  or {}     # staleness-gated: stale → levels blanked
+    ep  = _get_etf_pro_range(ticker) or {}
     mfr = _get_mfr_latest(ticker)  or {}
     yh  = _get_yahoo_latest(ticker) or {}
 
     price = mfr.get("price") or yh.get("price")
+    # rr_lo/rr_hi are None when the RR row is stale (>RR_MAX_AGE_DAYS td) —
+    # _get_risk_range blanked them. So every rr_lo/rr_hi consumer below (zone,
+    # pct, divergence) sees a stale range as absent by construction.
     rr_lo = rr.get("buy_trade")
     rr_hi = rr.get("sell_trade")
     mfr_lo = mfr.get("range_low")
     mfr_hi = mfr.get("range_high")
+
+    # Precedence for the range we PRESENT + run zone/percent against:
+    #   fresh RR  >  fresh ETF Pro levels  >  MFR-only (no RR/ETF-Pro clause).
+    # (operator directive 2026-07-06). ETF Pro carries current product levels
+    # (weekly Monday cadence) for the ~18 etfpro names; when the last RR is
+    # stale but ETF Pro is fresh we surface "ETF Pro levels $150-$157" instead
+    # of a stale range. ETF Pro drives terrain (zone/percent) only — it does
+    # NOT supply a Keith trend, so a stale-RR name still hits the RR-trend
+    # guard below and stays WATCH (a stale range can never trigger a trade).
+    import db_pg as _db_pg
+    _ep_age, _ep_stale = _db_pg.risk_range_age(ep.get("week_of")) if ep else (None, True)
+    ep_fresh = bool(ep) and ep.get("range_low") is not None and not _ep_stale
+    if rr_lo is not None and rr_hi is not None:
+        prange_lo, prange_hi, prange_src = rr_lo, rr_hi, "RR"
+    elif ep_fresh:
+        prange_lo, prange_hi, prange_src = (
+            ep.get("range_low"), ep.get("range_high"), "ETF Pro")
+    else:
+        prange_lo, prange_hi, prange_src = None, None, None
+
+    # Dated breadcrumb for a stale RR — informational only, never a live range
+    # or a percentage. Appended to the range-position line / mid_range reason
+    # so the operator can see the last RR without it decorating the alert as
+    # current.
+    stale_rr_note = ""
+    if rr.get("stale") and rr.get("stale_buy_trade") is not None:
+        _sd = rr.get("signal_date")
+        _sd_str = f"{_sd.month}/{_sd.day}" if _sd else "?"
+        try:
+            _slo = f"{float(rr['stale_buy_trade']):.2f}"
+            _shi = f"{float(rr['stale_sell_trade']):.2f}"
+        except (TypeError, ValueError):
+            _slo, _shi = rr['stale_buy_trade'], rr['stale_sell_trade']
+        stale_rr_note = (f" · last RR {_sd_str}: ${_slo}-${_shi} (stale)")
     trend  = mfr.get("trend_signal")
     momentum = mfr.get("momentum_signal")
     hurst  = mfr.get("hurst")
@@ -1924,11 +1970,14 @@ def decide_notifier(
     # RR isn't published for the ticker (rare; happens on the first day
     # a ticker appears in the inventory). `compute_zone` reads the
     # RR_EDGE_PERCENT env var to decide the edge band width.
+    # Computed against the primary range (fresh RR, else fresh ETF Pro), with
+    # MFR as the final fallback. A stale RR never reaches here — prange_* is
+    # already resolved to ETF Pro / None in that case.
     zone = "unknown"
     try:
         from price_monitor import compute_zone
-        if price is not None and rr_lo is not None and rr_hi is not None:
-            zone = compute_zone(float(price), float(rr_lo), float(rr_hi))
+        if price is not None and prange_lo is not None and prange_hi is not None:
+            zone = compute_zone(float(price), float(prange_lo), float(prange_hi))
         elif price is not None and mfr_lo is not None and mfr_hi is not None:
             zone = compute_zone(float(price), float(mfr_lo), float(mfr_hi))
     except Exception:
@@ -1942,16 +1991,22 @@ def decide_notifier(
     # "unable to calculate % without RR bounds" and Haiku improvised).
     #
     # `range_position_pct` is kept as the legacy primary % field for
-    # backward-compat downstream — RR if present, MFR fallback otherwise.
-    pct_rr: Optional[float] = None
+    # backward-compat downstream — primary range if present, MFR fallback.
+    #
+    # pct_primary is the % against the primary presentation range (fresh RR,
+    # else fresh ETF Pro). pct_rr retains its STRICT meaning — the % against a
+    # FRESH Hedgeye Risk Range only — so a stale range can never populate a
+    # "% of RR" number anywhere downstream (HARD RULE). When the primary range
+    # is ETF Pro, pct_rr stays None and the presentation labels it "ETF Pro".
+    pct_primary: Optional[float] = None
     pct_mfr: Optional[float] = None
     try:
-        if (price is not None and rr_lo is not None and rr_hi is not None
-                and float(rr_hi) > float(rr_lo)):
-            pct_rr = ((float(price) - float(rr_lo))
-                      / (float(rr_hi) - float(rr_lo))) * 100.0
+        if (price is not None and prange_lo is not None and prange_hi is not None
+                and float(prange_hi) > float(prange_lo)):
+            pct_primary = ((float(price) - float(prange_lo))
+                           / (float(prange_hi) - float(prange_lo))) * 100.0
     except Exception:
-        pct_rr = None
+        pct_primary = None
     try:
         if (price is not None and mfr_lo is not None and mfr_hi is not None
                 and float(mfr_hi) > float(mfr_lo)):
@@ -1959,14 +2014,17 @@ def decide_notifier(
                        / (float(mfr_hi) - float(mfr_lo))) * 100.0
     except Exception:
         pct_mfr = None
-    range_position_pct: Optional[float] = pct_rr if pct_rr is not None else pct_mfr
+    pct_rr: Optional[float] = pct_primary if prange_src == "RR" else None
+    range_position_pct: Optional[float] = (
+        pct_primary if pct_primary is not None else pct_mfr)
 
     # Divergence: >20pp gap between RR-% and MFR-% means the two sources
-    # disagree on where the price sits in the range. Useful operator
-    # signal — usually means the ranges themselves have drifted apart
-    # (RR is older / a different framework call). Only meaningful when
-    # BOTH percentages exist.
-    divergence = (pct_rr is not None and pct_mfr is not None
+    # disagree on where the price sits in the range. GATED ON RR FRESHNESS
+    # (2026-07-06): only fires off a FRESH Risk Range (prange_src == "RR").
+    # "Staleness is not divergence" — a stale RR that drifted from MFR must
+    # NOT raise the ⚠️ flag; that was the false-signal the operator flagged.
+    divergence = (prange_src == "RR"
+                  and pct_rr is not None and pct_mfr is not None
                   and abs(pct_rr - pct_mfr) > 20.0)
 
     # Optional wall line — only emit when at least one wall value exists.
@@ -1987,15 +2045,16 @@ def decide_notifier(
     #   (omitted entirely when neither source has bounds — caller will then
     #    hit the mid_range/unknown short-circuit and suppress the alert)
     range_pos_parts: list[str] = []
-    if pct_rr is not None:
-        range_pos_parts.append(f"{pct_rr:.0f}% of RR ${rr_lo}-${rr_hi}")
+    if pct_primary is not None:
+        range_pos_parts.append(
+            f"{pct_primary:.0f}% of {prange_src} ${prange_lo}-${prange_hi}")
     if pct_mfr is not None:
         range_pos_parts.append(f"{pct_mfr:.0f}% of MFR ${mfr_lo}-${mfr_hi}")
     range_pos_line = ""
     if range_pos_parts:
         divergence_tag = " ⚠️ RR/MFR divergence" if divergence else ""
         range_pos_line = ("Range position: " + " / ".join(range_pos_parts)
-                          + divergence_tag + "\n")
+                          + divergence_tag + stale_rr_note + "\n")
 
     # Source flags — which Hedgeye product surfaced this ticker. Surfaced
     # into the prompt as context (which source-prefix to emit, whether the
@@ -2030,7 +2089,7 @@ def decide_notifier(
                 account_value_usd = 50_000.0
         if range_pos_parts:
             reason = ("mid_range — " + " / ".join(range_pos_parts)
-                      + "; no edge, no Haiku call")
+                      + stale_rr_note + "; no edge, no Haiku call")
         else:
             reason = (f"zone={zone}; no RR or MFR bounds available, "
                       "alert suppressed (no Haiku call)")
@@ -2213,10 +2272,25 @@ def decide_notifier(
     except Exception as e:
         log.debug("notifier: sg_levels read failed for %s (%s)", ticker, e)
 
+    # Range line fed to Haiku. A stale RR is never presented as a live range
+    # here — rr_lo/rr_hi are already None in that case; prange_src names what
+    # the numbers actually are (RR / ETF Pro), and the stale RR is only echoed
+    # as an explicitly-dated breadcrumb so Haiku cannot mistake it for current.
+    if prange_src == "RR":
+        _rng_line = f"Hedgeye Risk Range: low={prange_lo}, high={prange_hi}\n"
+    elif prange_src == "ETF Pro":
+        _rng_line = (
+            "Hedgeye Risk Range: (stale or absent — not used)\n"
+            f"ETF Pro levels: low={prange_lo}, high={prange_hi}\n")
+    else:
+        _rng_line = "Hedgeye Risk Range: (none — no fresh levels)\n"
+    if stale_rr_note:
+        _rng_line += "Note:" + stale_rr_note.lstrip(" ·") + "\n"
+
     user_msg = (
         f"Ticker: {ticker.upper()}\n"
         f"Price: {price}\n"
-        f"Hedgeye Risk Range: low={rr_lo}, high={rr_hi}\n"
+        + _rng_line
         + range_pos_line
         + f"Zone: {zone}\n"
         + f"Ticker side: {side}\n"
