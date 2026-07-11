@@ -206,6 +206,16 @@ if __name__ == "__main__":
                         except Exception as e:
                             log.warning("bot_state write for mfr_watchlist failed: %s", e)
                         log.info("mfr_watchlist_sync: done — %s", summary)
+                        # Vol-regime layer (queue item 1, 2026-07-11): classify
+                        # the vol complex off the fresh snapshots — one frozen
+                        # fact row per index per day. Guarded; loud in the log.
+                        try:
+                            from tools.vol_regime import write_for_date, regime_line
+                            from datetime import date as _date
+                            vs = write_for_date(_date.today())
+                            log.info("vol_regime: %s — %s", vs, regime_line())
+                        except Exception as e:
+                            log.warning("vol_regime nightly write failed: %s", e)
                     else:
                         log.debug("mfr_watchlist_sync: already synced today (%s)", today)
 
