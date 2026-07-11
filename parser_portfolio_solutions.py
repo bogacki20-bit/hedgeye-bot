@@ -477,6 +477,15 @@ def process_email(message_id: str, *, dry_run: bool = False,
     # "why" — Keith's commentary verbatim with action/rank metadata for
     # query.
     _write_ps_corpus_row(message_id, snapshot_date, subject, html_body, parsed)
+    # PS flow stamping (migration 056, operator doctrine 2026-07-11): diff this
+    # snapshot against the previous one and write add/drop events with the
+    # market structure frozen at event date. Guarded — never blocks the parse.
+    try:
+        from tools.ps_flow import process_snapshot
+        summary["ps_flow"] = process_snapshot(snapshot_date)
+    except Exception as e:
+        log.warning("ps_flow stamping failed for %s: %s", snapshot_date, e)
+        summary["ps_flow"] = {"error": str(e)}
     # Refresh the materialized view so keith_trades_with_context reflects
     # today's PS data immediately. Best-effort; the nightly event-alerts
     # launcher also refreshes as a belt-and-suspenders.
