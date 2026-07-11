@@ -613,10 +613,11 @@ def _fmt_row(r, corr) -> str:
     else:
         wrap = ""
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
+    th = " ⚠️trend-against" if r.get("_thesis") else ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<5} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
-            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{warn}")
+            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}")
 
 
 def run_screen_q(q: dict) -> str:
@@ -625,6 +626,11 @@ def run_screen_q(q: dict) -> str:
     rows display (Hedgeye primary, MFR fallback)."""
     buckets, req_trend = _DIR_BUCKETS[q["direction"]]
     src = q.get("source")
+    # BOOK MODE (queue item 5 / the SHY-TUA-HEFT-AGGH fix): on a pure book screen,
+    # direction means POSITION SIDE (what you actually hold), not trend. TREND is
+    # shown per row and mismatches carry a ⚠️ thesis flag instead of relabeling a
+    # long as a "short". Source∩book composites keep source semantics unchanged.
+    book_mode = bool(q["held"] and not src)
     try:
         # Base universe: source= (whole source, incl. names not in ticker_tags/book)
         # > my book (book holdings) > default (tagged roster, bucket-filtered). Direction
@@ -642,6 +648,26 @@ def run_screen_q(q: dict) -> str:
         log.exception("screen query failed")
         return f"🛑 SCREEN error: {e}"
 
+    # Book mode: derive position sides (Python math over book_positions legs,
+    # wrapper-linkage exposure-adjusted) and filter the slice on the WANTED side.
+    # A failure here is LOUD — never silently fall back to trend semantics.
+    psides: dict = {}
+    no_side: list = []
+    pre_side_n = len(slice_)
+    if book_mode:
+        try:
+            from tools.book_direction import book_sides
+            psides = book_sides()
+        except Exception as e:
+            log.exception("book position sides lookup failed")
+            return (f"🛑 SCREEN error: book position sides unavailable ({e}) — "
+                    f"refusing to run a book {q['direction']} screen on trend semantics.")
+        want_side = "short" if q["direction"] == "shorts" else "long"
+        for r in slice_:
+            r["_pside"] = (psides.get(r["ticker"]) or {}).get("side")
+        no_side = [r for r in slice_ if r["_pside"] not in ("long", "short")]
+        slice_ = [r for r in slice_ if r["_pside"] == want_side]
+
     # Sided sources (keiths always; etfpro once the bias column exists): scope the slice
     # to the direction's stored side up front — "keiths shorts" = keiths' short book —
     # then the BEARISH TREND gate still applies on top. Side is rendered per row.
@@ -650,7 +676,9 @@ def run_screen_q(q: dict) -> str:
         want = "short" if q["direction"] == "shorts" else "long"
         slice_ = [r for r in slice_ if sides.get(r["ticker"]) == want]
     for r in slice_:
-        r["_side"] = sides.get(r["ticker"]) if sides else None
+        # Sided-source side wins on source screens; book mode renders the
+        # POSITION side through the same side: field.
+        r["_side"] = sides.get(r["ticker"]) if sides else r.get("_pside")
 
     # Rule-1: BTC Quant is the crypto trend authority (RR > BTC Quant > MFR) — override
     # trend_dir for crypto names BEFORE the gate, on every screen.
@@ -672,7 +700,20 @@ def run_screen_q(q: dict) -> str:
     # crypto names — i.e. extend v_screener.trend_dir's COALESCE to include btcquant the
     # way Hedgeye RR is authoritative for equities? NOT wired today: btcquant side is a
     # SEPARATE, filterable field (side:...), never gate-eligible. Flip only after ruling.
-    after_trend = [r for r in ranged if (r["trend_dir"] or "") == req_trend]
+    if book_mode:
+        # Book screens: TREND never drops a row you actually hold — it renders
+        # per row, and trend-against-position gets a ⚠️ thesis flag. raw_side vs
+        # the (linkage-adjusted) trend_dir: both flip together on inverse
+        # wrappers, so the verdict is frame-invariant (SBIT long + BTC bearish
+        # -> adjusted trend BULLISH -> intact, no flag).
+        for r in ranged:
+            raw = (psides.get(r["ticker"]) or {}).get("raw_side")
+            td = r["trend_dir"] or ""
+            r["_thesis"] = ((raw == "long" and td == "BEARISH") or
+                            (raw == "short" and td == "BULLISH"))
+        after_trend = ranged
+    else:
+        after_trend = [r for r in ranged if (r["trend_dir"] or "") == req_trend]
     if q["near"] == "bottom":
         after_near = [r for r in after_trend if r["range_pos"] is not None and float(r["range_pos"]) <= 0.20]
     elif q["near"] == "top":
@@ -696,7 +737,11 @@ def run_screen_q(q: dict) -> str:
     if q["cloud"]:    filt.append(f"{q['cloud']}-cloud")
     if q["momentum"]: filt.append("momentum_ok")
     if q["held"]:     filt.append("in-book")
-    head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
+    if book_mode:
+        head = (f"🔎 SCREEN — {' · '.join(filt)}  (side = POSITION side; "
+                f"TREND shown per row, ⚠️ = trend against position)")
+    else:
+        head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
 
     lines = [head, ""]
     if result:
@@ -705,6 +750,9 @@ def run_screen_q(q: dict) -> str:
         lines += [_fmt_row(r, corr) for r in result]
         if any(r.get("divergence") for r in result):
             lines.append("⚡ = MFR trade vs momentum divergence (momentum-exhaustion fade setup).")
+        if any(r.get("_thesis") for r in result):
+            lines.append("⚠️trend-against = TREND opposes your position side — thesis check, "
+                         "not a signal to flip.")
         if any(_is_mfr_only_topidea(r) for r in result):
             lines.append("⚠ = top idea on MFR trend only, no Hedgeye TREND — lower-confidence.")
         lines.append("cSPY/cUUP = bot-computed Pearson vs SPY/UUP daily returns (calc, not MFR); "
@@ -717,18 +765,24 @@ def run_screen_q(q: dict) -> str:
             base_lbl = "book holdings"
         else:
             base_lbl = "tag match (sector+bucket)"
+        side_lbl = f"position side = {q['direction'][:-1]}"
         funnel = [
-            f"{base_lbl}: {len(slice_)}",
+            (f"{base_lbl}: {pre_side_n}" if book_mode else f"{base_lbl}: {len(slice_)}"),
+            (f"→ {side_lbl}:         {len(slice_)}" if book_mode else None),
             f"→ has MFR range:           {len(ranged)}",
-            f"→ TREND={req_trend} (Rule-1): {len(after_trend)}",
+            (None if book_mode else f"→ TREND={req_trend} (Rule-1): {len(after_trend)}"),
             f"→ {near_lbl}:              {len(after_near)}",
             (f"→ momentum_ok:             {len(after_mom)}" if q["momentum"] else None),
             (f"→ {q['cloud']}-cloud:            {len(after_cloud)}" if q["cloud"] else None),
         ]
         funnel = [f for f in funnel if f]
         # FIRST funnel stage that hit 0.
-        stages = [(base_lbl, len(slice_)), ("has-range", len(ranged)),
-                  (f"TREND={req_trend}", len(after_trend))]
+        if book_mode:
+            stages = [(base_lbl, pre_side_n), (side_lbl, len(slice_)),
+                      ("has-range", len(ranged))]
+        else:
+            stages = [(base_lbl, len(slice_)), ("has-range", len(ranged)),
+                      (f"TREND={req_trend}", len(after_trend))]
         if q["near"]:     stages.append((near_lbl, len(after_near)))
         if q["momentum"]: stages.append(("momentum_ok", len(after_mom)))
         if q["cloud"]:    stages.append((f"{q['cloud']}-cloud", len(after_cloud)))
@@ -739,13 +793,18 @@ def run_screen_q(q: dict) -> str:
 
     # ⛔ gated-by-TREND — matched the tier but failed Rule-1. Full list on "show
     # gated"; otherwise a one-line breadcrumb so nothing disappears silently.
-    gated = sorted([r for r in ranged if (r["trend_dir"] or "") != req_trend],
-                   key=lambda r: (r["range_pos"] is None,
-                                  float(r["range_pos"]) if r["range_pos"] is not None else 0),
-                   reverse=(q["direction"] == "shorts"))
+    # Book mode: TREND never gates a held row — mismatches are ⚠️-flagged inline.
+    gated = [] if book_mode else sorted(
+        [r for r in ranged if (r["trend_dir"] or "") != req_trend],
+        key=lambda r: (r["range_pos"] is None,
+                       float(r["range_pos"]) if r["range_pos"] is not None else 0),
+        reverse=(q["direction"] == "shorts"))
     if q["show_gated"]:
         lines.append("")
-        if gated:
+        if book_mode:
+            lines.append("⛔ TREND does not gate book screens — trend-against-position "
+                         "rows are listed with ⚠️trend-against inline.")
+        elif gated:
             lines.append(f"⛔ GATED BY TREND — matched tier, trend != {req_trend} ({len(gated)}):")
             lines += [_fmt_gated(r) for r in gated]
         else:
@@ -754,6 +813,14 @@ def run_screen_q(q: dict) -> str:
         lines.append("")
         lines.append(f"⛔ {len(gated)} matched but gated by TREND (need {req_trend}) "
                      f"— reply 'show gated' to list them.")
+
+    # Book mode loud-failure: held names whose side is flat/unjudgeable are never
+    # silently dropped — name them.
+    if book_mode and no_side:
+        lines.append("")
+        names = ", ".join(sorted(f"{r['ticker']}({r.get('_pside') or '?'})" for r in no_side))
+        lines.append(f"◻️ side-indeterminate — held but no long/short verdict: {names} "
+                     f"(flat spread or unjudgeable legs; check ingest).")
 
     lines.append("")
     src_noun = _source_label(src) if (src and src != "posmon") else None
@@ -801,7 +868,8 @@ def run_screen(text: str) -> str:
 def handle_screen_command(text, chat_id=None):
     """Telegram listener hook. Handles the SCREEN sentinel AND follow-up replies to
     a pending query for this chat. Returns a reply string (results / guard / prompt)
-    or None if the message isn't screen-related. Never a bare ack for a follow-up."""
+    or None if the message isn't screen-related. Never a bare ack for a follow-up.
+    """
     if not text:
         return None
     s = text.strip()
