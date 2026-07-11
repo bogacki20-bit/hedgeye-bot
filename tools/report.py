@@ -135,12 +135,19 @@ def build_report(kind: str = "on-demand") -> str:
         # ── book state: side/rp/trend + thesis + dip-zone flags ──
         try:
             from tools.book_alerts import _book_rows, BOOK_DIP_DELTA
+            from tools.book_direction import book_sides
             rows = _book_rows()
-            longs, shorts, flags = 0, 0, []
+            # COUNT FRAME (2026-07-11 audit): counts are EXPOSURE side over ALL
+            # sided holdings (book_sides) — the same frame as SCREEN "book
+            # shorts", so the two never disagree. The ⚠ verdict below stays in
+            # the RAW frame (raw side vs linkage-adjusted trend, frame-
+            # invariant per the SBIT double-flip fix).
+            _sides = book_sides()
+            longs = sum(1 for v in _sides.values() if v.get("side") == "long")
+            shorts = sum(1 for v in _sides.values() if v.get("side") == "short")
+            flags = []
             for r in rows:
                 side, td = r["side"], r.get("trend_dir") or "?"
-                longs += side == "long"
-                shorts += side == "short"
                 against = ((side == "long" and td == "BEARISH") or
                            (side == "short" and td == "BULLISH"))
                 rp = r.get("rp_now")
@@ -154,7 +161,7 @@ def build_report(kind: str = "on-demand") -> str:
                 if mark:
                     rp_s = f"{rp:.2f}" if rp is not None else "?"
                     flags.append(f"{mark}{r['ticker']}({side[0].upper()},rp{rp_s},{td[:4]})")
-            lines.append(f"BOOK: {longs}L/{shorts}S · flagged: "
+            lines.append(f"BOOK: {longs}L/{shorts}S exposure · flagged: "
                          + (" ".join(flags) or "none")
                          + "  [⚠=trend-against 📉=dip/rip-zone]")
         except Exception as e:
