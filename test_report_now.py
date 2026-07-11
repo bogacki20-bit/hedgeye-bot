@@ -3,7 +3,8 @@ cues, live rp, candidate selection, sizing flags, formatting.
     python test_report_now.py
 """
 from tools.report_now import (rotation_cues, live_rp, pick_candidates,
-                              sizing_flags, fmt_candidate, fmt_section)
+                              sizing_flags, fmt_candidate, fmt_grouped,
+                              collapse_share_classes, tier_mark)
 
 
 # ── rotation cues ──
@@ -104,11 +105,55 @@ def test_fmt_candidate_breach_still_surfaces_with_flag():
     assert s == "CLOX 0.20 held134%,IND+ROTH⚠cap4"
 
 
-def test_fmt_section_cap_and_empty():
-    assert fmt_section("LONGS", [], {}) == "LONGS: none"
-    rows = [row(f"T{i}", "S", "BULLISH", 0.10 + i / 100) for i in range(12)]
-    s = fmt_section("LONGS", rows, {}, cap=10)
+def test_fmt_grouped_by_cue_with_marks():
+    # edit 1: the ✗ fade cue stays attached to its names
+    cues = [("Materials", "XLB", "✗"), ("Consumer Discretionary", "XLY", "✓")]
+    cands = [row("BYD", "Consumer Discretionary", "BULLISH", 0.14),
+             row("SHW", "Materials", "BULLISH", 0.30)]
+    s = fmt_grouped("LONGS", cands, {}, cues)
+    assert s == "LONGS: XLB✗: SHW 0.30 | XLY✓: BYD 0.14"
+
+
+def test_fmt_grouped_cap_and_empty():
+    assert fmt_grouped("LONGS", [], {}, []) == "LONGS: none"
+    cues = [("S", "XLS", "")]
+    rows_ = [row(f"T{i}", "S", "BULLISH", 0.10 + i / 100) for i in range(12)]
+    s = fmt_grouped("LONGS", rows_, {}, cues, cap=10)
     assert "+2 more" in s and s.count("·") == 9
+
+
+def test_tier_marks():
+    # edit 2: SCREEN's tier vocabulary, bench unmarked (dot = separator)
+    assert tier_mark("active_long") == "●●"
+    assert tier_mark("top_idea_short") == "●"
+    assert tier_mark("long_bench") == ""
+    assert tier_mark(None) == ""
+
+
+def test_fmt_candidate_carries_tier():
+    r = dict(row("BYD", "CD", "BULLISH", 0.14), tier="●●")
+    assert fmt_candidate(r, None) == "●●BYD 0.14"
+
+
+def test_collapse_share_classes_merges_pbr():
+    # edit 4: PBR + PBR-A -> one slot, span shown, extreme rp sorts
+    cands = [row("PBR-A", "Energy", "BEARISH", 0.95),
+             row("CVX", "Energy", "BEARISH", 0.78),
+             row("PBR", "Energy", "BEARISH", 0.75)]
+    out = collapse_share_classes(cands, "short")
+    assert [r["ticker"] for r in out] == ["PBR/-A", "CVX"]
+    merged = out[0]
+    assert merged["rp_live"] == 0.95 and merged["rp_span"] == (0.75, 0.95)
+    assert merged["ctx_key"] == "PBR"
+    assert fmt_candidate(merged, None) == "PBR/-A 0.75-0.95"
+
+
+def test_collapse_leaves_singles_and_ab_pairs_alone():
+    cands = [row("BRK-A", "F", "BULLISH", 0.20),
+             row("BRK-B", "F", "BULLISH", 0.22),
+             row("KO", "S", "BULLISH", 0.25)]
+    out = collapse_share_classes(cands, "long")
+    assert [r["ticker"] for r in out] == ["BRK-A", "BRK-B", "KO"]
 
 
 if __name__ == "__main__":

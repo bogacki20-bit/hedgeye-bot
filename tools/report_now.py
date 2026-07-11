@@ -126,10 +126,49 @@ def sizing_flags(side: str, acct_pct, is_fund: bool) -> str:
     return ""
 
 
+def collapse_share_classes(cands: list, direction: str) -> list:
+    """Edit 4: PBR + PBR-A are one company, two lines. Merge same-base
+    share classes (X and X-<sfx> both present) into one entry: ticker
+    'PBR/-A', rp_live = the direction-extreme (max for shorts, min for
+    longs), rp_span = (lo, hi) rendered as a range. ctx_key = base so a
+    held base still gets its fill context."""
+    groups: dict = {}
+    for r in cands:
+        groups.setdefault(r["ticker"].split("-")[0], []).append(r)
+    out, merged_bases = [], set()
+    for r in cands:
+        base = r["ticker"].split("-")[0]
+        if base in merged_bases:
+            continue                        # consumed by an earlier merge
+        group = groups[base]
+        pair = (len(group) > 1
+                and any("-" in g["ticker"] for g in group)
+                and any("-" not in g["ticker"] for g in group))
+        if not pair:
+            out.append(r)                   # incl. A/B-only pairs: untouched
+            continue
+        merged_bases.add(base)
+        rps = [g["rp_live"] for g in group]
+        sfx = "/".join("-" + g["ticker"].split("-", 1)[1]
+                       for g in group if "-" in g["ticker"])
+        merged = dict(next(g for g in group if "-" not in g["ticker"]))
+        merged["ticker"] = f"{base}/{sfx}"
+        merged["ctx_key"] = base
+        merged["rp_live"] = max(rps) if direction == "short" else min(rps)
+        merged["rp_span"] = (min(rps), max(rps))
+        out.append(merged)
+    out.sort(key=lambda x: x["rp_live"], reverse=(direction == "short"))
+    return out
+
+
 def fmt_candidate(r, ctx: dict | None) -> str:
-    """'BYD 0.14' unheld · 'RH 0.31 held71%,IND' held ·
-    'WM 0.22 held117%,IND⚠cap4' breached-but-surfaced."""
-    s = f"{r['ticker']} {r['rp_live']:.2f}"
+    """'●●BYD 0.14' unheld (tier mark when roster-active/top-idea) ·
+    'RH 0.31 held71%,IND' held · 'WM 0.22 held117%,IND⚠cap4' breached-but-
+    surfaced · 'PBR/-A 0.75-0.95' merged share classes."""
+    span = r.get("rp_span")
+    rp_s = (f"{span[0]:.2f}-{span[1]:.2f}" if span and span[0] != span[1]
+            else f"{r['rp_live']:.2f}")
+    s = f"{r.get('tier', '')}{r['ticker']} {rp_s}"
     if ctx:
         fill = ctx.get("fill")
         fill_s = f"{fill:.0f}%" if fill is not None else "?%"
@@ -142,46 +181,86 @@ def fmt_candidate(r, ctx: dict | None) -> str:
     return s
 
 
-def fmt_section(title, cands, ctx_map, cap: int = MAX_PER_SECTION) -> str:
+def fmt_grouped(title, cands, ctx_map, cues, cap: int = MAX_PER_SECTION) -> str:
+    """Edit 1: candidates grouped BY SECTOR CUE, in cue order, each group
+    labeled with its ETF symbol + flow-quality mark — so a ✗ (fade) cue
+    stays attached to its names. cues: [(gics, etf, mark)] in cue order."""
     if not cands:
         return f"{title}: none"
-    parts = [fmt_candidate(r, ctx_map.get(r["ticker"])) for r in cands[:cap]]
-    more = f" +{len(cands) - cap} more" if len(cands) > cap else ""
-    return f"{title}: " + " · ".join(parts) + more
+    parts, shown = [], 0
+    for gics, etf, mark in cues:
+        sec = [r for r in cands if r.get("sector") == gics]
+        if not sec or shown >= cap:
+            continue
+        take = sec[:cap - shown]
+        inner = " · ".join(
+            fmt_candidate(r, ctx_map.get(r.get("ctx_key", r["ticker"])))
+            for r in take)
+        parts.append(f"{etf}{mark}: {inner}")
+        shown += len(take)
+    more = f" +{len(cands) - shown} more" if len(cands) > shown else ""
+    return f"{title}: " + (" | ".join(parts) + more if parts else "none")
+
+
+def tier_mark(bucket) -> str:
+    """SCREEN's tier vocabulary, marks only where they add signal:
+    ●● active · ● top-idea. Bench/untagged unmarked (the '·' bench dot
+    would collide with the list separator)."""
+    b = bucket or ""
+    if b.startswith("active"):
+        return "●●"
+    if b.startswith("top_idea"):
+        return "●"
+    return ""
 
 
 # ═══════════════════════ live prices (one batch) ════════════════════════════
 
+MFR_FALLBACK_MAX = 5      # polite cap on per-name MFR price fallbacks
+
+
 def batch_live_prices(tickers: list) -> tuple:
-    """{ticker: last_price} via ONE yf.download for the whole set.
-    Returns (prices, failed_count). Symbols map through the canonical
-    HEDGEYE_TO_YFINANCE where present. Never raises — a feed outage
-    returns ({}, len(tickers)) and the caller prints it loud."""
+    """{ticker: last_price} via ONE yf.download for the whole set (the
+    0.5s-per-name path rate-limits at ~300). Names yfinance misses fall
+    back to MFR's latestPrice — capped at MFR_FALLBACK_MAX per run so an
+    outage can't turn into a 278-call hammering of their read API.
+    Returns (prices, missing_names). Never raises."""
     if not tickers:
-        return {}, 0
+        return {}, []
     try:
         from price_monitor import HEDGEYE_TO_YFINANCE
     except Exception:
         HEDGEYE_TO_YFINANCE = {}
     sym_of = {t: HEDGEYE_TO_YFINANCE.get(t, t) for t in tickers}
+    prices = {}
     try:
         import yfinance as yf
         data = yf.download(list(set(sym_of.values())), period="1d",
                            interval="5m", progress=False, threads=True,
                            group_by="ticker", auto_adjust=False)
+        for t, sym in sym_of.items():
+            try:
+                frame = data[sym] if len(sym_of) > 1 else data
+                closes = frame["Close"].dropna()
+                if len(closes):
+                    prices[t] = float(closes.iloc[-1])
+            except Exception:
+                continue
     except Exception as e:
         log.warning("REPORT NOW: batch price download failed: %s", e)
-        return {}, len(tickers)
-    prices = {}
-    for t, sym in sym_of.items():
+    missing = [t for t in tickers if t not in prices]
+    if missing and len(missing) <= MFR_FALLBACK_MAX:
         try:
-            frame = data[sym] if len(sym_of) > 1 else data
-            closes = frame["Close"].dropna()
-            if len(closes):
-                prices[t] = float(closes.iloc[-1])
-        except Exception:
-            continue
-    return prices, len(tickers) - len(prices)
+            from mfr_client import fetch_raw
+            for t in missing:
+                p = (fetch_raw(t) or {}).get("price")
+                if p is not None:
+                    prices[t] = float(p)
+                    log.info("REPORT NOW: %s priced via MFR fallback", t)
+        except Exception as e:
+            log.warning("REPORT NOW: MFR price fallback failed: %s", e)
+        missing = [t for t in tickers if t not in prices]
+    return prices, missing
 
 
 # ═══════════════════════ assembly ═══════════════════════════════════════════
@@ -249,7 +328,7 @@ def build_report_now() -> str:
             continue
         if sec in hot_s or sec in cool_s:
             wanted.add(t)
-    prices, failed = batch_live_prices(sorted(wanted))
+    prices, missing = batch_live_prices(sorted(wanted))
 
     rows = []
     for t in sorted(wanted):
@@ -257,26 +336,32 @@ def build_report_now() -> str:
         r = by_t.get(t) or {}
         rows.append({"ticker": t, "sector": r.get("gics_sector"),
                      "trend_dir": r.get("trend_dir"),
+                     "tier": tier_mark(r.get("hedgeye_bucket_0629")),
                      "rp_live": live_rp(prices.get(t), lo, hi)})
     longs, shorts = pick_candidates(rows, hot_g, cool_g)
-    # never nominate what you already hold at/over cap? NO — spec: show ALL
-    # compliant candidates even at cap; flags carry the breach.
+    longs = collapse_share_classes(longs, "long")
+    shorts = collapse_share_classes(shorts, "short")
+    # spec: show ALL compliant candidates even at cap; flags carry breaches.
 
     ctx = fills["agg"]
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines.append(f"REPORT NOW {now} · live px vs stored MFR range · "
                  f"L start {STARTER_BPS}bps add {ADD_BPS} · ETF cap "
                  f"{ETF_CAP:g}%({ETF_CEILING:g}⚠) · S HARD {SHORT_HARD:g}% "
-                 f"start {SHORT_STARTER_BPS}bps")
+                 f"start {SHORT_STARTER_BPS}bps · ●●=active ●=top-idea")
     lines.append("ROTATION (Δ3d rp): in: "
                  + (" ".join(f"{s}{d:+.2f}{m}" for s, d, m in hot) or "none")
                  + " · out: "
                  + (" ".join(f"{s}{d:+.2f}{m}" for s, d, m in cooling) or "none"))
-    lines.append(fmt_section(
-        f"LONGS (hot sectors · BULL · rp≤{LONG_RP_MAX:g})", longs, ctx))
-    lines.append(fmt_section(
+    # cue lists for grouping: (gics, etf_symbol, mark), cue order preserved
+    hot_cues = [(ETF_TO_GICS.get(s, s), s, m) for s, _d, m in hot]
+    cool_cues = [(ETF_TO_GICS.get(s, s), s, m) for s, _d, m in cooling]
+    lines.append(fmt_grouped(
+        f"LONGS (hot sectors · BULL · rp≤{LONG_RP_MAX:g})",
+        longs, ctx, hot_cues))
+    lines.append(fmt_grouped(
         f"SHORTS (cooling · BEAR · rp≥{SHORT_RP_MIN:g} · IND-only)",
-        shorts, ctx))
+        shorts, ctx, cool_cues))
 
     # EDGES: held names at live range extremes
     edges = []
@@ -298,10 +383,12 @@ def build_report_now() -> str:
                        if len(edges) > MAX_PER_SECTION else "")
                     if edges else "none"))
 
-    # loud accounting — nothing disappears silently
-    lines.append(f"coverage: {len(wanted)} priced-universe · "
-                 f"{failed} no-live-price · {untagged_skipped} untagged "
-                 f"(no sector tag — invisible to rotation cues)")
+    # loud accounting — nothing disappears silently; few misses get NAMED
+    miss_s = (f"no-live-price: {' '.join(missing)}" if missing and
+              len(missing) <= 5 else f"{len(missing)} no-live-price")
+    lines.append(f"coverage: {len(wanted)} priced-universe · {miss_s} · "
+                 f"{untagged_skipped} untagged (no sector tag — invisible "
+                 f"to rotation cues)")
     return "\n".join(lines)
 
 

@@ -48,6 +48,9 @@ MARKET_CLOSE = dtime(16, 0)
 # Tickers not in this map are skipped with a warning each cycle.
 # Add entries as new instruments come into the Risk Range universe.
 HEDGEYE_TO_YFINANCE = {
+    # Ticker changes (operator-confirmed): DB/Hedgeye label -> current symbol
+    "VSCO":    "VSXY",     # Victoria's Secret rename, confirmed 2026-07-11
+
     # US equity ETFs (identity)
     "HYG":     "HYG",
     "LQD":     "LQD",
