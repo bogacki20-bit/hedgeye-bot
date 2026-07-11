@@ -702,6 +702,9 @@ def handle_report_command(text: str):
         if not up.startswith(SENTINEL):
             return None
         arg = up[len(SENTINEL):].strip()
+        if arg == "NOW":
+            from tools.report_now import handle_report_now
+            return handle_report_now()
         if arg == "LEGACY":
             body = build_report_legacy(kind="on-demand")
             store_report(body, "on-demand-legacy")
@@ -718,7 +721,8 @@ def handle_report_command(text: str):
             store_report(body, "on-demand")
             return body
         return (f"🛑 REPORT: unknown variant {arg!r} — use REPORT · REPORT "
-                f"FULL · REPORT UPLOAD · REPORT LEGACY · BOOK FULL")
+                f"NOW · REPORT FULL · REPORT UPLOAD · REPORT LEGACY · "
+                f"BOOK FULL")
     except Exception as e:
         log.exception("REPORT failed")
         return f"🛑 REPORT error: {e}"

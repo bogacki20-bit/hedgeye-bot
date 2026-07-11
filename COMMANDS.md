@@ -13,11 +13,12 @@ as `🛑 handler error`, never a silent echo.
 ## 🟢 Read-only commands (never write)
 
 ### `REPORT` — EOD fact sheet (v4)
-- **Syntax:** `REPORT` (compact Telegram mode) · `REPORT FULL` (unfiltered
-  ⚡DIV) · `REPORT UPLOAD` (verbose .txt attachment: full tgt/src per line,
-  full DIV, position table appended — for pasting into an LLM) · `REPORT
-  LEGACY` (v3 renderer, parallel-run week) · `BOOK FULL` (per-account
-  position table as .txt — never inlined into chat)
+- **Syntax:** `REPORT` (compact Telegram mode) · `REPORT NOW` (intraday —
+  see below) · `REPORT FULL` (unfiltered ⚡DIV) · `REPORT UPLOAD` (verbose
+  .txt attachment: full tgt/src per line, full DIV, position table
+  appended — for pasting into an LLM) · `REPORT LEGACY` (v3 renderer,
+  parallel-run week) · `BOOK FULL` (per-account position table as .txt —
+  never inlined into chat)
 - **Output, in order:** header (`REPORT v4 <date> [kind]` + legend) ·
   `Δ since last:` (new ⚠ · SS drops touching book · biggest sector rp move
   ≥0.10, vs the previous stored snapshot) · `QUAD:` + last confirm ·
@@ -96,6 +97,23 @@ Flags: `⚡DIV(...)` trade-vs-momentum divergence · `📗own` held ·
 `◻️ side-indeterminate` (book mode) · empty results name the first funnel
 stage that hit 0.
 - *(handler: `tools/screener.py → handle_screen_command`)*
+
+### `REPORT NOW` — intraday companion
+- **Syntax:** `REPORT NOW`
+- **What it does:** LIVE prices (one batched yfinance call) against the
+  STORED MFR ranges, over the FULL MFR universe with a defined signal (not
+  just the SS list). Rotation cues from the same sector-flow Δ3d/✓✗ math
+  the EOD prints: hot sectors → LONG candidates (trend BULL, live rp≤0.35),
+  cooling sectors → SHORT candidates (trend BEAR, live rp≥0.65, IND-only —
+  IRAs are long-only). ALL compliant names surface even at cap — breaches
+  are flagged (`⚠cap4` ETF over 4% report cap · `⚠ceil6` over 6% ceiling ·
+  `⚠HARD2` short over the hard 2%), never hidden. Sizing header: longs
+  start 100 bps add 50/100, shorts start 50 bps. `EDGES` = book positions
+  at live range extremes (rp≤0.15 / ≥0.85; unclamped — 1.2 means through
+  the top). Coverage line counts no-price and untagged names (untagged are
+  invisible to rotation cues — tag to include). Takes ~15-30s to reply
+  (live price batch). Stored to `report_rows` kind=`now`. Read-only.
+- *(handler: `tools/report_now.py` via `tools/report.py`)*
 
 ### `MOVES` — bucket transitions
 - **Syntax:** `MOVES` or `MOVES <n>` (days, default 7)

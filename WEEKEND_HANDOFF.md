@@ -1,5 +1,4 @@
-# HEDGEYE-BOT — WEEKEND BUILD HANDOFF (as of Sat 2026-07-11, EOD)
-
+# HEDGEYE-BOT — WEEKEND BUILD HANDOFF (as of Sat 2026-07-11, late)
 Paste this whole file into a fresh Claude session to continue building.
 Weekends are the only real build time — weekdays Kris only runs the routine
 (see OPERATOR_ROUTINE.md in repo root).
@@ -9,105 +8,154 @@ Weekends are the only real build time — weekdays Kris only runs the routine
   GitHub bogacki20-bit/hedgeye-bot → Railway auto-deploys master. DB = Railway
   Postgres (DATABASE_PUBLIC_URL in .env; db_pg.py has a .env fallback).
   Canary/doctor: C:\Users\bogac\Downloads\canary\sg-scraper (Windows scheduler,
-  no deploy). Old copy at C:\Users\bogac\hedgeye-bot is INERT — ignore/delete.
-- Interface: Telegram ("Hedgeye stopgap bot"). Email poll now every 5 min
+  no deploy) → GitHub bogacki20-bit/hedgeye-canary (both repos pushed, the
+  old "local-only" note was stale). Old copy at C:\Users\bogac\hedgeye-bot
+  is INERT — ignore/delete.
+- Interface: Telegram ("Hedgeye stopgap bot"). Email poll every 5 min
   (EMAIL_CHECK_INTERVAL=300 on Railway).
 
 ## HOW TO WORK WITH KRIS (learned the hard way)
 - ONE command at a time, in a plain code block, nothing before the word
-  `python`/`git`. His terminal is old PowerShell: multi-line pastes glue
-  together, transcripts get pasted back by accident (harmless, tell him so).
-- Never one-liner python in PowerShell (quote mangling) — always write a small
-  script file (_apply_0XX.py pattern: apply migration + DRY-RUN preview).
-- Flow per feature: build + fixture tests → he runs apply script (dry-run) →
-  eyeball together → real run → git add/commit/push (Railway deploys).
+  `python`/`git`. Old PowerShell: multi-line pastes glue together,
+  transcripts get pasted back by accident (harmless, tell him so).
+- Never one-liner python in PowerShell — always a script file
+  (_apply_0XX.py pattern: migration + SIMULATED dry-run preview + --commit).
+- Flow per feature: build + fixture tests → dry run (SIMULATED post-seed
+  state, in-memory only) → eyeball together → --commit → git add/commit/push.
   He executes everything = the CONFIRM gate.
 - If his paste arrives blank/truncated, say so immediately; never narrate
-  unseen output.
+  unseen output. Watch for him running commands in the WRONG FOLDER (bot vs
+  canary) — check the PS prompt path.
 
 ## HARD RULES (unchanged)
 Python owns ALL computation and DB writes; LLM reasons over precomputed facts
-only. Loud CONFIRM gates on writes; no silent failures; a fact without a date
-isn't a fact; labels only from actual table membership; identity facts
-(quad, wrapper links) operator-confirmed only. COMPLIANCE: Hedgeye EMAIL-ONLY
+only. Loud CONFIRM gates on writes; no silent failures (n/a always printed
+with a reason); a fact without a date isn't a fact; labels only from actual
+table membership; identity facts (quad, wrapper links, position targets,
+cash-equivalents) operator-confirmed only. COMPLIANCE: Hedgeye EMAIL-ONLY
 (never scrape), MFR via read API only, enroll-never-remove.
 
 ## SHIPPED SAT 7/11 (do not rebuild — verify if suspicious)
-Commits e512db2 → 3f3cecb, migrations 055–060, all deployed:
-1. position_direction: SCREEN "book shorts/longs" = POSITION side (signed
-   qty, options net-of-spread, inverse wrappers). tools/book_direction.py.
-   Fixed the SHY/TUA/HEFT/AGGH-shown-as-shorts bug.
-2. 📗 book stamp on every alert (proactive_scanner + price_monitor).
-3. RTA cross-signal (tools/rta_cross_signal.py, migration 055): every
-   Real-Time Alert matches to book (direct/wrapper/sector) + SS roster →
-   fact alert; full closes (sell/cover, NOT -SOME) suppress the name from
-   both alert universes same-day (rta_position_closes).
-4. PS flow corpus (tools/ps_flow.py, 056): 220 stamped add/drop events,
-   structure frozen at event date; auto-stamps every PS email. Quad stamps
-   NULL before 2026-07-06 (QUAD_CLEAN_START — historical quads were wrong).
-5. SS flow corpus (tools/ss_flow.py, 058): 32 events stamped; hooks
-   apply_deltas; churn_summary() line.
-6. Vol-regime layer (tools/vol_regime.py, 057): 7 sleeves (VIX via VX_F
-   fallback until spot ^VIX data flows — enrolled on MFR 7/11 along with
-   ^VVIX; verify snapshots appeared), nightly write after MFR fan-out,
-   regime_line() header. Backfilled 39 dates.
-7. Book alerts (tools/book_alerts.py, 059): dip/rip CROSSING semantics
-   (fires only when retreat crosses BOOK_DIP_DELTA=0.25 vs prior cycle;
-   first run seeds silently — no floods) + trend-flip-on-transition.
-   Market-hours thread in main.py, 15 min.
-8. REPORT command (tools/report.py, 060): quad+vol header, sector flow,
-   RANGE DYNAMICS (HH/HL etc), dollar+bonds, SS churn, book flags, ⚡DIV,
-   alert counts. Telegram sentinel REPORT; nightly EOD row stored
-   (report_rows = ML corpus).
-9. compute_outcomes v2: signed shorts, option 100× multiplier, gap-sell
-   exclusion, --rebuild. Corpus rebuilt: 3,940 honest round trips.
-   actions_log backfilled to Jan 2 (was stale since 5/18).
-10. Fidelity ingest fixes: 2026-07 header casing, .env DSN fallback,
-    per-date quad cache. _daily_upload.py = ONE evening command (finds
-    newest exports in Downloads, runs whole chain).
-11. Facts established: Kris's real return +10.62% TWR (trailing yr),
-    ~5pts lost to options (his read, corpus-consistent); Individual acct
-    cycles ~$160k/yr of deposits/withdrawals (payroll+spending) — never
-    judge by balance.
+Morning session (commits e512db2→3f3cecb, migrations 055–060): see git log —
+position_direction/book stamps/RTA cross-signal/PS+SS flow corpora/vol-regime
+/book dip-rip alerts/REPORT v1/compute_outcomes v2/ingest fixes.
 
-## FIRST TASKS NEXT SESSION (in order)
-1. **Wrapper-flag audit** (open bug): after the double-flip fix, SBIT/EUO
-   flag correctly but METD/GGLS/MSFD/YCS/SQQQ show NO ⚠ in book_alerts/
-   REPORT despite broken theses per SCREEN; pre-fix book counts (58L/5S)
-   also disagreed with SCREEN's 10 exposure-shorts. Write a diagnostic
-   dumping side/raw_side/trend_dir per wrapper from tools/book_alerts.
-   _book_rows; align with screener frame; fixture all five.
-2. **UPDATED COMMAND KEY** (Kris explicitly wants this): rewrite COMMANDS.md
-   + a printable card v3 covering everything new: REPORT · SCREEN book
-   semantics (position side, ⚠️trend-against, side:, ◻️ indeterminate) ·
-   📗 alert stamps · RTA cross-signal alerts + same-day removal · book
-   dip/rip + trend-flip alerts (and their knobs) · SS:/QUAD:/CONFIRM/WRAP
-   OK|NO/MOVES/SOURCES/MFR BACKLOG (existing) · python -m tools.vol_regime
-   --show · _daily_upload.py evening routine. COMMANDS.md is source of
-   truth; card is for printing.
-3. **REPORT NOW** (intraday variant): live yfinance prices vs stored ranges,
-   names at top/bottom 15% now, book positions near edges.
-4. **Native macro symbols** (queue #2): needs KRIS's CONFIRM per mapping
-   (BITCOIN→BTCUSD, GOLD→? — careful: GOLD the ticker = Barrick. Identity
-   facts = operator-confirmed only).
-5. Then remaining queue: full-universe tagging / quad-doctrine table /
-   style factors (#6), Telegram write-path + CSV upload (#7), BTC Quant
-   deepening (#8), Databento (#9), ML layer (#10). Also deferred:
-   outcomes v3 expiration handling (no expiry rows in his data yet);
-   SS PNG Vision-OCR anchor (SIGNAL_STRENGTH_TODO.md Priority 1).
+Evening session (commits 2132efa, f223755, 518a4e7 — all deployed):
+1. Wrapper-flag "bug" CLOSED: no defect. METD/GGLS/MSFD/YCS/SQQQ absent
+   because Kris CLOSED them; frames agree everywhere (_wrapper_flag_audit.py
+   = rerunnable diagnostic). REPORT BOOK counts fixed to EXPOSURE frame
+   (matches SCREEN book shorts; raw-frame ⚠ verdict untouched).
+2. COMMANDS.md rewritten + COMMAND_CARD.html (printable card v3, print via
+   browser Ctrl+P). COMMANDS.md = source of truth; keep both in sync.
+3. REPORT v4.1 (the big one — migrations 061/062/063, all applied+seeded):
+   - Δ-since-last header (report_snapshots state chain — WORKING, verified)
+   - SECTOR FLOW ✓/✗ flow-quality marks (✗ = rp rising in descending range
+     = fade — the manual XLB/XLI/XLU catch, now computed)
+   - BOOK flags carry fill context: (L,rp0.27,BULL,1.2%acct,60%,RIRA,+3.5%pl)
+   - TRANCHE v2: fill% = acct% / target%. position_targets table
+     (identity facts). Default tiers: fi 10 / core 4 / eq 2 / sat 1
+     (shorts→sat); routing from Fidelity descriptions incl. abbreviations
+     (TREAS/TRS/BD/FD); fund naming REQUIRED (GOLD-ticker lesson).
+     Buckets <40 STARTER · <80 BUILDING · ≤110 FULL · >110 OVER.
+     Seeded: FUTY 4%/RIRA · BNDD 10%/IND · TUA 10%/RIRA · ULS 2%/RIRA.
+     Target-sum sanity: 87% of account value ✓.
+   - cash_equivalent flag (ticker_tags col): BUXX seeded ($13,571 parked —
+     NOT the ~$21K Kris guessed; snapshot says 13.6k). SHY deliberately NOT
+     flagged (⚠ stays on purpose). CASH line: settled+parked=deployable
+     ($47,171 / 52.3% AUM).
+   - Multi-account: per-(ticker,account) fills + TOTAL agg rows
+     (CLOX/SN/ZROZ split; agg fill = Σmv / Σ target dollars).
+   - Two renders, one compute: compact Telegram (3329 chars, <3500 ✓;
+     tgt shown only when explicit; DIV auto-collapses to count >3500) vs
+     REPORT UPLOAD verbose .txt attachment (9.5k chars; full tgt/src + DIV
+     + position table). BOOK FULL = table as .txt. sendDocument plumbing
+     in telegram_handler (dict replies).
+   - CANDIDATES rule: TREND=BULL + rp<0.35 + fill<80% (held names show
+     fill). REPORT LEGACY = v3 renderer, parallel-run ~1 week then remove.
+   - Telegram: TARGET LIST / TARGET <tkr> <pct> [acct] [note] / TARGET DEL
+     / TARGET CASHEQ|NOCASHEQ <tkr> → literal CONFIRM TARGET (NOT bare
+     CONFIRM — SS/QUAD cross-clear doesn't know this module; deliberate).
+4. OVER after calibration = real trim signals: UNH 153 · BRKR 152 ·
+   CLOX 134 (doubled IND+ROTH) · WM 117. AT-MAX: BNDD 94 EUO 108 HD 83
+   HEFT 96 LLY 99 ROK 87 RSG 95 TOL 102 VVV 82 WCN 95 XLRE 103.
+5. 36 GUESSED tiers remain (no ticker_tags row — tier from description
+   alone): AGGH ARKG BRKR CBRL CLOX DESK DRIP EUO EWH FAB FXH HEFT HST IAK
+   IWO JETS NORW PALL PAVE SBIT SETH SHY TLT TOL UUP VCLT VMC VXF VYM XAR
+   XHB XLP XLRE XLU XLV ZROZ. Verify opportunistically via TARGET rows.
+   Reroute-proposal scanner lives in _apply_063.py (patterns: stock-routed-
+   fund, sector-routed-sat) — reported none outstanding.
+
+## POST-DEPLOY CHECKS (do first next session if not yet done)
+- Telegram: REPORT (1 msg ~3.3k) · REPORT UPLOAD (.txt attach) · TARGET LIST
+  (4 rows + BUXX casheq) · BOOK FULL (.txt table). sendDocument is NEW
+  code — first live use.
+- Verify VVIX + ^VIX snapshots flowing (enrolled 7/11); vol_regime
+  auto-prefers spot ^VIX over VX_F once data exists (VOL line still shows
+  6 sleeves, no VIX-spot/VVIX yet).
+
+## FIRST TASKS NEXT SESSION (operator sprint notes, Sat 7/11 pm — in order)
+0. Post-deploy checks above first.
+1. **REPORT NOW** (intraday Telegram command, companion to EOD/AM report):
+   - Universe: FULL fractal range (MFR) DB — NOT just the SS list.
+   - Filter: sector/style + factor-exposure compliant AND has defined
+     signal strength.
+   - Rotation cues FROM the EOD report's sector flow (money out of XLU,
+     into XLK/XLY): hot sectors -> surface LONG candidates; cooling
+     sectors -> surface SHORT candidates from those sectors. (The ✓/✗
+     flow-quality marks shipped today are the input.)
+   - Show ALL compliant candidates even if at cap — override is operator
+     discretion. Flag, never hide.
+   - Compliance PER BOOK (IND / Rollover / Roth), not whole AUM — the
+     per-account fill machinery from TRANCHE v2 is the substrate.
+   - Sizing baked in: starter 100 bps; adds 50/100 bps increments; ETF cap
+     4% in report (6% actual ceiling — flag, don't hide); shorts HARD 2%
+     max, 50 bps starter — flag breaches, still surface.
+   - Output compact + LLM-friendly, single upload, smaller than EOD.
+2. **SpotGamma manual upload** (Telegram ingest): KILL the 5K equity
+   scanner scrape (2 weeks stuck, not worth it). Build file-upload path:
+   download report on phone -> send to bot -> ingest. Parse founder's note
+   -> flag/store for future RAG layer. Headless tape canary (15-min)
+   stays as-is — working. (sendDocument plumbing shipped today; ingest
+   direction = receiving documents, needs the getFile path.)
+3. **Keith add-pattern detector** (float mid-week): bullish TREND entry ->
+   sells off -> holds TRADE support -> Keith adds. Detect that sequence
+   across bot inventory to front-run Portfolio Solutions adds. BOT layer
+   (Python-computed), not RAG.
+4. Then the standing queue: native macro symbols (KRIS CONFIRM per mapping;
+   GOLD = Barrick trap) · full-universe tagging / quad-doctrine table /
+   style factors (also shrinks 36 GUESSED tiers + CONC untagged 70%) ·
+   BTC Quant deepening · Databento · ML layer. Deferred: outcomes v3
+   expiry handling · SS PNG Vision-OCR anchor. QUAD WATCH stays deferred
+   until the quad-doctrine table exists (no hardcoded quad maps).
+
+## SEPARATE TRACKS (not bot code)
+- **Claude RAG project** ("Keith/Hedgeye/SpotGamma brain"): new Claude
+  Project, separate from the bot. Corpus: Macro Show, Early Look, SpotGamma
+  AM/PM notes. Use: upload REPORT NOW output -> in-game decision support.
+- **Tier One Alpha** (placement TBD, likely BOTH): Telegram ingest into bot
+  (actionable regime flags — e.g. 1M vol < 3M vol -> vol-control funds set
+  up to buy; CTA buy/sell, risk-on/off) + RAG corpus (macro framing).
+- Standing: build heavy stuff NOW while Fable access is cheap/free.
+  Weekend = paid work or bot build only.
+- Repos push: DONE 7/11 pm — bot AND canary verified on GitHub (old
+  "local-only" note was stale).
 
 ## DATED
 - Mon 7/13: Feed 2 verdict (PM anchor vs week of dry-run deltas).
 - ~week of 7/13: review 20/80 suppression counts before 15/85 decision.
-- Jul 17: option expiries — book currently holds ZERO options; if he
-  re-enters, expiry-watch build becomes urgent.
+- ~Sat 7/18: REPORT LEGACY parallel week ends — remove v3 renderer if v4
+  held up.
+- Jul 17: option expiries — book holds ZERO options; if he re-enters,
+  expiry-watch build becomes urgent.
 - Telegram pending: WRAP NO DRIP if not yet answered (EXP match is a
   description misparse — NOT Eagle Materials; real underlying ≈ XOP inv 2x).
-- Verify VVIX + ^VIX snapshots started flowing (enrolled 7/11); vol_regime
-  auto-prefers spot ^VIX over VX_F per-date once data exists.
+  NOTE: DRIP currently defaults dflt-sat 1% which is right either way.
 
 ## TEST FILES (run before any commit touching these areas)
-test_book_direction.py · test_rta_cross_signal.py · test_book_alerts.py
-Diagnostics: _book_sides_verify.py · _etfpro_health_scan.py ·
-_options_postmortem.py (options vs equity P&L — Kris hasn't run it yet) ·
-_last_upload_dates.py · _daily_upload.py
+test_book_direction.py · test_rta_cross_signal.py · test_book_alerts.py ·
+test_report_v4.py · test_position_targets.py
+Diagnostics: _book_sides_verify.py · _wrapper_flag_audit.py · _desc_audit.py
+· _etfpro_health_scan.py · _options_postmortem.py (Kris hasn't run it yet) ·
+_last_upload_dates.py · _daily_upload.py (evening routine, ONE command)
+Apply scripts: _apply_063.py = superseding pattern reference (migration +
+SIMULATED dry run + --commit seeds). _apply_062.py is a stub, ignore.
