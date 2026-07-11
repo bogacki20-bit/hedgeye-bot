@@ -67,15 +67,47 @@ def parse_option(sym):
     return u, f"20{y}-{mo}-{d}", cp, float(k)
 
 
+# Fidelity switched export header casing ~2026-07-11 ("Account Number" ->
+# "Account number", "Cost Basis Total" -> "Cost basis total", ...). Canonicalize
+# via lowercase lookup so BOTH vintages parse identically. History-file headers
+# not in this map pass through unchanged.
+_HDR_CANON = {
+    "account number":            "Account Number",
+    "account name":              "Account Name",
+    "symbol":                    "Symbol",
+    "description":               "Description",
+    "quantity":                  "Quantity",
+    "last price":                "Last Price",
+    "last price change":         "Last Price Change",
+    "current value":             "Current Value",
+    "today's gain/loss dollar":  "Today's Gain/Loss Dollar",
+    "today's gain/loss percent": "Today's Gain/Loss Percent",
+    "total gain/loss dollar":    "Total Gain/Loss Dollar",
+    "total gain/loss percent":   "Total Gain/Loss Percent",
+    "percent of account":        "Percent Of Account",
+    "cost basis total":          "Cost Basis Total",
+    "average cost basis":        "Average Cost Basis",
+    "type":                      "Type",
+}
+
+
 def read_clean(path, header_startswith):
     """Read a Fidelity CSV: strip BOM, drop footer/disclaimer rows, fix the
-    trailing-comma column shift (index_col=False equivalent for stdlib csv)."""
+    trailing-comma column shift (index_col=False equivalent for stdlib csv).
+    Header match + column names are casing-tolerant (Fidelity 2026-07 format
+    change); a missing header fails LOUD with the filename, never a bare
+    StopIteration."""
     text = open(path, encoding="utf-8-sig").read()
     lines = text.splitlines()
-    # find header
-    hdr_idx = next(i for i, ln in enumerate(lines) if ln.startswith(header_startswith))
+    # find header (case-insensitive — Fidelity changed casing 2026-07)
+    try:
+        hdr_idx = next(i for i, ln in enumerate(lines)
+                       if ln.lower().startswith(header_startswith.lower()))
+    except StopIteration:
+        sys.exit(f"LOUD FAIL: no header line starting with {header_startswith!r} "
+                 f"in {path} — is this the right Fidelity export?")
     header = next(csv.reader([lines[hdr_idx]]))
-    header = [h.strip() for h in header]
+    header = [_HDR_CANON.get(h.strip().lower(), h.strip()) for h in header]
     rows = []
     for ln in lines[hdr_idx + 1:]:
         if not ln.strip():
@@ -321,9 +353,16 @@ def commit(positions, activity):
         from psycopg2.extras import execute_values
     except ImportError:
         sys.exit("psycopg2 not installed; cannot --commit. `pip install psycopg2-binary`")
-    dsn = os.environ.get("DATABASE_URL")
+    dsn = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
     if not dsn:
-        sys.exit("DATABASE_URL not set.")
+        try:
+            from db_pg import _load_dotenv_fallback
+            _load_dotenv_fallback()
+        except Exception:
+            pass
+        dsn = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
+    if not dsn:
+        sys.exit("Neither DATABASE_PUBLIC_URL nor DATABASE_URL set (and no .env fallback).")
     conn = psycopg2.connect(dsn)
     conn.autocommit = False
     try:

@@ -87,6 +87,10 @@ def ingest(csv_path: str | Path) -> dict:
         return summary
 
     reader = csv.DictReader(lines[header_idx:])
+    _quad_cache: dict = {}   # run_date -> (monthly, quarterly). One lookup per
+    #                          distinct date on the EXISTING connection — the
+    #                          old per-row db_pg.get_conn() re-dialed Railway
+    #                          1400+ times per ingest (20+ min of handshakes).
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
             for row in reader:
@@ -109,9 +113,8 @@ def ingest(csv_path: str | Path) -> dict:
                 # available (pre-migration env).
                 _mq = _qq = None
                 try:
-                    import db_pg
-                    with db_pg.get_conn() as _qc:
-                        with _qc.cursor() as _qcur:
+                    if run_date not in _quad_cache:
+                        with conn.cursor() as _qcur:
                             _qcur.execute(
                                 """
                                 SELECT monthly_quad, quarterly_quad
@@ -122,11 +125,10 @@ def ingest(csv_path: str | Path) -> dict:
                                 """,
                                 (run_date,),
                             )
-                            _row = _qcur.fetchone()
-                            if _row:
-                                _mq, _qq = _row[0], _row[1]
+                            _quad_cache[run_date] = _qcur.fetchone() or (None, None)
+                    _mq, _qq = _quad_cache[run_date]
                 except Exception:
-                    pass
+                    _quad_cache[run_date] = (None, None)
                 try:
                     cur.execute(
                         """

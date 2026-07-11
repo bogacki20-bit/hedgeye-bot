@@ -28,12 +28,31 @@ log = logging.getLogger(__name__)
 
 # ─────────────────────────── Connection ───────────────────────────
 
+def _load_dotenv_fallback() -> None:
+    """Local-run convenience: if the DB env vars are missing, read the repo
+    .env once (KEY=VALUE lines, os.environ.setdefault — never overrides real
+    env). Railway sets the vars directly, so this is a no-op when deployed."""
+    try:
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        with open(env_path) as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln and not ln.startswith("#") and "=" in ln:
+                    k, v = ln.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+    except FileNotFoundError:
+        pass
+
+
 def _resolve_dsn() -> str:
     dsn = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
     if not dsn:
+        _load_dotenv_fallback()
+        dsn = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
+    if not dsn:
         raise RuntimeError(
-            "Neither DATABASE_PUBLIC_URL nor DATABASE_URL is set. "
-            "Run via `railway run` so Railway injects them."
+            "Neither DATABASE_PUBLIC_URL nor DATABASE_URL is set (and no .env "
+            "found next to db_pg.py). Run via `railway run` or fill .env."
         )
     return dsn
 
