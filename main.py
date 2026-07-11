@@ -165,6 +165,32 @@ if __name__ == "__main__":
     else:
         log.info("Price monitor disabled (MONITOR_ENABLED=false).")
 
+    # Book alerts (queue 5, 2026-07-11) — dip/rip retreat + trend-flip on the
+    # operator's ACTUAL holdings. Market hours only (ET), every 15 min.
+    # Exempt from the 20/80 universe filter by design. BOOK_ALERTS_ENABLED=0
+    # to disable; BOOK_DIP_DELTA tunes the retreat threshold.
+    if os.getenv("BOOK_ALERTS_ENABLED", "1") == "1":
+        def _book_alerts_loop():
+            import time as _t
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            _ET = ZoneInfo("America/New_York")
+            while True:
+                try:
+                    now = _dt.now(_ET)
+                    if now.weekday() < 5 and (9, 25) <= (now.hour, now.minute) <= (16, 15):
+                        from tools.book_alerts import run_book_alerts
+                        s = run_book_alerts()
+                        if s.get("sent") or s.get("error"):
+                            log.info("book_alerts: %s", s)
+                except Exception as e:
+                    log.warning("book_alerts cycle failed: %s", e)
+                _t.sleep(int(os.getenv("BOOK_ALERT_INTERVAL", "900")))
+        threading.Thread(target=_book_alerts_loop, daemon=True,
+                         name="book_alerts").start()
+        log.info("Book alerts thread started (dip/rip delta=%s).",
+                 os.getenv("BOOK_DIP_DELTA", "0.25"))
+
     # MFR watchlist sync — once per UTC day, refresh every ticker in the
     # operator's MFR account (canonical fan-out source). Catches new tickers
     # added through the MFR UI without any code change. Toggle off via
