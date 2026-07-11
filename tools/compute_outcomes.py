@@ -67,7 +67,7 @@ def _find_alert_id(cur, ticker: str, before: dt.date) -> int | None:
 
 
 def run(backfill: bool = False, since: str | None = None,
-        dry_run: bool = False) -> int:
+        dry_run: bool = False, rebuild: bool = False) -> int:
     try:
         import db_pg
     except Exception as e:
@@ -96,7 +96,51 @@ def run(backfill: bool = False, since: str | None = None,
             actions = cur.fetchall()
 
             # FIFO open-lot queues keyed by (account, normalized ticker).
+            # v2 (2026-07-11): SIGNED inventory — lots carry side 'long' or
+            # 'short'. A SELL beyond open long inventory OPENS a short lot; a
+            # BUY covers shorts FIFO before opening a long. Option legs
+            # (Fidelity OCC raw symbols start with '-') carry the 100-share
+            # contract multiplier — price is premium/share, so dollar P&L
+            # scales by 100 (the old code booked spread P&L at 1/100th).
             books: dict[tuple, deque] = defaultdict(deque)
+            # Sell legs with no recorded buy AND no short label = position
+            # opened before the recorded history. NEVER synthesize a short
+            # from those — count + report them loudly instead.
+            gap_sells: dict = defaultdict(float)
+
+            def _emit_row(lot, matched, close_price, close_id, close_date,
+                          acct, tkr, mult):
+                entry = lot["price"]
+                if lot["side"] == "long":
+                    pnl_d = round((close_price - entry) * matched * mult, 2)
+                    pnl_p = (round((close_price / entry - 1.0) * 100.0, 4)
+                             if entry else None)
+                else:   # short: entry was the sell, close is the cover
+                    pnl_d = round((entry - close_price) * matched * mult, 2)
+                    pnl_p = (round((entry / close_price - 1.0) * 100.0, 4)
+                             if close_price else None)
+                hold_min = None
+                if lot["date"] and close_date:
+                    d = close_date - lot["date"]
+                    hold_min = (int(d.total_seconds() // 60)
+                                if hasattr(d, "total_seconds")
+                                else int(d.days) * 1440)
+                rows_out.append({
+                    "action_id_open": lot["id"],
+                    "action_id_close": close_id,
+                    "ticker": lot["rsym"] or tkr,
+                    "normalized_ticker": tkr,
+                    "account_number": acct,
+                    "entry_price": entry,
+                    "exit_price": close_price,
+                    "qty": round(matched, 6),
+                    "holding_period_minutes": hold_min,
+                    "pnl_dollars": pnl_d,
+                    "pnl_pct": pnl_p,
+                    "was_winner": pnl_d > 0,
+                    "open_date": lot["date"],
+                    "closed_at": close_date,
+                })
             for (aid, acct, nsym, rsym, action, qty, price,
                  run_date, ingested) in actions:
                 side = _side(action)
@@ -106,49 +150,45 @@ def run(backfill: bool = False, since: str | None = None,
                 q = abs(float(qty))
                 p = float(price)
                 key = (acct, tkr)
-                if side == "BUY":
-                    books[key].append({
-                        "id": aid, "qty": q, "price": p,
-                        "date": run_date, "rsym": rsym, "nsym": nsym,
-                    })
-                    continue
-                # SELL: consume oldest BUY lots FIFO
+                mult = 100.0 if (rsym or "").startswith("-") else 1.0
+                close_side = "short" if side == "BUY" else "long"
+                open_side  = "long"  if side == "BUY" else "short"
+                # Close opposite-side lots FIFO first…
                 remaining = q
-                while remaining > 1e-9 and books[key]:
+                while (remaining > 1e-9 and books[key]
+                       and books[key][0]["side"] == close_side):
                     lot = books[key][0]
                     matched = min(lot["qty"], remaining)
-                    entry = lot["price"]
-                    pnl_d = round((p - entry) * matched, 2)
-                    pnl_p = round((p / entry - 1.0) * 100.0, 4) if entry else None
-                    hold_min = None
-                    if lot["date"] and run_date:
-                        hold_min = int((run_date - lot["date"]).total_seconds()
-                                       // 60) if hasattr(run_date - lot["date"],
-                                                         "total_seconds") else \
-                                   int((run_date - lot["date"]).days) * 1440
-                    rows_out.append({
-                        "action_id_open": lot["id"],
-                        "action_id_close": aid,
-                        "ticker": lot["rsym"] or tkr,
-                        "normalized_ticker": tkr,
-                        "account_number": acct,
-                        "entry_price": entry,
-                        "exit_price": p,
-                        "qty": round(matched, 6),
-                        "holding_period_minutes": hold_min,
-                        "pnl_dollars": pnl_d,
-                        "pnl_pct": pnl_p,
-                        "was_winner": pnl_d > 0,
-                        "open_date": lot["date"],
-                        "closed_at": run_date,
-                    })
+                    _emit_row(lot, matched, p, aid, run_date, acct, tkr, mult)
                     lot["qty"] -= matched
                     remaining -= matched
                     if lot["qty"] <= 1e-9:
                         books[key].popleft()
+                # …then any remainder OPENS a lot on this side (BUY -> long,
+                # SELL -> short). A short lot only opens when Fidelity labeled
+                # the sell as one ("SHORT SALE" equities, "OPENING TRANSACTION"
+                # options sold-to-open) — an unlabeled surplus sell is a
+                # pre-history long being closed, not a short (gap-sell).
+                if remaining > 1e-9:
+                    au = (action or "").upper()
+                    if open_side == "short" and not (
+                            "SHORT" in au or "OPENING" in au):
+                        gap_sells[tkr] += remaining
+                        continue
+                    books[key].append({
+                        "id": aid, "qty": remaining, "price": p,
+                        "date": run_date, "rsym": rsym, "nsym": nsym,
+                        "side": open_side,
+                    })
 
             print(f"FIFO-matched {len(rows_out)} closed round trip(s) "
                   f"from {len(actions)} action rows.")
+            if gap_sells:
+                names = ", ".join(f"{t}({q:g})" for t, q in
+                                  sorted(gap_sells.items()))
+                print(f"  ⚠ {len(gap_sells)} name(s) with sells exceeding "
+                      f"recorded buys (pre-history positions, EXCLUDED from "
+                      f"P&L): {names}")
             wins = sum(1 for r in rows_out if r["was_winner"])
             if rows_out:
                 tot = sum(r["pnl_dollars"] for r in rows_out)
@@ -162,6 +202,13 @@ def run(backfill: bool = False, since: str | None = None,
                           f"= ${r['pnl_dollars']:+,.2f}")
                 print("[dry-run] no outcomes_log writes.")
                 return 0
+
+            if rebuild:
+                # v2 purge: pre-fix rows carry option P&L at 1/100th and no
+                # short round trips — they must not coexist with corrected
+                # rows. Full delete + reinsert below, one transaction.
+                cur.execute("DELETE FROM outcomes_log")
+                print(f"--rebuild: purged {cur.rowcount} old outcomes_log row(s).")
 
             quad = _quad_now()
             inserted = 0
@@ -210,10 +257,14 @@ def _cli(argv=None) -> int:
                    help="only run_date >= YYYY-MM-DD (ignored with --backfill)")
     p.add_argument("--dry-run", action="store_true",
                    help="FIFO-match + report only; no outcomes_log writes")
+    p.add_argument("--rebuild", action="store_true",
+                   help="DELETE all outcomes_log rows first, then reinsert "
+                        "(required once after the v2 shorts/option-multiplier fix)")
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    return run(backfill=a.backfill, since=a.since, dry_run=a.dry_run)
+    return run(backfill=a.backfill, since=a.since, dry_run=a.dry_run,
+               rebuild=a.rebuild)
 
 
 if __name__ == "__main__":
