@@ -97,6 +97,29 @@ def test_shares_dominate_hedge_leg_weighting():
     assert s["VCLT"]["side"] == "long", s["VCLT"]
 
 
+def test_side_stamp_variants():
+    import time as _t
+    import tools.book_direction as bd
+    sides = {
+        "XLV":  {"side": "long", "raw_side": "long", "net": 1.0, "legs": 1,
+                 "unknown_legs": 0, "via_linkage": False},
+        "SBIT": {"side": "short", "raw_side": "long", "net": 1.0, "legs": 1,
+                 "unknown_legs": 0, "via_linkage": True},
+    }
+    links = {"SBIT": {"underlying": "BTCUSD", "inverse": True},
+             "METD": {"underlying": "META", "inverse": True}}
+    bd._stamp_cache.update({"exp": _t.time() + 60, "sides": sides,
+                            "links": links, "failed": False})
+    assert bd.side_stamp("XLV") == "📗 YOU HOLD XLV: LONG"
+    assert "SHORT exposure" in bd.side_stamp("SBIT")
+    assert "SBIT" in bd.side_stamp("BTCUSD")        # reverse: held wrapper on it
+    assert bd.side_stamp("META") == ""              # METD not held here
+    assert bd.side_stamp("NVDA") == ""
+    bd._stamp_cache.update({"failed": True})
+    assert "FAILED" in bd.side_stamp("XLV")         # loud, never silent
+    bd._stamp_cache.update({"exp": 0.0, "failed": False})
+
+
 if __name__ == "__main__":
     import sys, inspect
     fails = 0

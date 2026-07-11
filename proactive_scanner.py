@@ -431,6 +431,20 @@ def _format_alert(decision: dict) -> tuple[str, str]:
 
     title = f"{action} {ticker}"
     body = reasoning if reasoning else f"{action} {ticker}"
+
+    # Book stamp (queue item 5): every alert declares the operator's position
+    # in the name (direct, wrapper, or via held wrapper on this underlying).
+    # 📗-titled alerts are position-relevant at a glance. Failure is loud.
+    try:
+        from tools.book_direction import side_stamp
+        stamp = side_stamp(ticker)
+    except Exception as e:
+        log.warning("scanner: book stamp failed for %s: %s", ticker, e)
+        stamp = "📗 book-check FAILED — position match unavailable"
+    if stamp:
+        body = f"{body}\n{stamp}"
+        if stamp.startswith("📗 YOU HOLD") or stamp.startswith("📗 EXPOSURE"):
+            title = f"📗 {title}"
     return title, body[:1024]
 
 

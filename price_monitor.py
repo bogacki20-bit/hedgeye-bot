@@ -983,6 +983,19 @@ def format_alert_message(ticker: str, price: float, low: float, high: float,
     if wrapper:
         body += f"\nequity wrapper: {wrapper}"
 
+    # Book stamp (queue item 5): declare the operator's position in the name.
+    # Same source as SCREEN's position side; loud on failure, never silent.
+    try:
+        from tools.book_direction import side_stamp
+        _stamp = side_stamp(ticker)
+    except Exception as _e:
+        log.warning("price_monitor: book stamp failed for %s: %s", ticker, _e)
+        _stamp = "📗 book-check FAILED — position match unavailable"
+    if _stamp:
+        body += f"\n{_stamp}"
+        if _stamp.startswith("📗 YOU HOLD") or _stamp.startswith("📗 EXPOSURE"):
+            title = f"📗 {title}"
+
     if recommendation_text:
         body += f"\n\n{recommendation_text}"
     if alert_id:

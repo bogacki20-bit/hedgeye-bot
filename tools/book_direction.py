@@ -27,6 +27,7 @@ with no C/P) are counted in `unknown_legs` and surfaced by the caller — never
 silently dropped into a side.
 """
 import logging
+import time
 
 log = logging.getLogger("book_direction")
 
@@ -107,3 +108,63 @@ def book_sides() -> dict:
         log.warning("wrapper links unavailable for book sides: %s", e)
         links = {}
     return compute_sides(rows, links)
+
+
+# ───────────── alert-decoration cache (book stamp on every alert) ─────────────
+# 5-min TTL, same pattern as active_slice: one DB read per cache window, not
+# one per alerted ticker. Failure is LOUD — the stamp says the check failed
+# rather than silently rendering the alert as if the name weren't held.
+
+_STAMP_TTL = 300.0
+_stamp_cache: dict = {"exp": 0.0, "sides": None, "links": None, "failed": False}
+
+
+def _stamp_data() -> dict:
+    now = time.time()
+    if _stamp_cache["exp"] > now:
+        return _stamp_cache
+    try:
+        _stamp_cache["sides"] = book_sides()
+        try:
+            from tools.wrapper_links import get_links
+            _stamp_cache["links"] = get_links()
+        except Exception as e:
+            log.warning("book stamp: wrapper links unavailable: %s", e)
+            _stamp_cache["links"] = {}
+        _stamp_cache["failed"] = False
+    except Exception as e:
+        log.warning("book stamp: sides refresh failed: %s", e)
+        _stamp_cache["failed"] = True
+    _stamp_cache["exp"] = now + _STAMP_TTL
+    return _stamp_cache
+
+
+def side_stamp(ticker: str) -> str:
+    """One-line book stamp for alert bodies. '' when the name isn't held and
+    no held wrapper expresses it. Examples:
+        📗 YOU HOLD XLV: LONG
+        📗 YOU HOLD SBIT (long shares) = SHORT exposure
+        📗 EXPOSURE via METD (short META ↯inv)
+    On lookup failure returns a loud failure marker, never silence."""
+    t = (ticker or "").strip().upper()
+    if not t:
+        return ""
+    c = _stamp_data()
+    if c["failed"] or c["sides"] is None:
+        return "📗 book-check FAILED — position match unavailable"
+    s = c["sides"].get(t)
+    if s and s["side"] in ("long", "short"):
+        if s["via_linkage"]:
+            return (f"📗 YOU HOLD {t} ({s['raw_side']} shares) = "
+                    f"{s['side'].upper()} exposure")
+        return f"📗 YOU HOLD {t}: {s['side'].upper()}"
+    hits = []
+    for w, lk in (c["links"] or {}).items():
+        if (lk.get("underlying") or "").strip().upper() == t:
+            ws = c["sides"].get(w)
+            if ws and ws["side"] in ("long", "short"):
+                inv = " ↯inv" if lk.get("inverse") else ""
+                hits.append(f"{w} ({ws['side']} {t}{inv})")
+    if hits:
+        return "📗 EXPOSURE via " + ", ".join(sorted(hits))
+    return ""
