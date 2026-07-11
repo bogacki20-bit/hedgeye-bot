@@ -57,10 +57,31 @@ def _chunk_message(text, limit=TG_MAX_CHARS):
     return chunks
 
 
+def _send_document(token, chat_id, name, text, caption=""):
+    """Send a text payload as a .txt attachment (REPORT UPLOAD / BOOK FULL).
+    LOUD on failure, never raises into the loop."""
+    url = API_BASE.format(token=token, method="sendDocument")
+    try:
+        r = requests.post(url,
+                          data={"chat_id": chat_id, "caption": caption[:1024]},
+                          files={"document": (name, text.encode("utf-8"))},
+                          timeout=30)
+        r.raise_for_status()
+        log.info(f"Sent document {name} to chat {chat_id} ({len(text)} chars).")
+    except Exception as e:
+        body = getattr(getattr(e, "response", None), "text", "")
+        log.error(f"sendDocument {name} failed: {e} {body}".strip())
+
+
 def _send_message(token, chat_id, text):
     """Send a reply, chunking to Telegram's 4096-char limit. Send failures are LOUD
     (log status + response body) but never raise — one bad chunk must not abort the
-    listener loop."""
+    listener loop. Dict replies {document_name, document_text, caption} are
+    sent as file attachments via sendDocument."""
+    if isinstance(text, dict) and "document_text" in text:
+        _send_document(token, chat_id, text.get("document_name", "report.txt"),
+                       text["document_text"], text.get("caption", ""))
+        return
     parts = _chunk_message(text)
     for idx, chunk in enumerate(parts):
         tag = f" [{idx + 1}/{len(parts)}]" if len(parts) > 1 else ""
@@ -317,11 +338,13 @@ def _dispatch_message(token, chat_id, text):
     def _bl():   from tools.enrollment import handle_backlog_command;     return handle_backlog_command(text)
     def _src():  from tools.source_registry import handle_sources_command; return handle_sources_command(text)
     def _wrap(): from tools.wrapper_links import handle_wrapper_command;  return handle_wrapper_command(text)
+    def _tgt():  from tools.position_targets import handle_target_command; return handle_target_command(text)
     def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
 
     for name, fn in (("ss_roster", _ss), ("quad", _quad), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
-                     ("sources", _src), ("wrap", _wrap), ("report", _rpt)):
+                     ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
+                     ("report", _rpt)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)

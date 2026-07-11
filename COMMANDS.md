@@ -12,21 +12,40 @@ as `🛑 handler error`, never a silent echo.
 
 ## 🟢 Read-only commands (never write)
 
-### `REPORT` — EOD fact sheet
-- **Syntax:** `REPORT`
-- **Output, in order:** header (`REPORT <date> [on-demand]`) · `QUAD:`
-  monthly/quarterly + last confirm date · `VOL:` regime line (7 sleeves:
-  trend, range-pos, phase — e.g. `VIX BEAR@0.31 compressing`) ·
-  `SECTOR FLOW` (rp now + Δ3d, money-in first) · `RANGE DYNAMICS`
-  (HH/HL ascending · LH/LL descending · HH/LL widening · LH/HL compressing —
-  the range walks before price confirms) · `DOLLAR+BONDS` (UUP TLT SHY LQD
-  HYG) · `SS FLOW` churn · `BOOK:` **exposure**-frame counts (`58L/5S
-  exposure` — same frame as `SCREEN my book shorts`, they can never disagree)
-  + flagged names `[⚠=trend-against 📉=dip/rip-zone]` · `⚡DIV` divergence
-  list · today's alert counts.
-- Output is designed to be pasted into an LLM for reasoning — dense facts,
-  no narrative. Every on-demand call is also stored (`report_rows`,
-  kind=`on-demand`); the nightly EOD row (kind=`eod`) is the ML corpus.
+### `REPORT` — EOD fact sheet (v4)
+- **Syntax:** `REPORT` (compact Telegram mode) · `REPORT FULL` (unfiltered
+  ⚡DIV) · `REPORT UPLOAD` (verbose .txt attachment: full tgt/src per line,
+  full DIV, position table appended — for pasting into an LLM) · `REPORT
+  LEGACY` (v3 renderer, parallel-run week) · `BOOK FULL` (per-account
+  position table as .txt — never inlined into chat)
+- **Output, in order:** header (`REPORT v4 <date> [kind]` + legend) ·
+  `Δ since last:` (new ⚠ · SS drops touching book · biggest sector rp move
+  ≥0.10, vs the previous stored snapshot) · `QUAD:` + last confirm ·
+  `VOL:` regime line (trend, range-pos, phase per sleeve) · `SECTOR FLOW`
+  (rp + Δ3d, money-in first, **✓/✗ flow-quality**: ✓ = Δrp agrees with range
+  structure, ✗ = fade-vs-structure — rising rp inside a descending range) ·
+  `RANGE DYNAMICS` (HH/HL asc · LH/LL desc · HH/LL widening · LH/HL
+  compressing) · `DOLLAR+BONDS` · `SS FLOW` churn · `BOOK:` exposure-frame
+  counts (cash-equivalents excluded) + flagged names with **fill context**
+  compact `⚠TLT(L,rp0.34,BEAR,7.3%acct,73%,IND,-2.1%pl)` — % of its
+  account, fill % of target, account (or `RIRA+IND` aggregated on splits),
+  unrealized P&L. The target itself (`→10.0%tgt·dflt-fi`) prints only when
+  explicit or bucket=OVER (compact), always in UPLOAD mode. Default tiers
+  (v4.1): fi 10 · core 4 (broad/theme ETF) · eq 2 (single name) · sat 1
+  (inverse/levered, commodity, single-country, crypto, ALL shorts);
+  explicit `TARGET` rows override. Buckets: <40% STARTER · 40-80 BUILDING ·
+  80-110 FULL · >110 OVER · `CASH:` settled $ + parked (cash-equivalents,
+  e.g. BUXX) = deployable, % of AUM +
+  % of AUM (unsettled n/a — not in the Fidelity export) · `CONC:` top-3
+  weight clusters from ticker_tags (sector / rate_sensitive / dur:*) +
+  untagged bucket + top_cluster · `⚡DIV` scoped to book∪bench∪SS (full list
+  via `REPORT FULL`) · `CANDIDATES:` rule-based nomination, rule printed
+  inline (`TREND=BULL + rp<0.35 + fill<80%`) — no ranking, no advice ·
+  `ALERTS:` today's alert *contents* (capped 8, then +N more).
+- Facts only, no narrative — built to be pasted into an LLM for reasoning.
+  Missing data prints `n/a` with a reason, never disappears. Stored to
+  `report_rows` (nightly `eod` rows = ML corpus); each v4 build also stores
+  a `report_snapshots` state row that powers the next Δ-header.
 - *(handler: `tools/report.py → handle_report_command`)*
 
 ### `SCREEN` — natural-language screener
@@ -117,6 +136,21 @@ stage that hit 0.
   still current?`, reply **`OK`** to stamp it current (value unchanged) or
   send a fresh `QUAD:`. A stray `OK` with no pending ping is ignored.
 - *(handlers: `tools/quad_manual.py`, `tools/quad_confirm.py`)*
+
+### `TARGET` — position size targets (identity facts, operator-only)
+- **Syntax:** `TARGET LIST` (read-only) · `TARGET <tkr> <pct> [IND|RIRA|ROTH]
+  [note]` · `TARGET DEL <tkr> [acct]` · `TARGET CASHEQ <tkr>` /
+  `TARGET NOCASHEQ <tkr>` (cash-parking flag: excluded from fills/exposure/
+  CONC, counts as parked on the CASH line) — all stage, then
+  **`CONFIRM TARGET`** (15-min TTL; `CANCEL TARGET` discards). The confirm
+  word is deliberately distinct from bare `CONFIRM` so it can never collide
+  with a staged `SS:`/`QUAD:`.
+- **Purpose:** fill% = current % of account / target %. Explicit rows are
+  operator doctrine and always win; names without a row use the Hedgeye
+  asset-class default, printed as `·dflt-*`. Account defaults to IND;
+  pct bounds 0–25.
+- **Writes:** `position_targets`. Never inferred, never LLM-written.
+  *(handler: `tools/position_targets.py`)*
 
 ### `WRAP OK` / `WRAP NO` — wrapper linkage (identity facts, operator-only)
 - **Syntax:** `WRAP OK <tkr> [underlying] [inverse|long]` · `WRAP NO <tkr>`

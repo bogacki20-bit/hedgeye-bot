@@ -30,9 +30,9 @@
 <div class="cols">
 
 <section>
-<h2>REPORT <span class="tag">EOD fact sheet</span></h2>
-<span class="cmd">REPORT</span>
-<p class="note">QUAD + VOL header (7 sleeves) · SECTOR FLOW (rp, Δ3d) · RANGE DYNAMICS (HH/HL asc · LH/LL desc · HH/LL widening · LH/HL compressing) · DOLLAR+BONDS · SS churn · BOOK exposure counts + ⚠/📉 flags · ⚡DIV · alert counts. Paste into an LLM to reason. Stored to report_rows; nightly EOD row = ML corpus.</p>
+<h2>REPORT <span class="tag">v4 fact sheet</span></h2>
+<span class="cmd">REPORT · REPORT FULL · REPORT UPLOAD · REPORT LEGACY · BOOK FULL</span>
+<p class="note">Legend header + Δ since last (new ⚠, SS drops on book, sector moves) · QUAD · VOL · SECTOR FLOW w/ ✓✗ flow-quality (✗ = rp rising in a descending range = fade) · RANGE DYNAMICS · DOLLAR+BONDS · SS churn · BOOK flags w/ fill context ⚠TLT(L,rp0.34,BEAR,7.3%acct,73%,IND,-2.1%pl) — →tgt·src shown when explicit or OVER; buckets &lt;40 STARTER · &lt;80 BUILDING · ≤110 FULL · &gt;110 OVER; default tiers fi10 core4 eq2 sat1 (shorts→sat) · CASH settled+parked=deployable · CONC clusters · ⚡DIV (book∪bench∪SS; FULL = all) · CANDIDATES [TREND=BULL + rp&lt;0.35 + fill&lt;80%] · ALERT contents. UPLOAD = verbose .txt (full tgt/src + table + DIV); BOOK FULL = position table .txt; LEGACY = v3. n/a always printed with a reason.</p>
 </section>
 
 <section>
@@ -81,6 +81,7 @@
 <tr><td>SS: AMAT RSI …</td><td>stage SS roster → echoes diff → <b>CONFIRM</b> (&gt;50% removal: <b>CONFIRM REPLACE</b>)</td></tr>
 <tr><td>QUAD: M1 Q3</td><td>stage quad (1–4) → <b>CONFIRM</b>, 15-min TTL</td></tr>
 <tr><td>OK</td><td>answer 🌅 morning quad ping — stamps current, value unchanged</td></tr>
+<tr><td>TARGET T pct [acct]</td><td>stage size target (% of account) → <b>CONFIRM TARGET</b>; TARGET LIST · TARGET DEL T · TARGET CASHEQ T (parked-cash flag)</td></tr>
 <tr><td>WRAP OK T [u] [inverse|long]</td><td>confirm wrapper link (identity fact — operator only)</td></tr>
 <tr><td>WRAP NO T</td><td>dismiss proposal permanently</td></tr>
 <tr><td>CANCEL</td><td>discard staged SS:/QUAD:</td></tr>
