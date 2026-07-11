@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hedgeye Bot — Command Card v3</title>
+<style>
+  @page { size: letter; margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 8.5pt/1.32 "Segoe UI", Arial, sans-serif; color: #111; padding: 8px; }
+  h1 { font-size: 13pt; margin-bottom: 1px; }
+  .sub { font-size: 7.5pt; color: #555; margin-bottom: 6px; }
+  .cols { column-count: 3; column-gap: 12px; column-rule: 1px solid #ccc; }
+  section { break-inside: avoid; margin-bottom: 7px; }
+  h2 { font-size: 9pt; border-bottom: 1.5px solid #111; margin-bottom: 3px; padding-bottom: 1px; }
+  h2 .tag { font-weight: normal; font-size: 7pt; color: #666; }
+  code, .cmd { font: 8pt Consolas, monospace; background: #f0f0f0; padding: 0 2px; border-radius: 2px; }
+  .cmd { display: block; margin: 1px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 2px 0; }
+  td { vertical-align: top; padding: 1px 3px 1px 0; font-size: 8pt; }
+  td:first-child { white-space: nowrap; font-family: Consolas, monospace; font-size: 7.5pt; }
+  p { margin: 2px 0; }
+  .note { font-size: 7.5pt; color: #444; }
+  .w { color: #a00; font-weight: bold; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+<h1>HEDGEYE BOT — COMMAND CARD <span style="font-size:8pt">v3 · 2026-07-11</span></h1>
+<div class="sub">Telegram unless marked 🖥️. Full reference: COMMANDS.md. Unrecognized text = harmless echo. 🔴 = writes DB.</div>
+<div class="cols">
+
+<section>
+<h2>REPORT <span class="tag">EOD fact sheet</span></h2>
+<span class="cmd">REPORT</span>
+<p class="note">QUAD + VOL header (7 sleeves) · SECTOR FLOW (rp, Δ3d) · RANGE DYNAMICS (HH/HL asc · LH/LL desc · HH/LL widening · LH/HL compressing) · DOLLAR+BONDS · SS churn · BOOK exposure counts + ⚠/📉 flags · ⚡DIV · alert counts. Paste into an LLM to reason. Stored to report_rows; nightly EOD row = ML corpus.</p>
+</section>
+
+<section>
+<h2>SCREEN <span class="tag">direction required</span></h2>
+<span class="cmd">SCREEN energy shorts top of range</span>
+<span class="cmd">SCREEN my book shorts</span>
+<span class="cmd">SCREEN etf pro shorts in my book</span>
+<table>
+<tr><td>longs/shorts</td><td>direction + TREND gate (position side in book mode)</td></tr>
+<tr><td>source</td><td>etf pro · portfolio solutions · investing ideas · keiths · signal strength · position monitor · btc quant</td></tr>
+<tr><td>sector</td><td>any GICS: tech, energy, crypto, reits…</td></tr>
+<tr><td>range</td><td>bottom of range (≤.20) · top of range (≥.80)</td></tr>
+<tr><td>cloud</td><td>above / in / below the cloud (MFR trend range)</td></tr>
+<tr><td>momentum</td><td>require bullish MFR momentum</td></tr>
+<tr><td>held</td><td>in my book / that I own</td></tr>
+<tr><td>show gated</td><td>list names Rule-1 dropped</td></tr>
+</table>
+</section>
+
+<section>
+<h2>SCREEN book semantics</h2>
+<p class="note"><b>book shorts = POSITION side</b> (signed qty, options net-of-spread, inverse wrappers exposure-adjusted: SBIT long = short). Trend never drops a held row — it flags:</p>
+<table>
+<tr><td>⚠️trend-against</td><td>trend flipped against your position (raw side vs adjusted trend)</td></tr>
+<tr><td>side:short</td><td>position / stored source side</td></tr>
+<tr><td>u:META·BULL↯inv</td><td>wrapper: underlying, its trend, inverse</td></tr>
+<tr><td>◻️ indeterminate</td><td>held, no side verdict (flat spread) — listed, never dropped</td></tr>
+<tr><td>🌑 DARK / ⛔ GATED</td><td>no MFR range / failed TREND (see: show gated)</td></tr>
+<tr><td>📗own ⚡DIV ⚠mfr-only</td><td>held · trade-vs-mom divergence · top-idea on MFR trend only</td></tr>
+</table>
+</section>
+
+<section>
+<h2>Read-only utilities</h2>
+<table>
+<tr><td>MOVES [n]</td><td>bucket transitions, last n days (7)</td></tr>
+<tr><td>SOURCES</td><td>per-feed member count + last update</td></tr>
+<tr><td>MFR BACKLOG</td><td>roster names to activate in MFR</td></tr>
+<tr><td>WRAP LIST</td><td>unmapped wrapper proposals</td></tr>
+</table>
+</section>
+
+<section>
+<h2>🔴 Writes <span class="tag">gated</span></h2>
+<table>
+<tr><td>SS: AMAT RSI …</td><td>stage SS roster → echoes diff → <b>CONFIRM</b> (&gt;50% removal: <b>CONFIRM REPLACE</b>)</td></tr>
+<tr><td>QUAD: M1 Q3</td><td>stage quad (1–4) → <b>CONFIRM</b>, 15-min TTL</td></tr>
+<tr><td>OK</td><td>answer 🌅 morning quad ping — stamps current, value unchanged</td></tr>
+<tr><td>WRAP OK T [u] [inverse|long]</td><td>confirm wrapper link (identity fact — operator only)</td></tr>
+<tr><td>WRAP NO T</td><td>dismiss proposal permanently</td></tr>
+<tr><td>CANCEL</td><td>discard staged SS:/QUAD:</td></tr>
+</table>
+</section>
+
+<section>
+<h2>🔴 Trade decisions <span class="tag">no gate — message IS the action</span></h2>
+<span class="cmd">OIH BUY 100 &nbsp;·&nbsp; A1234 SELL 250</span>
+<span class="cmd">DONE A1234 100sh @ 419.50</span>
+<p class="note">Verbs: buy sell add trim long short pass skip ignore later wait hold override done filled executed. 100/$100 = dollars, 100sh = shares. Links to ticker's latest alert ≤48h or A&lt;id&gt;.</p>
+</section>
+
+<section>
+<h2>🔔 Alerts you'll get</h2>
+<table>
+<tr><td>📗 stamp</td><td>every alert: YOU HOLD X: LONG · (long shares) = SHORT exposure · EXPOSURE via wrapper</td></tr>
+<tr><td>RTA cross-signal</td><td>RTA matched to book/wrapper/sector + SS roster. Full closes (sell/cover, not -SOME) suppress the name same-day from both alert universes</td></tr>
+<tr><td>📉 DIP / 📈 RIP</td><td>held name retreated/bounced ≥ 0.25 rp vs 5-day extreme, trend intact — fires on CROSSING only, 15-min mkt hours, 1/day/type</td></tr>
+<tr><td>⚡ THESIS CHECK</td><td>the DAY adjusted trend flips against a position (transition only; standing = ⚠ in REPORT/SCREEN)</td></tr>
+<tr><td>🔄 flip-watch</td><td>daily: held-wrapper underlying trend changed</td></tr>
+</table>
+<p class="note">Knobs: BOOK_DIP_DELTA=0.25 · BOOK_ALERTS_ENABLED=1 · EMAIL_CHECK_INTERVAL=300 (Railway vars).</p>
+</section>
+
+<section>
+<h2>🖥️ Lenovo console</h2>
+<span class="cmd">python _daily_upload.py</span>
+<p class="note">THE evening command (export Positions + Accounts History to Downloads first): ingest → actions_log → outcomes. Loud on stale files (&gt;3d); idempotent.</p>
+<span class="cmd">python -m tools.vol_regime --show</span>
+<p class="note">Current regime line (--today write · --backfill · --dry-run).</p>
+<p class="note">Diagnostics: _wrapper_flag_audit · _book_sides_verify · _last_upload_dates · _etfpro_health_scan · _options_postmortem. Tests: test_book_direction · test_rta_cross_signal · test_book_alerts.</p>
+</section>
+
+<section>
+<h2>Hard rules</h2>
+<p class="note">Python owns computation + writes; LLM reasons over facts. CONFIRM gates on writes. No date = not a fact. Identity facts (quad, wrapper links) operator-confirmed only. Hedgeye EMAIL-ONLY · MFR read-API, enroll-never-remove.</p>
+</section>
+
+</div>
+</body>
+</html>
