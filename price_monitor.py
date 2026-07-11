@@ -1014,6 +1014,7 @@ def get_alert_ticker_universe() -> set:
     ALERT_TICKERS set if the view is unavailable (db down, migration 004 not
     yet applied, etc.) so we never silently mute the alert system.
     """
+    universe = None
     try:
         import db_pg
         with db_pg.get_conn() as conn:
@@ -1023,10 +1024,24 @@ def get_alert_ticker_universe() -> set:
                 if rows:
                     dynamic = {r[0] for r in rows if r[0]}
                     if dynamic:
-                        return dynamic | ALERT_TICKERS  # union: never narrower than the static list
+                        universe = dynamic | ALERT_TICKERS  # union: never narrower than the static list
     except Exception as e:
         log.debug(f"monitored_tickers view query failed, falling back to ALERT_TICKERS: {e}")
-    return set(ALERT_TICKERS)
+    if universe is None:
+        universe = set(ALERT_TICKERS)
+    # Same-day close suppression (operator rule 2026-07-11): full-close RTA
+    # (sell/cover) mutes the name for the rest of today. Guarded — failure
+    # means no suppression, never a muted system.
+    try:
+        from tools.rta_cross_signal import closed_today
+        drop = closed_today() & universe
+        if drop:
+            log.info("price_monitor: %d name(s) suppressed by close-type RTA "
+                     "today: %s", len(drop), ", ".join(sorted(drop)))
+            universe -= drop
+    except Exception as e:
+        log.debug(f"RTA close suppression unavailable: {e}")
+    return universe
 
 
 def run_monitor_cycle(dry_run: bool = False) -> dict:

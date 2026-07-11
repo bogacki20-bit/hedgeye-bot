@@ -323,6 +323,15 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
     summary["noted_in_inventory"] = note_in_inventory(
         rec["ticker"], rec["side"], message_id)
     stamp_email_parsed(message_id, "rta")
+    # Cross-signal (operator spec 2026-07-11): match the RTA against the book
+    # + SS roster, alert with facts, and same-day-suppress on full closes.
+    # Guarded — a cross-signal failure never blocks the RTA pipeline.
+    try:
+        from tools.rta_cross_signal import handle_rta
+        summary["cross_signal"] = handle_rta(rec, snapshot_date, message_id)
+    except Exception as e:
+        log.warning("rta cross-signal failed for %s: %s", rec.get("ticker"), e)
+        summary["cross_signal"] = {"error": str(e)}
     if fan_out:
         summary["fan_out"] = fan_out_refresh([rec["ticker"]])
     else:

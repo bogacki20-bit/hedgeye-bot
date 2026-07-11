@@ -686,6 +686,19 @@ def polling_universe() -> list[str]:
     uni: set[str] = set()
     for key in _POLLING_INCLUDED_KEYS:
         uni.update(bd.get(key, []))
+    # Same-day close suppression (operator rule 2026-07-11): a full-close RTA
+    # (sell/cover) removes the name for the rest of TODAY; publications govern
+    # from tomorrow. Guarded — lookup failure means no suppression, never a
+    # collapsed universe.
+    try:
+        from tools.rta_cross_signal import closed_today
+        drop = closed_today() & uni
+        if drop:
+            log.info("polling_universe: %d name(s) suppressed by close-type "
+                     "RTA today: %s", len(drop), ", ".join(sorted(drop)))
+            uni -= drop
+    except Exception as e:
+        log.warning("polling_universe: RTA close suppression unavailable: %s", e)
     return sorted(uni)
 
 
