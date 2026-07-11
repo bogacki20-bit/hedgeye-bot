@@ -73,6 +73,15 @@ def apply_deltas(added, removed, snapshot_date, source_email_id=None,
 
     log.info("ss_roster apply: +%s -%s skipped=%d roster=%d header=%s",
              applied_add, applied_remove, len(skipped), roster_count, header_count)
+    # SS-flow stamping (migration 058): freeze structure+quad on the events
+    # just applied. Idempotent scan — also catches anchor-driven transitions.
+    # Guarded; never blocks the roster apply.
+    if applied_add or applied_remove:
+        try:
+            from tools.ss_flow import stamp_unstamped
+            log.info("ss_flow stamp: %s", stamp_unstamped())
+        except Exception as e:
+            log.warning("ss_flow stamping failed: %s", e)
     if header_count is not None and roster_count != header_count:
         try:
             from notifier import send_telegram
