@@ -146,7 +146,12 @@ def _book_rows() -> list:
         if r.get("_wrap"):
             w = r["_wrap"]
             wrap = f"u:{w['underlying']}{'↯inv' if w['inverse'] else ''}"
-        rows.append({"ticker": t, "side": sides[t]["side"],
+        # FRAME RULE (the SBIT double-flip bug, 2026-07-11): compare the RAW
+        # holding side against the linkage-ADJUSTED trend — both flip together
+        # on inverse wrappers, so the verdict is frame-invariant. Using the
+        # exposure side here double-flips: intact theses get flagged, broken
+        # ones don't. raw_side == side for everything non-wrapped.
+        rows.append({"ticker": t, "side": sides[t].get("raw_side") or sides[t]["side"],
                      "trend_dir": r.get("trend_dir"),
                      "rp_now": (float(r["range_pos"])
                                 if r.get("range_pos") is not None else None),

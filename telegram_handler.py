@@ -317,10 +317,11 @@ def _dispatch_message(token, chat_id, text):
     def _bl():   from tools.enrollment import handle_backlog_command;     return handle_backlog_command(text)
     def _src():  from tools.source_registry import handle_sources_command; return handle_sources_command(text)
     def _wrap(): from tools.wrapper_links import handle_wrapper_command;  return handle_wrapper_command(text)
+    def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
 
     for name, fn in (("ss_roster", _ss), ("quad", _quad), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
-                     ("sources", _src), ("wrap", _wrap)):
+                     ("sources", _src), ("wrap", _wrap), ("report", _rpt)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)

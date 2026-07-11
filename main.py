@@ -242,6 +242,14 @@ if __name__ == "__main__":
                             log.info("vol_regime: %s — %s", vs, regime_line())
                         except Exception as e:
                             log.warning("vol_regime nightly write failed: %s", e)
+                        # EOD REPORT row (queue 4): stored snapshots ARE the
+                        # ML corpus format. Guarded; loud in the log.
+                        try:
+                            from tools.report import store_eod
+                            store_eod()
+                            log.info("report: EOD row stored")
+                        except Exception as e:
+                            log.warning("EOD report store failed: %s", e)
                     else:
                         log.debug("mfr_watchlist_sync: already synced today (%s)", today)
 
