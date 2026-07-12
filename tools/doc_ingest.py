@@ -65,6 +65,9 @@ _DATE_RES = [
     (re.compile(r"(january|february|march|april|may|june|july|august|"
                 r"september|october|november|december)\s+(\d{1,2}),?\s+"
                 r"(20\d{2})", re.I), "monname"),
+    # '10 Jul 2026' — Flow Patrol's format (live miss, 7/12)
+    (re.compile(r"(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|"
+                r"nov|dec)[a-z]*\.?\s+(20\d{2})", re.I), "dmon"),
 ]
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july",
@@ -100,6 +103,13 @@ def parse_note_date(file_name: str | None, text: str | None):
                     y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
                 elif order == "mdy":
                     mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                elif order == "dmon":
+                    d, y = int(m.group(1)), int(m.group(3))
+                    mo = [k for k in _MONTHS
+                          if k.startswith(m.group(2).lower())]
+                    mo = _MONTHS[mo[0]] if mo else None
+                    if mo is None:
+                        continue
                 else:
                     mo = _MONTHS[m.group(1).lower()]
                     d, y = int(m.group(2)), int(m.group(3))
