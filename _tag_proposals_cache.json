@@ -1,4 +1,88 @@
 {
+ "005930.KS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "005930.KS",
+   "category": null,
+   "industry": "Consumer Electronics",
+   "longName": "Samsung Electronics Co., Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "SamsungElec"
+  }
+ },
+ "1913.HK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "1913.HK",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "Prada S.p.A.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "PRADA"
+  }
+ },
+ "2331.HK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "2331.HK",
+   "category": null,
+   "industry": "Leisure",
+   "longName": "Li Ning Company Limited",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "LI NING"
+  }
+ },
+ "2408.TW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "2408.TW",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": "Nanya Technology Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "NANYA TECHNOLOGY CORPORATION"
+  }
+ },
+ "2513.HK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "2513.HK",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Knowledge Atlas Tech Joint",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "KNOWLEDGE ATLAS"
+  }
+ },
+ "285A.T": {
+  "err": null,
+  "info": {
+   "_symbol_used": "285A.T",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "KIOXIA HOLDINGS CORPORATION"
+  }
+ },
+ "3998.HK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "3998.HK",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Bosideng International Holdings Limited",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "BOSIDENG"
+  }
+ },
  "AAAU": {
   "err": null,
   "info": {
@@ -9,6 +93,78 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Goldman Sachs Physical Gold ETF"
+  }
+ },
+ "AAPL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AAPL",
+   "category": null,
+   "industry": "Consumer Electronics",
+   "longName": "Apple Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Apple Inc."
+  }
+ },
+ "ABNB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ABNB",
+   "category": null,
+   "industry": "Travel Services",
+   "longName": "Airbnb, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Airbnb, Inc."
+  }
+ },
+ "ABX.TO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ABX.TO",
+   "category": null,
+   "industry": "Gold",
+   "longName": "Barrick Mining Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "BARRICK MINING CORPORATION"
+  }
+ },
+ "ACHC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ACHC",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "Acadia Healthcare Company, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Acadia Healthcare Company, Inc."
+  }
+ },
+ "ACI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ACI",
+   "category": null,
+   "industry": "Grocery Stores",
+   "longName": "Albertsons Companies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Albertsons Companies, Inc."
+  }
+ },
+ "ADBE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ADBE",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Adobe Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Adobe Inc."
   }
  },
  "ADDYY": {
@@ -23,6 +179,66 @@
    "shortName": "adidas AG"
   }
  },
+ "ADS.DE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ADS.DE",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "adidas AG",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "adidas AG                     N"
+  }
+ },
+ "ADYEY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ADYEY",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Adyen N.V.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Adyen N.V."
+  }
+ },
+ "AEO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AEO",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "American Eagle Outfitters, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "American Eagle Outfitters, Inc."
+  }
+ },
+ "AFRM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AFRM",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Affirm Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Affirm Holdings, Inc."
+  }
+ },
+ "AGCO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AGCO",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "AGCO Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "AGCO Corporation"
+  }
+ },
  "AGGH": {
   "err": null,
   "info": {
@@ -35,6 +251,66 @@
    "shortName": "Simplify Aggregate Bond ETF"
   }
  },
+ "AIQUY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AIQUY",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "L'Air Liquide S.A.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "L'Air Liquide SA"
+  }
+ },
+ "AKAM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AKAM",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Akamai Technologies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Akamai Technologies, Inc."
+  }
+ },
+ "ALLY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ALLY",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Ally Financial Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Ally Financial Inc."
+  }
+ },
+ "AMAT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AMAT",
+   "category": null,
+   "industry": "Semiconductor Equipment & Materials",
+   "longName": "Applied Materials, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Applied Materials, Inc."
+  }
+ },
+ "AMC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AMC",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "AMC Entertainment Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "AMC Entertainment Holdings, Inc"
+  }
+ },
  "AMLP": {
   "err": null,
   "info": {
@@ -45,6 +321,126 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Alerian MLP ETF"
+  }
+ },
+ "AMN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AMN",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "AMN Healthcare Services, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "AMN Healthcare Services Inc"
+  }
+ },
+ "AMZN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AMZN",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "Amazon.com, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Amazon.com, Inc."
+  }
+ },
+ "ANET": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ANET",
+   "category": null,
+   "industry": "Computer Hardware",
+   "longName": "Arista Networks, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Arista Networks, Inc."
+  }
+ },
+ "ANF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ANF",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Abercrombie & Fitch Co.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Abercrombie & Fitch Company"
+  }
+ },
+ "APD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "APD",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "Air Products and Chemicals, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Air Products and Chemicals, Inc"
+  }
+ },
+ "APLE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "APLE",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "Apple Hospitality REIT, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Apple Hospitality REIT, Inc."
+  }
+ },
+ "APP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "APP",
+   "category": null,
+   "industry": "Advertising Agencies",
+   "longName": "AppLovin Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Applovin Corporation"
+  }
+ },
+ "APPN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "APPN",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Appian Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Appian Corporation"
+  }
+ },
+ "AR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AR",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Antero Resources Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Antero Resources Corporation"
+  }
+ },
+ "ARCB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ARCB",
+   "category": null,
+   "industry": "Trucking",
+   "longName": "ArcBest Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "ArcBest Corporation"
   }
  },
  "ARCO": {
@@ -71,6 +467,18 @@
    "shortName": "Global X MSCI Argentina ETF"
   }
  },
+ "ARHS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ARHS",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Arhaus, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Arhaus, Inc."
+  }
+ },
  "ARKG": {
   "err": null,
   "info": {
@@ -81,6 +489,82 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "ARK Genomic Revolution ETF"
+  }
+ },
+ "AS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AS",
+   "category": null,
+   "industry": "Leisure",
+   "longName": "Amer Sports, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Amer Sports, Inc."
+  }
+ },
+ "ASAN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ASAN",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Asana, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Asana, Inc."
+  }
+ },
+ "ASO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ASO",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Academy Sports and Outdoors, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Academy Sports and Outdoors, In"
+  }
+ },
+ "ATD.TO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ATD.TO",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Alimentation Couche-Tard Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "ALIMENTATION COUCHE-TARD INC"
+  }
+ },
+ "ATRO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ATRO",
+   "category": null,
+   "industry": "Aerospace & Defense",
+   "longName": "Astronics Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Astronics Corporation"
+  }
+ },
+ "ATUS": {
+  "err": "empty yfinance info",
+  "info": null
+ },
+ "ATZ.TO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ATZ.TO",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Aritzia Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "ARITZIA INC"
   }
  },
  "ATZAF": {
@@ -95,6 +579,174 @@
    "shortName": "Aritzia Inc."
   }
  },
+ "AVO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AVO",
+   "category": null,
+   "industry": "Food Distribution",
+   "longName": "Mission Produce, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Mission Produce, Inc."
+  }
+ },
+ "AWI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AWI",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Armstrong World Industries, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Armstrong World Industries Inc"
+  }
+ },
+ "AXP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AXP",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "American Express Company",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "American Express Company"
+  }
+ },
+ "AZO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AZO",
+   "category": null,
+   "industry": "Auto Parts",
+   "longName": "AutoZone, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "AutoZone, Inc."
+  }
+ },
+ "BA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BA",
+   "category": null,
+   "industry": "Aerospace & Defense",
+   "longName": "The Boeing Company",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Boeing Company (The)"
+  }
+ },
+ "BABA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BABA",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "Alibaba Group Holding Limited",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Alibaba Group Holding Limited"
+  }
+ },
+ "BALL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BALL",
+   "category": null,
+   "industry": "Packaging & Containers",
+   "longName": "Ball Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Ball Corporation"
+  }
+ },
+ "BBWI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BBWI",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Bath & Body Works, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Bath & Body Works, Inc."
+  }
+ },
+ "BBY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BBY",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Best Buy Co., Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Best Buy Co., Inc."
+  }
+ },
+ "BF-B": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BF-B",
+   "category": null,
+   "industry": "Beverages - Wineries & Distilleries",
+   "longName": "Brown-Forman Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Brown Forman Inc"
+  }
+ },
+ "BHP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BHP",
+   "category": null,
+   "industry": "Other Industrial Metals & Mining",
+   "longName": "BHP Group Limited",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "BHP Group Limited"
+  }
+ },
+ "BIRK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BIRK",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "Birkenstock Holding plc",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Birkenstock Holding plc"
+  }
+ },
+ "BJ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BJ",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "BJ's Wholesale Club Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "BJ's Wholesale Club Holdings, I"
+  }
+ },
+ "BJRI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BJRI",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "BJ's Restaurants, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "BJ's Restaurants, Inc."
+  }
+ },
  "BKLN": {
   "err": null,
   "info": {
@@ -107,6 +759,30 @@
    "shortName": "Invesco Senior Loan ETF"
   }
  },
+ "BKV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BKV",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "BKV Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "BKV Corporation"
+  }
+ },
+ "BLDR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BLDR",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Builders FirstSource, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Builders FirstSource, Inc."
+  }
+ },
  "BLOK": {
   "err": null,
   "info": {
@@ -117,6 +793,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Amplify Blockchain Technology E"
+  }
+ },
+ "BLSH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BLSH",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Bullish",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Bullish"
   }
  },
  "BMNR": {
@@ -167,6 +855,66 @@
    "shortName": "United States Brent Oil Fund, L"
   }
  },
+ "BOOT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BOOT",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Boot Barn Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Boot Barn Holdings, Inc."
+  }
+ },
+ "BP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BP",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "BP p.l.c.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "BP p.l.c."
+  }
+ },
+ "BRBR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BRBR",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "BellRing Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "BellRing Brands, Inc."
+  }
+ },
+ "BRCB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BRCB",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Black Rock Coffee Bar, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Black Rock Coffee Bar, Inc."
+  }
+ },
+ "BRCC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BRCC",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "BRC Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "BRC Inc."
+  }
+ },
  "BRKR": {
   "err": null,
   "info": {
@@ -177,6 +925,30 @@
    "quoteType": "EQUITY",
    "sector": "Healthcare",
    "shortName": "Bruker Corporation"
+  }
+ },
+ "BROS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BROS",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Dutch Bros Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Dutch Bros Inc."
+  }
+ },
+ "BRUN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BRUN",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Boost Run, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Boost Run Inc."
   }
  },
  "BTAL": {
@@ -191,6 +963,150 @@
    "shortName": "AGF U.S. Market Neutral Anti-Be"
   }
  },
+ "BTI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BTI",
+   "category": null,
+   "industry": "Tobacco",
+   "longName": "British American Tobacco p.l.c.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "British American Tobacco  Indus"
+  }
+ },
+ "BURL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BURL",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Burlington Stores, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Burlington Stores, Inc."
+  }
+ },
+ "BUXX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BUXX",
+   "category": "Ultrashort Bond",
+   "industry": null,
+   "longName": "Strive Enhanced Income Short Maturity ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Strive Enhanced Income Short Ma"
+  }
+ },
+ "BYD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BYD",
+   "category": null,
+   "industry": "Resorts & Casinos",
+   "longName": "Boyd Gaming Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Boyd Gaming Corporation"
+  }
+ },
+ "CACC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CACC",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Credit Acceptance Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Credit Acceptance Corporation"
+  }
+ },
+ "CAG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CAG",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Conagra Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "ConAgra Brands, Inc."
+  }
+ },
+ "CAKE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CAKE",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "The Cheesecake Factory Incorporated",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "The Cheesecake Factory Incorpor"
+  }
+ },
+ "CAL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CAL",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Caleres, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Caleres, Inc."
+  }
+ },
+ "CAMT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CAMT",
+   "category": null,
+   "industry": "Semiconductor Equipment & Materials",
+   "longName": "Camtek Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Camtek Ltd."
+  }
+ },
+ "CARG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CARG",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "CarGurus, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "CarGurus, Inc."
+  }
+ },
+ "CARR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CARR",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Carrier Global Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Carrier Global Corporation"
+  }
+ },
+ "CASY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CASY",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Casey's General Stores, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Caseys General Stores, Inc."
+  }
+ },
  "CAT": {
   "err": null,
   "info": {
@@ -201,6 +1117,18 @@
    "quoteType": "EQUITY",
    "sector": "Industrials",
    "shortName": "Caterpillar, Inc."
+  }
+ },
+ "CAVA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CAVA",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "CAVA Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "CAVA Group, Inc."
   }
  },
  "CBRL": {
@@ -215,6 +1143,102 @@
    "shortName": "Cracker Barrel Old Country Stor"
   }
  },
+ "CCK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CCK",
+   "category": null,
+   "industry": "Packaging & Containers",
+   "longName": "Crown Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Crown Holdings, Inc."
+  }
+ },
+ "CCL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CCL",
+   "category": null,
+   "industry": "Travel Services",
+   "longName": "Carnival Corporation Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Carnival Corporation Ltd."
+  }
+ },
+ "CEG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CEG",
+   "category": null,
+   "industry": "Utilities - Independent Power Producers",
+   "longName": "Constellation Energy Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Utilities",
+   "shortName": "Constellation Energy Corporatio"
+  }
+ },
+ "CELH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CELH",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "Celsius Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Celsius Holdings, Inc."
+  }
+ },
+ "CF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CF",
+   "category": null,
+   "industry": "Agricultural Inputs",
+   "longName": "CF Industries Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "CF Industries Holdings, Inc."
+  }
+ },
+ "CFG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CFG",
+   "category": null,
+   "industry": "Banks - Regional",
+   "longName": "Citizens Financial Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Citizens Financial Group, Inc."
+  }
+ },
+ "CFR.SW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CFR.SW",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "Compagnie Financi\u00e8re Richemont SA",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "RICHEMONT N"
+  }
+ },
+ "CHDN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHDN",
+   "category": null,
+   "industry": "Gambling",
+   "longName": "Churchill Downs Incorporated",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Churchill Downs, Incorporated"
+  }
+ },
  "CHEF": {
   "err": null,
   "info": {
@@ -225,6 +1249,66 @@
    "quoteType": "EQUITY",
    "sector": "Consumer Defensive",
    "shortName": "The Chefs' Warehouse, Inc."
+  }
+ },
+ "CHH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHH",
+   "category": null,
+   "industry": "Lodging",
+   "longName": "Choice Hotels International, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Choice Hotels International, In"
+  }
+ },
+ "CHPT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHPT",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "ChargePoint Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "ChargePoint Holdings, Inc."
+  }
+ },
+ "CHRD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHRD",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Chord Energy Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Chord Energy Corporation"
+  }
+ },
+ "CHTR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHTR",
+   "category": null,
+   "industry": "Telecom Services",
+   "longName": "Charter Communications, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Charter Communications, Inc."
+  }
+ },
+ "CHWY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHWY",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "Chewy, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Chewy, Inc."
   }
  },
  "CLOX": {
@@ -251,6 +1335,42 @@
    "shortName": "Eldridge BBB-B CLO ETF"
   }
  },
+ "CMCSA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CMCSA",
+   "category": null,
+   "industry": "Telecom Services",
+   "longName": "Comcast Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Comcast Corporation"
+  }
+ },
+ "CMG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CMG",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Chipotle Mexican Grill, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Chipotle Mexican Grill, Inc."
+  }
+ },
+ "CNH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CNH",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "CNH Industrial N.V.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "CNH Industrial N.V."
+  }
+ },
  "COAL": {
   "err": null,
   "info": {
@@ -261,6 +1381,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Range Global Coal Index ETF"
+  }
+ },
+ "COCO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COCO",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "The Vita Coco Company, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Vita Coco Company, Inc."
+  }
+ },
+ "COF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COF",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Capital One Financial Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Capital One Financial Corporati"
+  }
+ },
+ "COIN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COIN",
+   "category": null,
+   "industry": "Financial Data & Stock Exchanges",
+   "longName": "Coinbase Global, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Coinbase Global, Inc."
   }
  },
  "COMP": {
@@ -275,6 +1431,210 @@
    "shortName": "Compass, Inc."
   }
  },
+ "COP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COP",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "ConocoPhillips",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "ConocoPhillips"
+  }
+ },
+ "COST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COST",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "Costco Wholesale Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Costco Wholesale Corporation"
+  }
+ },
+ "CP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CP",
+   "category": null,
+   "industry": "Railroads",
+   "longName": "Canadian Pacific Kansas City Limited",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Canadian Pacific Kansas City Li"
+  }
+ },
+ "CPAY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CPAY",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Corpay, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Corpay, Inc."
+  }
+ },
+ "CPB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CPB",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "The Campbell's Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Campbell's Company"
+  }
+ },
+ "CPRI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CPRI",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "Capri Holdings Limited",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Capri Holdings Limited"
+  }
+ },
+ "CRCL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CRCL",
+   "category": null,
+   "industry": "Capital Markets",
+   "longName": "Circle Internet Group",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Circle Internet Group, Inc."
+  }
+ },
+ "CRI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CRI",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Carter's, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Carter's, Inc."
+  }
+ },
+ "CRLBF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CRLBF",
+   "category": null,
+   "industry": "Drug Manufacturers - Specialty & Generic",
+   "longName": "Cresco Labs Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Cresco Labs Inc."
+  }
+ },
+ "CRM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CRM",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Salesforce, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Salesforce, Inc."
+  }
+ },
+ "CRWD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CRWD",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "CrowdStrike Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "CrowdStrike Holdings, Inc."
+  }
+ },
+ "CRWV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CRWV",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "CoreWeave, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "CoreWeave, Inc."
+  }
+ },
+ "CSL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CSL",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Carlisle Companies Incorporated",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Carlisle Companies Incorporated"
+  }
+ },
+ "CSX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CSX",
+   "category": null,
+   "industry": "Railroads",
+   "longName": "CSX Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "CSX Corporation"
+  }
+ },
+ "CTVA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CTVA",
+   "category": null,
+   "industry": "Agricultural Inputs",
+   "longName": "Corteva, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Corteva, Inc."
+  }
+ },
+ "CVI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CVI",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "CVR Energy, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "CVR Energy Inc."
+  }
+ },
+ "CVX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CVX",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "Chevron Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Chevron Corporation"
+  }
+ },
  "CWB": {
   "err": null,
   "info": {
@@ -285,6 +1645,54 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "State Street SPDR Bloomberg Con"
+  }
+ },
+ "CXXIF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CXXIF",
+   "category": null,
+   "industry": "Drug Manufacturers - Specialty & Generic",
+   "longName": "C21 Investments Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "C21 Investments Inc."
+  }
+ },
+ "CZR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CZR",
+   "category": null,
+   "industry": "Resorts & Casinos",
+   "longName": "Caesars Entertainment, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Caesars Entertainment, Inc."
+  }
+ },
+ "DAR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DAR",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Darling Ingredients Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Darling Ingredients Inc."
+  }
+ },
+ "DASH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DASH",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "DoorDash, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "DoorDash, Inc."
   }
  },
  "DBJP": {
@@ -299,6 +1707,66 @@
    "shortName": "Xtrackers MSCI Japan Hedged Equ"
   }
  },
+ "DDOG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DDOG",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Datadog, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Datadog, Inc."
+  }
+ },
+ "DDS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DDS",
+   "category": null,
+   "industry": "Department Stores",
+   "longName": "Dillard's, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Dillard's, Inc."
+  }
+ },
+ "DE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DE",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "Deere & Company",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Deere & Company"
+  }
+ },
+ "DECK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DECK",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "Deckers Outdoor Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Deckers Outdoor Corporation"
+  }
+ },
+ "DEO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DEO",
+   "category": null,
+   "industry": "Beverages - Wineries & Distilleries",
+   "longName": "Diageo plc",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Diageo plc"
+  }
+ },
  "DESK": {
   "err": null,
   "info": {
@@ -309,6 +1777,30 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "VanEck Office and Commercial RE"
+  }
+ },
+ "DG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DG",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "Dollar General Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Dollar General Corporation"
+  }
+ },
+ "DGX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DGX",
+   "category": null,
+   "industry": "Diagnostics & Research",
+   "longName": "Quest Diagnostics Incorporated",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Quest Diagnostics Incorporated"
   }
  },
  "DHI": {
@@ -323,6 +1815,102 @@
    "shortName": "D.R. Horton, Inc."
   }
  },
+ "DINO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DINO",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "HF Sinclair Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "HF Sinclair Corporation"
+  }
+ },
+ "DK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DK",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "Delek US Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Delek US Holdings, Inc."
+  }
+ },
+ "DKL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DKL",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "Delek Logistics Partners, LP",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Delek Logistics Partners, L.P."
+  }
+ },
+ "DKS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DKS",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "DICK'S Sporting Goods, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Dick's Sporting Goods Inc"
+  }
+ },
+ "DLTR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DLTR",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "Dollar Tree, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Dollar Tree, Inc."
+  }
+ },
+ "DNUT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DNUT",
+   "category": null,
+   "industry": "Grocery Stores",
+   "longName": "Krispy Kreme, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Krispy Kreme, Inc."
+  }
+ },
+ "DOW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DOW",
+   "category": null,
+   "industry": "Chemicals",
+   "longName": "Dow Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Dow Inc."
+  }
+ },
+ "DPZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DPZ",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Domino's Pizza, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Domino's Pizza Inc"
+  }
+ },
  "DRAM": {
   "err": null,
   "info": {
@@ -333,6 +1921,30 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Roundhill Memory ETF"
+  }
+ },
+ "DRH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DRH",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "DiamondRock Hospitality Company",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Diamondrock Hospitality Company"
+  }
+ },
+ "DRI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DRI",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Darden Restaurants, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Darden Restaurants, Inc."
   }
  },
  "DRIP": {
@@ -347,6 +1959,78 @@
    "shortName": "Direxion Daily S&P Oil & Gas Ex"
   }
  },
+ "DRVN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DRVN",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "Driven Brands Holdings Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Driven Brands Holdings Inc."
+  }
+ },
+ "DT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DT",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Dynatrace, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Dynatrace, Inc."
+  }
+ },
+ "DTG.DE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DTG.DE",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "Daimler Truck Holding AG",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Daimler Truck Holding AG      N"
+  }
+ },
+ "DVN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DVN",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Devon Energy Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Devon Energy Corporation"
+  }
+ },
+ "EAT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EAT",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Brinker International, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Brinker International, Inc."
+  }
+ },
+ "EFX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EFX",
+   "category": null,
+   "industry": "Consulting Services",
+   "longName": "Equifax Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Equifax, Inc."
+  }
+ },
  "EIS": {
   "err": null,
   "info": {
@@ -357,6 +2041,30 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares MSCI Israel ETF"
+  }
+ },
+ "EL.PA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EL.PA",
+   "category": null,
+   "industry": "Medical Instruments & Supplies",
+   "longName": "EssilorLuxottica Soci\u00e9t\u00e9 anonyme",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "ESSILORLUXOTTICA"
+  }
+ },
+ "ELF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ELF",
+   "category": null,
+   "industry": "Household & Personal Products",
+   "longName": "e.l.f. Beauty, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "e.l.f. Beauty, Inc."
   }
  },
  "EMB": {
@@ -383,6 +2091,18 @@
    "shortName": "VanEck J. P. Morgan EM Local Cu"
   }
  },
+ "EMR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EMR",
+   "category": null,
+   "industry": "Specialty Industrial Machinery",
+   "longName": "Emerson Electric Co.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Emerson Electric Company"
+  }
+ },
  "EMXC": {
   "err": null,
   "info": {
@@ -393,6 +2113,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares MSCI Emerging Markets e"
+  }
+ },
+ "ENB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ENB",
+   "category": null,
+   "industry": "Oil & Gas Midstream",
+   "longName": "Enbridge Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Enbridge Inc"
   }
  },
  "EQRR": {
@@ -417,6 +2149,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares Ethereum Trust ETF"
+  }
+ },
+ "ETSY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ETSY",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "Etsy, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Etsy, Inc."
   }
  },
  "EUO": {
@@ -575,6 +2319,54 @@
    "shortName": "iShares MSCI Brazil ETF"
   }
  },
+ "EXP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EXP",
+   "category": null,
+   "industry": "Building Materials",
+   "longName": "Eagle Materials Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Eagle Materials Inc"
+  }
+ },
+ "EXPE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EXPE",
+   "category": null,
+   "industry": "Travel Services",
+   "longName": "Expedia Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Expedia Group, Inc."
+  }
+ },
+ "EXPGY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EXPGY",
+   "category": null,
+   "industry": "Consulting Services",
+   "longName": "Experian plc",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Experian plc"
+  }
+ },
+ "EYE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EYE",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "National Vision Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "National Vision Holdings, Inc."
+  }
+ },
  "EZA": {
   "err": null,
   "info": {
@@ -611,6 +2403,30 @@
    "shortName": "First American Corporation (New"
   }
  },
+ "FANG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FANG",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Diamondback Energy, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Diamondback Energy, Inc."
+  }
+ },
+ "FCFS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FCFS",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "FirstCash Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "FirstCash Holdings, Inc."
+  }
+ },
  "FDRXX": {
   "err": null,
   "info": {
@@ -627,6 +2443,126 @@
   "err": "empty yfinance info",
   "info": null
  },
+ "FICO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FICO",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Fair Isaac Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Fair Isaac Corporation"
+  }
+ },
+ "FISV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FISV",
+   "category": null,
+   "industry": null,
+   "longName": "Fiserv, Inc.",
+   "quoteType": "EQUITY",
+   "sector": null,
+   "shortName": "Fiserv, Inc."
+  }
+ },
+ "FIVE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FIVE",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Five Below, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Five Below, Inc."
+  }
+ },
+ "FND": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FND",
+   "category": null,
+   "industry": "Home Improvement Retail",
+   "longName": "Floor & Decor Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Floor & Decor Holdings, Inc."
+  }
+ },
+ "FNV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FNV",
+   "category": null,
+   "industry": "Gold",
+   "longName": "Franco-Nevada Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Franco-Nevada Corporation"
+  }
+ },
+ "FOUR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FOUR",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Shift4 Payments, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Shift4 Payments, Inc."
+  }
+ },
+ "FOXA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FOXA",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Fox Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Fox Corporation"
+  }
+ },
+ "FRPT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FRPT",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Freshpet, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Freshpet, Inc."
+  }
+ },
+ "FSLY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FSLY",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Fastly, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Fastly, Inc."
+  }
+ },
+ "FUBO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FUBO",
+   "category": null,
+   "industry": "Broadcasting",
+   "longName": "FuboTV Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "fuboTV Inc."
+  }
+ },
  "FUTY": {
   "err": null,
   "info": {
@@ -637,6 +2573,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Fidelity MSCI Utilities Index E"
+  }
+ },
+ "FWONK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FWONK",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Formula One Group",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Liberty Media Corporation - Ser"
   }
  },
  "FXB": {
@@ -715,6 +2663,30 @@
   "err": "empty yfinance info",
   "info": null
  },
+ "GAP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GAP",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "The Gap, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Gap, Inc. (The)"
+  }
+ },
+ "GDNSF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GDNSF",
+   "category": null,
+   "industry": null,
+   "longName": "Vireo Growth Inc.",
+   "quoteType": "MUTUALFUND",
+   "sector": null,
+   "shortName": "GOODNESS GROWTH HLDGS INC"
+  }
+ },
  "GDX": {
   "err": null,
   "info": {
@@ -725,6 +2697,30 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "VanEck Gold Miners ETF"
+  }
+ },
+ "GEHC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GEHC",
+   "category": null,
+   "industry": "Medical Devices",
+   "longName": "GE HealthCare Technologies Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "GE HealthCare Technologies Inc."
+  }
+ },
+ "GEL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GEL",
+   "category": null,
+   "industry": "Oil & Gas Midstream",
+   "longName": "Genesis Energy, L.P.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Genesis Energy, L.P."
   }
  },
  "GGLS": {
@@ -751,6 +2747,42 @@
    "shortName": "State Street SPDR S&P Global In"
   }
  },
+ "GIII": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GIII",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "G-III Apparel Group, Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "G-III Apparel Group, LTD."
+  }
+ },
+ "GIS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GIS",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "General Mills, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "General Mills, Inc."
+  }
+ },
+ "GLASF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GLASF",
+   "category": null,
+   "industry": "",
+   "longName": "Glass House Brands Inc.",
+   "quoteType": "EQUITY",
+   "sector": "",
+   "shortName": "Glass House Brands Inc."
+  }
+ },
  "GLD": {
   "err": null,
   "info": {
@@ -763,6 +2795,150 @@
    "shortName": "SPDR Gold Shares"
   }
  },
+ "GME": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GME",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "GameStop Corp.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "GameStop Corporation"
+  }
+ },
+ "GO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GO",
+   "category": null,
+   "industry": "Grocery Stores",
+   "longName": "Grocery Outlet Holding Corp.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Grocery Outlet Holding Corp."
+  }
+ },
+ "GOOGL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GOOGL",
+   "category": null,
+   "industry": "Internet Content & Information",
+   "longName": "Alphabet Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Alphabet Inc."
+  }
+ },
+ "GOOS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GOOS",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Canada Goose Holdings Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Canada Goose Holdings Inc. Subo"
+  }
+ },
+ "GPI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GPI",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "Group 1 Automotive, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Group 1 Automotive, Inc."
+  }
+ },
+ "GPN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GPN",
+   "category": null,
+   "industry": "Specialty Business Services",
+   "longName": "Global Payments Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Global Payments Inc."
+  }
+ },
+ "GRGD.TO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GRGD.TO",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Groupe Dynamite Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "GROUPE DYNAMITE INC"
+  }
+ },
+ "GRMN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GRMN",
+   "category": null,
+   "industry": "Scientific & Technical Instruments",
+   "longName": "Garmin Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Garmin Ltd."
+  }
+ },
+ "GTBIF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GTBIF",
+   "category": null,
+   "industry": "Drug Manufacturers - Specialty & Generic",
+   "longName": "Green Thumb Industries Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Green Thumb Industries Inc."
+  }
+ },
+ "GTLB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GTLB",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "GitLab Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "GitLab Inc."
+  }
+ },
+ "GWW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GWW",
+   "category": null,
+   "industry": "Industrial Distribution",
+   "longName": "W.W. Grainger, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "W.W. Grainger, Inc."
+  }
+ },
+ "H": {
+  "err": null,
+  "info": {
+   "_symbol_used": "H",
+   "category": null,
+   "industry": "Lodging",
+   "longName": "Hyatt Hotels Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Hyatt Hotels Corporation"
+  }
+ },
  "HARD": {
   "err": null,
   "info": {
@@ -773,6 +2949,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Simplify Commodities Strategy N"
+  }
+ },
+ "HAYPP.ST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HAYPP.ST",
+   "category": null,
+   "industry": "Tobacco",
+   "longName": "Haypp Group AB (publ)",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Haypp Group AB"
+  }
+ },
+ "HCA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HCA",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "HCA Healthcare, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "HCA Healthcare, Inc."
+  }
+ },
+ "HD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HD",
+   "category": null,
+   "industry": "Home Improvement Retail",
+   "longName": "The Home Depot, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Home Depot, Inc. (The)"
   }
  },
  "HEFA": {
@@ -799,6 +3011,66 @@
    "shortName": "Hedgeye Fourth Turning ETF"
   }
  },
+ "HELE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HELE",
+   "category": null,
+   "industry": "Household & Personal Products",
+   "longName": "Helen of Troy Limited",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Helen of Troy Limited"
+  }
+ },
+ "HIMS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HIMS",
+   "category": null,
+   "industry": "Drug Manufacturers - Specialty & Generic",
+   "longName": "Hims & Hers Health, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Hims & Hers Health, Inc."
+  }
+ },
+ "HLT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HLT",
+   "category": null,
+   "industry": "Lodging",
+   "longName": "Hilton Worldwide Holdings Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Hilton Worldwide Holdings Inc."
+  }
+ },
+ "HNNMY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HNNMY",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "H & M Hennes & Mauritz AB (publ)",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Hennes & Mauritz AB"
+  }
+ },
+ "HQY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HQY",
+   "category": null,
+   "industry": "Health Information Services",
+   "longName": "HealthEquity, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "HealthEquity, Inc."
+  }
+ },
  "HST": {
   "err": null,
   "info": {
@@ -809,6 +3081,30 @@
    "quoteType": "EQUITY",
    "sector": "Real Estate",
    "shortName": "Host Hotels & Resorts, Inc."
+  }
+ },
+ "HSY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HSY",
+   "category": null,
+   "industry": "Confectioners",
+   "longName": "The Hershey Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Hershey Company"
+  }
+ },
+ "HUBS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HUBS",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "HubSpot, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "HubSpot, Inc."
   }
  },
  "HYG": {
@@ -859,6 +3155,18 @@
    "shortName": "VanEck Indonesia Index ETF"
   }
  },
+ "IDXX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IDXX",
+   "category": null,
+   "industry": "Diagnostics & Research",
+   "longName": "IDEXX Laboratories, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "IDEXX Laboratories, Inc."
+  }
+ },
  "IEF": {
   "err": null,
   "info": {
@@ -869,6 +3177,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares 7-10 Year Treasury Bond"
+  }
+ },
+ "IFF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IFF",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "International Flavors & Fragrances Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "International Flavors & Fragran"
   }
  },
  "IFRA": {
@@ -895,6 +3215,18 @@
    "shortName": "iShares International Treasury "
   }
  },
+ "IHG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IHG",
+   "category": null,
+   "industry": "Lodging",
+   "longName": "InterContinental Hotels Group PLC",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Intercontinental Hotels Group"
+  }
+ },
  "IHI": {
   "err": null,
   "info": {
@@ -917,6 +3249,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares Latin America 40 ETF"
+  }
+ },
+ "ILMN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ILMN",
+   "category": null,
+   "industry": "Diagnostics & Research",
+   "longName": "Illumina, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Illumina, Inc."
   }
  },
  "INDA": {
@@ -991,6 +3335,30 @@
    "shortName": "iShares Russell 2000 Growth Fun"
   }
  },
+ "JBS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "JBS",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "JBS N.V.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "JBS N.V."
+  }
+ },
+ "JD.L": {
+  "err": null,
+  "info": {
+   "_symbol_used": "JD.L",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "JD Sports Fashion Plc",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "JD SPORTS FASHION PLC ORD 0.05P"
+  }
+ },
  "JETS": {
   "err": null,
   "info": {
@@ -1001,6 +3369,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "U.S. Global Jets ETF"
+  }
+ },
+ "JPM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "JPM",
+   "category": null,
+   "industry": "Banks - Diversified",
+   "longName": "JPMorgan Chase & Co.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "JP Morgan Chase & Co."
+  }
+ },
+ "KDP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KDP",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "Keurig Dr Pepper Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Keurig Dr Pepper Inc."
+  }
+ },
+ "KHC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KHC",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "The Kraft Heinz Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Kraft Heinz Company"
   }
  },
  "KMX": {
@@ -1015,6 +3419,66 @@
    "shortName": "CarMax Inc"
   }
  },
+ "KR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KR",
+   "category": null,
+   "industry": "Grocery Stores",
+   "longName": "The Kroger Co.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Kroger Company (The)"
+  }
+ },
+ "KRUS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KRUS",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Kura Sushi USA, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Kura Sushi USA, Inc."
+  }
+ },
+ "KSS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KSS",
+   "category": null,
+   "industry": "Department Stores",
+   "longName": "Kohl's Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Kohl's Corporation"
+  }
+ },
+ "KTB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KTB",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Kontoor Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Kontoor Brands, Inc."
+  }
+ },
+ "KVYO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KVYO",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Klaviyo, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Klaviyo, Inc. Series A"
+  }
+ },
  "KXIAY": {
   "err": null,
   "info": {
@@ -1025,6 +3489,150 @@
    "quoteType": "EQUITY",
    "sector": "Technology",
    "shortName": "KIOXIA HLDGS CORP"
+  }
+ },
+ "LAD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LAD",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "Lithia Motors, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Lithia Motors, Inc."
+  }
+ },
+ "LAMR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LAMR",
+   "category": null,
+   "industry": "REIT - Specialty",
+   "longName": "Lamar Advertising Company",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Lamar Advertising Company"
+  }
+ },
+ "LAZR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LAZR",
+   "category": null,
+   "industry": "",
+   "longName": "Tema ETF Trust - Tema Photonics & Optical ETF",
+   "quoteType": "EQUITY",
+   "sector": "",
+   "shortName": "Tema Photonics & Optical ETF"
+  }
+ },
+ "LCID": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LCID",
+   "category": null,
+   "industry": "Auto Manufacturers",
+   "longName": "Lucid Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Lucid Group, Inc."
+  }
+ },
+ "LEVI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LEVI",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Levi Strauss & Co.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Levi Strauss & Co"
+  }
+ },
+ "LFMD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LFMD",
+   "category": null,
+   "industry": "Health Information Services",
+   "longName": "LifeMD, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "LifeMD, Inc."
+  }
+ },
+ "LFST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LFST",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "LifeStance Health Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "LifeStance Health Group, Inc."
+  }
+ },
+ "LH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LH",
+   "category": null,
+   "industry": "Diagnostics & Research",
+   "longName": "Labcorp Holdings Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Labcorp Holdings Inc."
+  }
+ },
+ "LII": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LII",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Lennox International Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Lennox International, Inc."
+  }
+ },
+ "LIN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LIN",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "Linde plc",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Linde plc"
+  }
+ },
+ "LISN.SW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LISN.SW",
+   "category": null,
+   "industry": "Confectioners",
+   "longName": "Chocoladefabriken Lindt & Spr\u00fcngli AG",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "LINDT N"
+  }
+ },
+ "LLY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LLY",
+   "category": null,
+   "industry": "Drug Manufacturers - General",
+   "longName": "Eli Lilly and Company",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Eli Lilly and Company"
   }
  },
  "LMT": {
@@ -1039,6 +3647,18 @@
    "shortName": "Lockheed Martin Corporation"
   }
  },
+ "LNN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LNN",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "Lindsay Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Lindsay Corporation"
+  }
+ },
  "LOTMY": {
   "err": null,
   "info": {
@@ -1049,6 +3669,30 @@
    "quoteType": "EQUITY",
    "sector": "Consumer Cyclical",
    "shortName": "LOTTOMATICA GROUP SPA"
+  }
+ },
+ "LOW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LOW",
+   "category": null,
+   "industry": "Home Improvement Retail",
+   "longName": "Lowe's Companies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Lowe's Companies, Inc."
+  }
+ },
+ "LPX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LPX",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Louisiana-Pacific Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Louisiana-Pacific Corporation"
   }
  },
  "LQD": {
@@ -1075,6 +3719,150 @@
    "shortName": "Lam Research Corporation"
   }
  },
+ "LTH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LTH",
+   "category": null,
+   "industry": "Leisure",
+   "longName": "Life Time Group Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Life Time Group Holdings, Inc."
+  }
+ },
+ "LTMC.MI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LTMC.MI",
+   "category": null,
+   "industry": "Gambling",
+   "longName": "Lottomatica Group S.p.A.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "LOTTOMATICA GROUP"
+  }
+ },
+ "LULU": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LULU",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "lululemon athletica inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "lululemon athletica inc."
+  }
+ },
+ "LUMN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LUMN",
+   "category": null,
+   "industry": "Telecom Services",
+   "longName": "Lumen Technologies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Lumen Technologies, Inc."
+  }
+ },
+ "LUXE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LUXE",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "LuxExperience B.V.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "LuxExperience B.V."
+  }
+ },
+ "LVMHF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LVMHF",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "LVMH Mo\u00ebt Hennessy - Louis Vuitton, Soci\u00e9t\u00e9 Europ\u00e9enne",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "LVMH-Moet Hennessy Louis Vuitto"
+  }
+ },
+ "LVS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LVS",
+   "category": null,
+   "industry": "Resorts & Casinos",
+   "longName": "Las Vegas Sands Corp.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Las Vegas Sands Corp."
+  }
+ },
+ "LW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LW",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Lamb Weston Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Lamb Weston Holdings, Inc."
+  }
+ },
+ "LYB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LYB",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "LyondellBasell Industries N.V.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "LyondellBasell Industries NV"
+  }
+ },
+ "LYV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LYV",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Live Nation Entertainment, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Live Nation Entertainment, Inc."
+  }
+ },
+ "M": {
+  "err": null,
+  "info": {
+   "_symbol_used": "M",
+   "category": null,
+   "industry": "Department Stores",
+   "longName": "Macy's, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Macy's Inc"
+  }
+ },
+ "MA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MA",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Mastercard Incorporated",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Mastercard Incorporated"
+  }
+ },
  "MAGS": {
   "err": null,
   "info": {
@@ -1085,6 +3873,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Roundhill Magnificent Seven ETF"
+  }
+ },
+ "MAR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MAR",
+   "category": null,
+   "industry": "Lodging",
+   "longName": "Marriott International, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Marriott International"
+  }
+ },
+ "MARA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MARA",
+   "category": null,
+   "industry": "Capital Markets",
+   "longName": "MARA Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "MARA Holdings, Inc."
+  }
+ },
+ "MAS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MAS",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Masco Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Masco Corporation"
   }
  },
  "MBB": {
@@ -1099,6 +3923,54 @@
    "shortName": "iShares MBS ETF"
   }
  },
+ "MCD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MCD",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "McDonald's Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "McDonald's Corporation"
+  }
+ },
+ "MCO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MCO",
+   "category": null,
+   "industry": "Financial Data & Stock Exchanges",
+   "longName": "Moody's Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Moody's Corporation"
+  }
+ },
+ "MDB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MDB",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "MongoDB, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "MongoDB, Inc."
+  }
+ },
+ "META": {
+  "err": null,
+  "info": {
+   "_symbol_used": "META",
+   "category": null,
+   "industry": "Internet Content & Information",
+   "longName": "Meta Platforms, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Meta Platforms, Inc."
+  }
+ },
  "METD": {
   "err": null,
   "info": {
@@ -1109,6 +3981,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Direxion Daily META Bear 1X ETF"
+  }
+ },
+ "MGM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MGM",
+   "category": null,
+   "industry": "Resorts & Casinos",
+   "longName": "MGM Resorts International",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "MGM Resorts International"
+  }
+ },
+ "MICC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MICC",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "The Magnum Ice Cream Company N.V.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Magnum Ice Cream Company N."
+  }
+ },
+ "MLM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MLM",
+   "category": null,
+   "industry": "Building Materials",
+   "longName": "Martin Marietta Materials, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Martin Marietta Materials, Inc."
   }
  },
  "MLPX": {
@@ -1123,6 +4031,102 @@
    "shortName": "Global X MLP & Energy Infrastru"
   }
  },
+ "MMM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MMM",
+   "category": null,
+   "industry": "Conglomerates",
+   "longName": "3M Company",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "3M Company"
+  }
+ },
+ "MNDY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MNDY",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "monday.com Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "monday.com Ltd."
+  }
+ },
+ "MNST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MNST",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "Monster Beverage Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Monster Beverage Corporation"
+  }
+ },
+ "MOS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MOS",
+   "category": null,
+   "industry": "Agricultural Inputs",
+   "longName": "The Mosaic Company",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Mosaic Company (The)"
+  }
+ },
+ "MP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MP",
+   "category": null,
+   "industry": "Other Industrial Metals & Mining",
+   "longName": "MP Materials Corp.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "MP Materials Corp."
+  }
+ },
+ "MPC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MPC",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "Marathon Petroleum Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Marathon Petroleum Corporation"
+  }
+ },
+ "MPLX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MPLX",
+   "category": null,
+   "industry": "Oil & Gas Midstream",
+   "longName": "MPLX LP",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "MPLX LP"
+  }
+ },
+ "MRVL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MRVL",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": "Marvell Technology, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Marvell Technology, Inc."
+  }
+ },
  "MSFD": {
   "err": null,
   "info": {
@@ -1133,6 +4137,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Direxion Daily MSFT Bear 1X ETF"
+  }
+ },
+ "MSFT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MSFT",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Microsoft Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Microsoft Corporation"
+  }
+ },
+ "MSM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MSM",
+   "category": null,
+   "industry": "Industrial Distribution",
+   "longName": "MSC Industrial Direct Co., Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "MSC Industrial Direct Company, "
+  }
+ },
+ "MSTR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MSTR",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Strategy Inc",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Strategy Inc"
   }
  },
  "MSTY": {
@@ -1147,6 +4187,18 @@
    "shortName": "YieldMax MSTR Option Income Str"
   }
  },
+ "MTDR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MTDR",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Matador Resources Company",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Matador Resources Company"
+  }
+ },
  "MTUM": {
   "err": null,
   "info": {
@@ -1157,6 +4209,30 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares MSCI USA Momentum Facto"
+  }
+ },
+ "MUSA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MUSA",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Murphy USA Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Murphy USA Inc."
+  }
+ },
+ "MZTI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MZTI",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "The Marzetti Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Marzetti Company"
   }
  },
  "NBIS": {
@@ -1171,6 +4247,66 @@
    "shortName": "Nebius Group N.V."
   }
  },
+ "NCLH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NCLH",
+   "category": null,
+   "industry": "Travel Services",
+   "longName": "Norwegian Cruise Line Holdings Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Norwegian Cruise Line Holdings "
+  }
+ },
+ "NEE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NEE",
+   "category": null,
+   "industry": "Utilities - Regulated Electric",
+   "longName": "NextEra Energy, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Utilities",
+   "shortName": "NextEra Energy, Inc."
+  }
+ },
+ "NEM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NEM",
+   "category": null,
+   "industry": "Gold",
+   "longName": "Newmont Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Newmont Corporation"
+  }
+ },
+ "NET": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NET",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Cloudflare, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Cloudflare, Inc."
+  }
+ },
+ "NFLX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NFLX",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Netflix, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Netflix, Inc."
+  }
+ },
  "NFRA": {
   "err": null,
   "info": {
@@ -1183,6 +4319,22 @@
    "shortName": "FlexShares STOXX Global Broad I"
   }
  },
+ "NKE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NKE",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "NIKE, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Nike, Inc."
+  }
+ },
+ "NKLA": {
+  "err": "empty yfinance info",
+  "info": null
+ },
  "NORW": {
   "err": null,
   "info": {
@@ -1193,6 +4345,66 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Global X MSCI Norway ETF"
+  }
+ },
+ "NOW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NOW",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "ServiceNow, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "ServiceNow, Inc."
+  }
+ },
+ "NTR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NTR",
+   "category": null,
+   "industry": "Agricultural Inputs",
+   "longName": "Nutrien Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Nutrien Ltd."
+  }
+ },
+ "NVDA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NVDA",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": "NVIDIA Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "NVIDIA Corporation"
+  }
+ },
+ "NVO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NVO",
+   "category": null,
+   "industry": "Drug Manufacturers - General",
+   "longName": "Novo Nordisk A/S",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Novo Nordisk A/S"
+  }
+ },
+ "NYT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NYT",
+   "category": null,
+   "industry": "Publishing",
+   "longName": "The New York Times Company",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "New York Times Company (The)"
   }
  },
  "OC": {
@@ -1207,6 +4419,30 @@
    "shortName": "Owens Corning Inc"
   }
  },
+ "ODFL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ODFL",
+   "category": null,
+   "industry": "Trucking",
+   "longName": "Old Dominion Freight Line, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Old Dominion Freight Line, Inc."
+  }
+ },
+ "OFRM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OFRM",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Once Upon A Farm, PBC",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Once Upon a Farm, PBC"
+  }
+ },
  "OIH": {
   "err": null,
   "info": {
@@ -1217,6 +4453,78 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "VanEck Oil Services ETF"
+  }
+ },
+ "OKTA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OKTA",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Okta, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Okta, Inc."
+  }
+ },
+ "OLLI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OLLI",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "Ollie's Bargain Outlet Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Ollie's Bargain Outlet Holdings"
+  }
+ },
+ "OMC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OMC",
+   "category": null,
+   "industry": "Advertising Agencies",
+   "longName": "Omnicom Group Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Omnicom Group Inc."
+  }
+ },
+ "OMF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OMF",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "OneMain Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "OneMain Holdings, Inc."
+  }
+ },
+ "ONEW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ONEW",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "OneWater Marine Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "OneWater Marine Inc."
+  }
+ },
+ "ONON": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ONON",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "On Holding AG",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "On Holding AG"
   }
  },
  "ONTO": {
@@ -1231,6 +4539,78 @@
    "shortName": "Onto Innovation Inc."
   }
  },
+ "OPEN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OPEN",
+   "category": null,
+   "industry": "Real Estate Services",
+   "longName": "Opendoor Technologies Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Opendoor Technologies Inc"
+  }
+ },
+ "ORCL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ORCL",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Oracle Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Oracle Corporation"
+  }
+ },
+ "ORLY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ORLY",
+   "category": null,
+   "industry": "Auto Parts",
+   "longName": "O'Reilly Automotive, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "O'Reilly Automotive, Inc."
+  }
+ },
+ "OUT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OUT",
+   "category": null,
+   "industry": "REIT - Specialty",
+   "longName": "OUTFRONT Media Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "OUTFRONT Media Inc."
+  }
+ },
+ "OXM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OXM",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Oxford Industries, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Oxford Industries, Inc."
+  }
+ },
+ "PAG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PAG",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "Penske Automotive Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Penske Automotive Group, Inc."
+  }
+ },
  "PALL": {
   "err": null,
   "info": {
@@ -1241,6 +4621,54 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "abrdn Physical Palladium Shares"
+  }
+ },
+ "PAM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PAM",
+   "category": null,
+   "industry": "Conglomerates",
+   "longName": "Pampa Energ\u00eda S.A.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Pampa Energia S.A."
+  }
+ },
+ "PANDY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PANDY",
+   "category": null,
+   "industry": null,
+   "longName": null,
+   "quoteType": "NONE",
+   "sector": null,
+   "shortName": null
+  }
+ },
+ "PANW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PANW",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Palo Alto Networks, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Palo Alto Networks, Inc."
+  }
+ },
+ "PATH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PATH",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "UiPath, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "UiPath, Inc."
   }
  },
  "PAVE": {
@@ -1255,6 +4683,54 @@
    "shortName": "Global X U.S. Infrastructure De"
   }
  },
+ "PBF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PBF",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "PBF Energy Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "PBF Energy Inc."
+  }
+ },
+ "PBR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PBR",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "Petr\u00f3leo Brasileiro S.A. - Petrobras",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Petroleo Brasileiro S.A. Petrob"
+  }
+ },
+ "PBR-A": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PBR-A",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "Petr\u00f3leo Brasileiro S.A. - Petrobras",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Petroleo Brasileiro S.A. Petrob"
+  }
+ },
+ "PCAR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PCAR",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "PACCAR Inc",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "PACCAR Inc."
+  }
+ },
  "PDBC": {
   "err": null,
   "info": {
@@ -1267,6 +4743,42 @@
    "shortName": "Invesco Optimum Yield Diversifi"
   }
  },
+ "PEB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PEB",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "Pebblebrook Hotel Trust",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Pebblebrook Hotel Trust"
+  }
+ },
+ "PEGA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PEGA",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Pegasystems Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Pegasystems Inc."
+  }
+ },
+ "PEP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PEP",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "PepsiCo, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Pepsico, Inc."
+  }
+ },
  "PFF": {
   "err": null,
   "info": {
@@ -1277,6 +4789,66 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares Preferred and Income Se"
+  }
+ },
+ "PINS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PINS",
+   "category": null,
+   "industry": "Internet Content & Information",
+   "longName": "Pinterest, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Pinterest, Inc."
+  }
+ },
+ "PK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PK",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "Park Hotels & Resorts Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Park Hotels & Resorts Inc."
+  }
+ },
+ "PLNT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PLNT",
+   "category": null,
+   "industry": "Leisure",
+   "longName": "Planet Fitness, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Planet Fitness, Inc."
+  }
+ },
+ "PLUG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PLUG",
+   "category": null,
+   "industry": "Electrical Equipment & Parts",
+   "longName": "Plug Power Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Plug Power, Inc."
+  }
+ },
+ "PM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PM",
+   "category": null,
+   "industry": "Tobacco",
+   "longName": "Philip Morris International Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Philip Morris International Inc"
   }
  },
  "POET": {
@@ -1303,6 +4875,102 @@
    "shortName": "abrdn Physical Platinum Shares "
   }
  },
+ "PR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PR",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Permian Resources Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Permian Resources Corporation"
+  }
+ },
+ "PRMB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PRMB",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "Primo Brands Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Primo Brands Corporation"
+  }
+ },
+ "PRVA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PRVA",
+   "category": null,
+   "industry": "Health Information Services",
+   "longName": "Privia Health Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Privia Health Group, Inc."
+  }
+ },
+ "PSKY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PSKY",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Paramount Skydance Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Paramount Skydance Corporation"
+  }
+ },
+ "PSX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PSX",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "Phillips 66",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Phillips 66"
+  }
+ },
+ "PUM.DE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PUM.DE",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "PUMA SE",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "PUMA SE                       I"
+  }
+ },
+ "PVH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PVH",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "PVH Corp.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "PVH Corp."
+  }
+ },
+ "PYPL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PYPL",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "PayPal Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "PayPal Holdings, Inc."
+  }
+ },
  "QQQ": {
   "err": null,
   "info": {
@@ -1327,6 +4995,294 @@
    "shortName": "Restaurant Brands International"
   }
  },
+ "R": {
+  "err": null,
+  "info": {
+   "_symbol_used": "R",
+   "category": null,
+   "industry": "Rental & Leasing Services",
+   "longName": "Ryder System, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Ryder System, Inc."
+  }
+ },
+ "RBLX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RBLX",
+   "category": null,
+   "industry": "Electronic Gaming & Multimedia",
+   "longName": "Roblox Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Roblox Corporation"
+  }
+ },
+ "RCL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RCL",
+   "category": null,
+   "industry": "Travel Services",
+   "longName": "Royal Caribbean Cruises Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Royal Caribbean Cruises Ltd."
+  }
+ },
+ "RDDT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RDDT",
+   "category": null,
+   "industry": "Internet Content & Information",
+   "longName": "Reddit, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Reddit, Inc."
+  }
+ },
+ "RDNT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RDNT",
+   "category": null,
+   "industry": "Diagnostics & Research",
+   "longName": "RadNet, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "RadNet, Inc."
+  }
+ },
+ "REAL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "REAL",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "The RealReal, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "The RealReal, Inc."
+  }
+ },
+ "RH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RH",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "RH",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "RH"
+  }
+ },
+ "RHP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RHP",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "Ryman Hospitality Properties, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Ryman Hospitality Properties, I"
+  }
+ },
+ "RI.PA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RI.PA",
+   "category": null,
+   "industry": "Beverages - Wineries & Distilleries",
+   "longName": "Pernod Ricard SA",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "PERNOD RICARD"
+  }
+ },
+ "RIO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RIO",
+   "category": null,
+   "industry": "Other Industrial Metals & Mining",
+   "longName": "Rio Tinto Group",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Rio Tinto Plc"
+  }
+ },
+ "RIOT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RIOT",
+   "category": null,
+   "industry": "Capital Markets",
+   "longName": "Riot Platforms, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Riot Platforms, Inc."
+  }
+ },
+ "RKT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RKT",
+   "category": null,
+   "industry": "Mortgage Finance",
+   "longName": "Rocket Companies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Rocket Companies, Inc."
+  }
+ },
+ "RL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RL",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Ralph Lauren Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Ralph Lauren Corporation"
+  }
+ },
+ "RMD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RMD",
+   "category": null,
+   "industry": "Medical Instruments & Supplies",
+   "longName": "ResMed Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "ResMed Inc."
+  }
+ },
+ "RMS.PA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RMS.PA",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "Herm\u00e8s International Soci\u00e9t\u00e9 en commandite par actions",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "HERMES INTL"
+  }
+ },
+ "ROK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ROK",
+   "category": null,
+   "industry": "Specialty Industrial Machinery",
+   "longName": "Rockwell Automation, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Rockwell Automation, Inc."
+  }
+ },
+ "ROKU": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ROKU",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Roku, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Roku, Inc."
+  }
+ },
+ "ROP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ROP",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Roper Technologies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Roper Technologies, Inc."
+  }
+ },
+ "ROST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ROST",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Ross Stores, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Ross Stores, Inc."
+  }
+ },
+ "RPI.L": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RPI.L",
+   "category": null,
+   "industry": "Electronic Components",
+   "longName": "Raspberry Pi Holdings plc",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "RASPBERRY PI HOLDINGS PLC ORD 0"
+  }
+ },
+ "RRC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RRC",
+   "category": null,
+   "industry": "Oil & Gas E&P",
+   "longName": "Range Resources Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Range Resources Corporation"
+  }
+ },
+ "RRGB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RRGB",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Red Robin Gourmet Burgers, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Red Robin Gourmet Burgers, Inc."
+  }
+ },
+ "RSG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RSG",
+   "category": null,
+   "industry": "Waste Management",
+   "longName": "Republic Services, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Republic Services, Inc."
+  }
+ },
+ "RSI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RSI",
+   "category": null,
+   "industry": "Gambling",
+   "longName": "Rush Street Interactive, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Rush Street Interactive, Inc."
+  }
+ },
  "RSP": {
   "err": null,
   "info": {
@@ -1337,6 +5293,66 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Invesco S&P 500 Equal Weight ET"
+  }
+ },
+ "RTO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RTO",
+   "category": null,
+   "industry": "Specialty Business Services",
+   "longName": "Rentokil Initial plc",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Rentokil Initial plc"
+  }
+ },
+ "RVLV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RVLV",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "Revolve Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Revolve Group, Inc."
+  }
+ },
+ "SAH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SAH",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "Sonic Automotive, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Sonic Automotive, Inc."
+  }
+ },
+ "SAIA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SAIA",
+   "category": null,
+   "industry": "Trucking",
+   "longName": "Saia, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Saia, Inc."
+  }
+ },
+ "SBH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SBH",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Sally Beauty Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Sally Beauty Holdings, Inc. (Na"
   }
  },
  "SBIT": {
@@ -1351,6 +5367,18 @@
    "shortName": "ProShares UltraShort Bitcoin ET"
   }
  },
+ "SBUX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SBUX",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Starbucks Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Starbucks Corporation"
+  }
+ },
  "SETH": {
   "err": null,
   "info": {
@@ -1361,6 +5389,102 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "ProShares Short Ether ETF"
+  }
+ },
+ "SFD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SFD",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Smithfield Foods, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Smithfield Foods, Inc."
+  }
+ },
+ "SFM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SFM",
+   "category": null,
+   "industry": "Grocery Stores",
+   "longName": "Sprouts Farmers Market, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Sprouts Farmers Market, Inc."
+  }
+ },
+ "SG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SG",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Sweetgreen, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Sweetgreen, Inc."
+  }
+ },
+ "SGRY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SGRY",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "Surgery Partners, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Surgery Partners, Inc."
+  }
+ },
+ "SHEL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SHEL",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "Shell plc",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Shell PLC"
+  }
+ },
+ "SHOO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SHOO",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "Steven Madden, Ltd.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Steven Madden, Ltd."
+  }
+ },
+ "SHOP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SHOP",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Shopify Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Shopify Inc."
+  }
+ },
+ "SHW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SHW",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "The Sherwin-Williams Company",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Sherwin-Williams Company (The)"
   }
  },
  "SHY": {
@@ -1375,6 +5499,18 @@
    "shortName": "iShares 1-3 Year Treasury Bond "
   }
  },
+ "SIG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SIG",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "Signet Jewelers Limited",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Signet Jewelers Limited"
+  }
+ },
  "SIL": {
   "err": null,
   "info": {
@@ -1385,6 +5521,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Global X Silver Miners ETF"
+  }
+ },
+ "SIMO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SIMO",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": "Silicon Motion Technology Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Silicon Motion Technology Corpo"
+  }
+ },
+ "SITM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SITM",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": "SiTime Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "SiTime Corporation"
+  }
+ },
+ "SJM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SJM",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "The J. M. Smucker Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The J.M. Smucker Company"
   }
  },
  "SLV": {
@@ -1411,6 +5583,54 @@
    "shortName": "VanEck Semiconductor ETF"
   }
  },
+ "SMPL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SMPL",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "The Simply Good Foods Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Simply Good Foods Company"
+  }
+ },
+ "SN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SN",
+   "category": null,
+   "industry": "Furnishings, Fixtures & Appliances",
+   "longName": "SharkNinja, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "SharkNinja, Inc."
+  }
+ },
+ "SNOW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SNOW",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Snowflake Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Snowflake Inc."
+  }
+ },
+ "SOFI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SOFI",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "SoFi Technologies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "SoFi Technologies, Inc."
+  }
+ },
  "SOLZ": {
   "err": null,
   "info": {
@@ -1421,6 +5641,42 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Solana ETF"
+  }
+ },
+ "SPGI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SPGI",
+   "category": null,
+   "industry": "Financial Data & Stock Exchanges",
+   "longName": "S&P Global Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "S&P Global Inc."
+  }
+ },
+ "SPHR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SPHR",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "Sphere Entertainment Co.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Sphere Entertainment Co."
+  }
+ },
+ "SPT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SPT",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Sprout Social, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Sprout Social, Inc"
   }
  },
  "SPY": {
@@ -1459,6 +5715,30 @@
    "shortName": "SunOpta, Inc."
   }
  },
+ "STLD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "STLD",
+   "category": null,
+   "industry": "Steel",
+   "longName": "Steel Dynamics, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Steel Dynamics, Inc."
+  }
+ },
+ "SUJA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SUJA",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "Suja Life, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Suja Life, Inc."
+  }
+ },
  "SWBI": {
   "err": null,
   "info": {
@@ -1471,6 +5751,78 @@
    "shortName": "Smith & Wesson Brands, Inc."
   }
  },
+ "SXT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SXT",
+   "category": null,
+   "industry": "Specialty Chemicals",
+   "longName": "Sensient Technologies Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Sensient Technologies Corporati"
+  }
+ },
+ "SYF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SYF",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Synchrony Financial",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Synchrony Financial"
+  }
+ },
+ "T": {
+  "err": null,
+  "info": {
+   "_symbol_used": "T",
+   "category": null,
+   "industry": "Telecom Services",
+   "longName": "AT&T Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "AT&T Inc."
+  }
+ },
+ "TAP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TAP",
+   "category": null,
+   "industry": "Beverages - Brewers",
+   "longName": "Molson Coors Beverage Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Molson Coors Beverage Company"
+  }
+ },
+ "TEAM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TEAM",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Atlassian Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Atlassian Corporation"
+  }
+ },
+ "TGS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TGS",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "Transportadora de Gas del Sur S.A.",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Transportadora de Gas del Sur S"
+  }
+ },
  "TGT": {
   "err": null,
   "info": {
@@ -1481,6 +5833,18 @@
    "quoteType": "EQUITY",
    "sector": "Consumer Defensive",
    "shortName": "Target Corporation"
+  }
+ },
+ "THC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "THC",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "Tenet Healthcare Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Tenet Healthcare Corporation"
   }
  },
  "TINY": {
@@ -1507,6 +5871,42 @@
    "shortName": "iShares TIPS Bond ETF"
   }
  },
+ "TJX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TJX",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "The TJX Companies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "TJX Companies, Inc. (The)"
+  }
+ },
+ "TKO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TKO",
+   "category": null,
+   "industry": "Entertainment",
+   "longName": "TKO Group Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "TKO Group Holdings, Inc."
+  }
+ },
+ "TLN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TLN",
+   "category": null,
+   "industry": "Utilities - Independent Power Producers",
+   "longName": "Talen Energy Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Utilities",
+   "shortName": "Talen Energy Corporation"
+  }
+ },
  "TLT": {
   "err": null,
   "info": {
@@ -1517,6 +5917,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares 20+ Year Treasury Bond "
+  }
+ },
+ "TMUS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TMUS",
+   "category": null,
+   "industry": "Telecom Services",
+   "longName": "T-Mobile US, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "T-Mobile US, Inc."
   }
  },
  "TOL": {
@@ -1531,6 +5943,30 @@
    "shortName": "Toll Brothers, Inc."
   }
  },
+ "TPB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TPB",
+   "category": null,
+   "industry": "Tobacco",
+   "longName": "Turning Point Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Turning Point Brands, Inc."
+  }
+ },
+ "TPR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TPR",
+   "category": null,
+   "industry": "Luxury Goods",
+   "longName": "Tapestry, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Tapestry, Inc."
+  }
+ },
  "TPYP": {
   "err": null,
   "info": {
@@ -1541,6 +5977,66 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Tortoise North American Pipelin"
+  }
+ },
+ "TRP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TRP",
+   "category": null,
+   "industry": "Oil & Gas Midstream",
+   "longName": "TC Energy Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "TC Energy Corporation"
+  }
+ },
+ "TRU": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TRU",
+   "category": null,
+   "industry": "Financial Data & Stock Exchanges",
+   "longName": "TransUnion",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "TransUnion"
+  }
+ },
+ "TSCO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TSCO",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Tractor Supply Company",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Tractor Supply Company"
+  }
+ },
+ "TSLA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TSLA",
+   "category": null,
+   "industry": "Auto Manufacturers",
+   "longName": "Tesla, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Tesla, Inc."
+  }
+ },
+ "TSN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TSN",
+   "category": null,
+   "industry": "Farm Products",
+   "longName": "Tyson Foods, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Tyson Foods, Inc."
   }
  },
  "TSSI": {
@@ -1555,6 +6051,54 @@
    "shortName": "TSS, Inc."
   }
  },
+ "TT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TT",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Trane Technologies plc",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Trane Technologies plc"
+  }
+ },
+ "TTD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TTD",
+   "category": null,
+   "industry": "Advertising Agencies",
+   "longName": "The Trade Desk, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "The Trade Desk, Inc."
+  }
+ },
+ "TTE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TTE",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "TotalEnergies SE",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "TotalEnergies SE"
+  }
+ },
+ "TTWO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TTWO",
+   "category": null,
+   "industry": "Electronic Gaming & Multimedia",
+   "longName": "Take-Two Interactive Software, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Take-Two Interactive Software, "
+  }
+ },
  "TUA": {
   "err": null,
   "info": {
@@ -1565,6 +6109,78 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Simplify Short Term Treasury Fu"
+  }
+ },
+ "TWLO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TWLO",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Twilio Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Twilio Inc."
+  }
+ },
+ "TXG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TXG",
+   "category": null,
+   "industry": "Health Information Services",
+   "longName": "10x Genomics, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "10x Genomics, Inc."
+  }
+ },
+ "TXRH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TXRH",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Texas Roadhouse, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Texas Roadhouse, Inc."
+  }
+ },
+ "U": {
+  "err": null,
+  "info": {
+   "_symbol_used": "U",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Unity Software Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Unity Software Inc."
+  }
+ },
+ "UAA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UAA",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "Under Armour, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Under Armour, Inc."
+  }
+ },
+ "UBER": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UBER",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Uber Technologies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Uber Technologies, Inc."
   }
  },
  "UGA": {
@@ -1579,6 +6195,66 @@
    "shortName": "United States Gasoline Fund LP"
   }
  },
+ "UHS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UHS",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "Universal Health Services, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Universal Health Services, Inc."
+  }
+ },
+ "UL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UL",
+   "category": null,
+   "industry": "Household & Personal Products",
+   "longName": "Unilever PLC",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Unilever PLC"
+  }
+ },
+ "ULS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ULS",
+   "category": null,
+   "industry": "Specialty Business Services",
+   "longName": "UL Solutions Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "UL Solutions Inc."
+  }
+ },
+ "ULTA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ULTA",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Ulta Beauty, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Ulta Beauty, Inc."
+  }
+ },
+ "UNH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UNH",
+   "category": null,
+   "industry": "Healthcare Plans",
+   "longName": "UnitedHealth Group Incorporated",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "UnitedHealth Group Incorporated"
+  }
+ },
  "URA": {
   "err": null,
   "info": {
@@ -1589,6 +6265,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Global X Uranium ETF"
+  }
+ },
+ "URI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "URI",
+   "category": null,
+   "industry": "Rental & Leasing Services",
+   "longName": "United Rentals, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "United Rentals, Inc."
   }
  },
  "USMV": {
@@ -1615,6 +6303,30 @@
    "shortName": "United States Oil Fund"
   }
  },
+ "USPH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "USPH",
+   "category": null,
+   "industry": "Medical Care Facilities",
+   "longName": "U.S. Physical Therapy, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "U.S. Physical Therapy, Inc."
+  }
+ },
+ "UTZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UTZ",
+   "category": null,
+   "industry": "Packaged Foods",
+   "longName": "Utz Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Utz Brands Inc"
+  }
+ },
  "UUP": {
   "err": null,
   "info": {
@@ -1625,6 +6337,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Invesco DB USD Index Bullish Fu"
+  }
+ },
+ "V": {
+  "err": null,
+  "info": {
+   "_symbol_used": "V",
+   "category": null,
+   "industry": "Credit Services",
+   "longName": "Visa Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Visa Inc."
   }
  },
  "VCLT": {
@@ -1639,6 +6363,30 @@
    "shortName": "Vanguard Long-Term Corporate Bo"
   }
  },
+ "VFC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VFC",
+   "category": null,
+   "industry": "Apparel Manufacturing",
+   "longName": "V.F. Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "V.F. Corporation"
+  }
+ },
+ "VG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VG",
+   "category": null,
+   "industry": "Oil & Gas Midstream",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Venture Global, Inc."
+  }
+ },
  "VGK": {
   "err": null,
   "info": {
@@ -1651,6 +6399,42 @@
    "shortName": "Vanguard FTSEEuropean ETF"
   }
  },
+ "VIK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VIK",
+   "category": null,
+   "industry": "Travel Services",
+   "longName": "Viking Holdings Ltd",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Viking Holdings Ltd"
+  }
+ },
+ "VLO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VLO",
+   "category": null,
+   "industry": "Oil & Gas Refining & Marketing",
+   "longName": "Valero Energy Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "Valero Energy Corporation"
+  }
+ },
+ "VLTO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VLTO",
+   "category": null,
+   "industry": "Pollution & Treatment Controls",
+   "longName": "Veralto Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Veralto Corp"
+  }
+ },
  "VMC": {
   "err": null,
   "info": {
@@ -1661,6 +6445,54 @@
    "quoteType": "EQUITY",
    "sector": "Basic Materials",
    "shortName": "Vulcan Materials Company (Holdi"
+  }
+ },
+ "VOLV-B.ST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VOLV-B.ST",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "AB Volvo (publ)",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Volvo, AB ser. B"
+  }
+ },
+ "VRNO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VRNO",
+   "category": null,
+   "industry": "",
+   "longName": "Verano Holdings Corp.",
+   "quoteType": "EQUITY",
+   "sector": "",
+   "shortName": "Verano Holdings Corp."
+  }
+ },
+ "VSCO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VSXY",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Victorias Secret & Co."
+  }
+ },
+ "VST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VST",
+   "category": null,
+   "industry": "Utilities - Independent Power Producers",
+   "longName": "Vistra Corp.",
+   "quoteType": "EQUITY",
+   "sector": "Utilities",
+   "shortName": "Vistra Corp."
   }
  },
  "VSXY": {
@@ -1685,6 +6517,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Vanguard Total World Stock Inde"
+  }
+ },
+ "VVV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VVV",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "Valvoline Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Valvoline Inc."
   }
  },
  "VXF": {
@@ -1723,6 +6567,162 @@
    "shortName": "Vanguard International High Div"
   }
  },
+ "VZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VZ",
+   "category": null,
+   "industry": "Telecom Services",
+   "longName": "Verizon Communications Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Verizon Communications Inc."
+  }
+ },
+ "W": {
+  "err": null,
+  "info": {
+   "_symbol_used": "W",
+   "category": null,
+   "industry": "Internet Retail",
+   "longName": "Wayfair Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Wayfair Inc."
+  }
+ },
+ "WCN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WCN",
+   "category": null,
+   "industry": "Waste Management",
+   "longName": "Waste Connections, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Waste Connections, Inc."
+  }
+ },
+ "WDAY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WDAY",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Workday, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Workday, Inc."
+  }
+ },
+ "WFC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WFC",
+   "category": null,
+   "industry": "Banks - Diversified",
+   "longName": "Wells Fargo & Company",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Wells Fargo & Company"
+  }
+ },
+ "WH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WH",
+   "category": null,
+   "industry": "Lodging",
+   "longName": "Wyndham Hotels & Resorts, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Wyndham Hotels & Resorts, Inc."
+  }
+ },
+ "WING": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WING",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Wingstop Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Wingstop Inc."
+  }
+ },
+ "WM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WM",
+   "category": null,
+   "industry": "Waste Management",
+   "longName": "Waste Management, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Waste Management, Inc."
+  }
+ },
+ "WMS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WMS",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Advanced Drainage Systems, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Advanced Drainage Systems, Inc."
+  }
+ },
+ "WMT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WMT",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "Walmart Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Walmart Inc."
+  }
+ },
+ "WRBY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WRBY",
+   "category": null,
+   "industry": "Medical Instruments & Supplies",
+   "longName": "Warby Parker Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Warby Parker Inc."
+  }
+ },
+ "WSM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WSM",
+   "category": null,
+   "industry": "Specialty Retail",
+   "longName": "Williams-Sonoma, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Williams-Sonoma, Inc."
+  }
+ },
+ "WST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WST",
+   "category": null,
+   "industry": "Medical Instruments & Supplies",
+   "longName": "West Pharmaceutical Services, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "West Pharmaceutical Services, I"
+  }
+ },
  "XAR": {
   "err": null,
   "info": {
@@ -1745,6 +6745,30 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "State Street SPDR S&P Homebuild"
+  }
+ },
+ "XHR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XHR",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "Xenia Hotels & Resorts, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Xenia Hotels & Resorts, Inc."
+  }
+ },
+ "XIFR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XIFR",
+   "category": null,
+   "industry": "Utilities - Renewable",
+   "longName": "XPLR Infrastructure, LP",
+   "quoteType": "EQUITY",
+   "sector": "Utilities",
+   "shortName": "XPLR Infrastructure, LP"
   }
  },
  "XLB": {
@@ -1891,6 +6915,18 @@
    "shortName": "State Street SPDR S&P Metals & "
   }
  },
+ "XOM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XOM",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "ExxonMobil Holdings Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "ExxonMobil Holdings Corporation"
+  }
+ },
  "XOP": {
   "err": null,
   "info": {
@@ -1915,6 +6951,18 @@
    "shortName": "State Street SPDR S&P Telecom E"
   }
  },
+ "XYZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XYZ",
+   "category": null,
+   "industry": "Software - Infrastructure",
+   "longName": "Block, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Block, Inc."
+  }
+ },
  "YCS": {
   "err": null,
   "info": {
@@ -1925,6 +6973,90 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "ProShares UltraShort Yen New"
+  }
+ },
+ "YETI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "YETI",
+   "category": null,
+   "industry": "Leisure",
+   "longName": "YETI Holdings, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "YETI Holdings, Inc."
+  }
+ },
+ "YPF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "YPF",
+   "category": null,
+   "industry": "Oil & Gas Integrated",
+   "longName": "YPF Sociedad An\u00f3nima",
+   "quoteType": "EQUITY",
+   "sector": "Energy",
+   "shortName": "YPF Sociedad Anonima"
+  }
+ },
+ "YSWY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "YSWY",
+   "category": null,
+   "industry": "Grocery Stores",
+   "longName": "Yesway, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Yesway, Inc."
+  }
+ },
+ "YUM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "YUM",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Yum! Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Yum! Brands, Inc."
+  }
+ },
+ "ZG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ZG",
+   "category": null,
+   "industry": "Internet Content & Information",
+   "longName": "Zillow Group, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Zillow Group, Inc."
+  }
+ },
+ "ZI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ZI",
+   "category": null,
+   "industry": null,
+   "longName": null,
+   "quoteType": "NONE",
+   "sector": null,
+   "shortName": null
+  }
+ },
+ "ZM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ZM",
+   "category": null,
+   "industry": "Software - Application",
+   "longName": "Zoom Communications, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Zoom Communications, Inc."
   }
  },
  "ZROZ": {

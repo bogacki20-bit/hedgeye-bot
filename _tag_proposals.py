@@ -77,6 +77,10 @@ def classify_rule_based(ticker: str):
         return ("currency", None)
     if t in CRYPTO_SPOT:
         return ("crypto", "Digital Assets")
+    # Position Monitor crypto pairs: BTCUSD, SOLUSD, AVAXUSD, RUNEUSD …
+    # (6+ chars ending USD — no listed equity ticker fits that shape).
+    if t.endswith("USD") and len(t) >= 6:
+        return ("crypto", "Digital Assets")
     return None
 
 

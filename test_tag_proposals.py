@@ -29,6 +29,10 @@ check("BITCOIN is crypto", classify_rule_based("BITCOIN"),
 check("BTC is crypto", classify_rule_based("BTC"),
       ("crypto", "Digital Assets"))
 check("SPY needs fetch", classify_rule_based("SPY"), None)
+check("BTCUSD is crypto (PM pair form)", classify_rule_based("BTCUSD"),
+      ("crypto", "Digital Assets"))
+check("RUNEUSD is crypto (PM pair form)", classify_rule_based("RUNEUSD"),
+      ("crypto", "Digital Assets"))
 check("IBIT needs fetch (ETF wrapper, not spot)",
       classify_rule_based("IBIT"), None)
 
