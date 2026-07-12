@@ -428,6 +428,23 @@ def _run_listener(token, allowed_chat_id):
                     log.info(f"Dropped message from non-whitelisted chat_id={chat_id}.")
                     continue
 
+                # Document uploads (sprint P2): phone -> bot -> doc_uploads.
+                # Whitelisted chat only (checked above). Crash-contained the
+                # same way as text dispatch.
+                doc = message.get("document")
+                if doc:
+                    log.info(f"Received document from {chat_id}: "
+                             f"{doc.get('file_name')!r} ({doc.get('file_size')} bytes)")
+                    try:
+                        from tools.doc_ingest import handle_telegram_document
+                        reply = handle_telegram_document(
+                            token, doc, caption=message.get("caption", ""))
+                    except Exception as e:
+                        log.error(f"document ingest failed: {e}", exc_info=True)
+                        reply = f"🛑 document ingest error: {e}"
+                    _send_message(token, chat_id, reply)
+                    continue
+
                 if not text:
                     log.info(f"Skipped non-text message from chat {chat_id}.")
                     continue

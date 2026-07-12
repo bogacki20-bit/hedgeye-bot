@@ -179,6 +179,19 @@ stage that hit 0.
 - **Writes:** `wrapper_links` / `wrapper_no_mapping`.
   *(handler: `tools/wrapper_links.py`)*
 
+### 📥 Document upload — send a file to the bot (no gate; the send IS the action)
+- **How:** download a report on your phone (SpotGamma founder's note /
+  Flow Patrol / Equity Hub export / Tier One Alpha — PDF, txt, md, csv,
+  html), share it to the bot chat like any Telegram attachment. Optional
+  caption helps classification.
+- **What happens:** text extracted (pypdf for PDFs) → classified
+  (`founders_note_am/pm` · `flow_patrol` · `equity_hub` · `tier1alpha` ·
+  `other` ⚠) → stored to `doc_uploads` (the RAG staging corpus) → loud
+  reply with kind, note date (`UNDATED ⚠` when none found), char count,
+  and a preview. 20MB Telegram cap. Unknown binaries store flagged, never
+  silently dropped. This replaces the dead 5K Equity-Hub scrape.
+- **Writes:** `doc_uploads` only. *(handler: `tools/doc_ingest.py`)*
+
 ### Trade decisions — log against an alert (no gate; the message IS the action)
 - `<TICKER> <VERB> [amount]` — e.g. `OIH BUY 100` (links to the ticker's
   most recent alert ≤48h)
