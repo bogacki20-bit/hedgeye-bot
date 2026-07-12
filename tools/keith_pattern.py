@@ -189,6 +189,33 @@ def _ss_now(cur) -> set:
         return set()
 
 
+SS_DROP_DAYS = 14      # a recent SS drop = invalidation tell (operator 7/12)
+
+
+def _ss_recent_drops(cur, days: int = SS_DROP_DAYS) -> dict:
+    """{ticker: last_drop_date} for SS drops in the last N days — Keith
+    pulling a name is the pattern-thesis invalidation tell."""
+    try:
+        cur.execute("""SELECT ticker, max(event_date) FROM ss_flow_events
+                       WHERE event = 'drop'
+                         AND event_date >= CURRENT_DATE - %s
+                       GROUP BY ticker""", (days,))
+        return dict(cur.fetchall())
+    except Exception as e:
+        _log.warning("keith: ss drops unavailable: %s", e)
+        return {}
+
+
+def ss_tag(t: str, ss_now: set, drops: dict) -> str:
+    """Render-tag (pure, tested): ·SS on roster · ✗SSdrop@date recently
+    dropped (invalidation — FLAGGED, not hidden, per doctrine)."""
+    if t in drops:
+        return f"{t}✗SSdrop@{drops[t]}"
+    if t in ss_now:
+        return f"{t}·SS"
+    return t
+
+
 def _scan(series, loose: bool):
     """(fired {t: setups}, brewing [(t, stage)], latest_date)."""
     fired, brewing, last = {}, [], []
@@ -210,14 +237,14 @@ def snapshot(loose: bool = True, recent_days: int = 3) -> str:
     with db_pg.get_conn() as c, c.cursor() as cur:
         series = build_series(cur)
         ss = _ss_now(cur)
+        drops = _ss_recent_drops(cur)
     fired, brewing, latest = _scan(series, loose)
 
-    def tag(t):
-        return f"{t}·SS" if t in ss else t
-    recent = sorted(f"{tag(t)}@{s['date']}" for t, ss_ in fired.items()
-                    for s in ss_
+    recent = sorted(f"{ss_tag(t, ss, drops)}@{s['date']}"
+                    for t, ss_ in fired.items() for s in ss_
                     if latest and (latest - s["date"]).days <= recent_days)
-    brew = sorted(f"{tag(t)}({st_[0]})" for t, st_ in brewing)   # (T)/(P)
+    brew = sorted(f"{ss_tag(t, ss, drops)}({st_[0]})"
+                  for t, st_ in brewing)                       # (T)/(P)
     mode = "loose" if loose else "strict"
     lines = [f"⚡KEITH add-pattern [{mode} · UNVALIDATED — paper signal, "
              f"corpora too young] as of {latest}",
@@ -226,7 +253,8 @@ def snapshot(loose: bool = True, recent_days: int = 3) -> str:
              + (" ".join(brew[:30]) or "none")
              + (f" +{len(brew) - 30} more" if len(brew) > 30 else ""),
              "pattern: bullish TREND · pullback · HELD trade support · "
-             "closed up. ·SS = on Signal Strength now. Your rules decide."]
+             "closed up. ·SS = on Signal Strength now · ✗SSdrop = dropped "
+             "from SS ≤14d (invalidation tell). Your rules decide."]
     return "\n".join(lines)
 
 
@@ -239,6 +267,7 @@ def weekly_report() -> str:
     with db_pg.get_conn() as c, c.cursor() as cur:
         series = build_series(cur)
         ss = _ss_now(cur)
+        drops = _ss_recent_drops(cur)
         cur.execute("SELECT ticker, event_date FROM ps_flow_events "
                     "WHERE event='add'")
         ps_adds = cur.fetchall()
@@ -262,13 +291,11 @@ def weekly_report() -> str:
     ps_h, ps_c = hits(ps_adds, 7)
     ss_h, ss_c = hits(ss_adds, 14)
 
-    def tag(t):
-        return f"{t}·SS" if t in ss else t
     lines = [f"⚡KEITH WEEKLY [{latest}] — paper-trade progress "
              f"(UNVALIDATED until recall proves out)",
              f"fired this week ({len(week)}): "
-             + (" ".join(sorted(f"{tag(t)}@{s['date']}" for t, s in week))
-                or "none"),
+             + (" ".join(sorted(f"{ss_tag(t, ss, drops)}@{s['date']}"
+                                for t, s in week)) or "none"),
              f"validation: PS-add recall {ps_h}/{ps_c} (7d lead) · "
              f"SS-add recall {ss_h}/{ss_c} (14d lead) — evaluable only; "
              f"corpora deepen weekly",

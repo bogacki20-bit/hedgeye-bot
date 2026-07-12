@@ -1,7 +1,7 @@
 """Fixture tests for the Keith add-pattern state machine (pure, no DB).
     python test_keith_pattern.py
 """
-from tools.keith_pattern import detect
+from tools.keith_pattern import detect, ss_tag
 
 
 def r(d, price, trend, lo=95.0, hi=110.0):
@@ -75,6 +75,15 @@ def test_rearm_allows_second_setup():
                    r(10, 97, "BULLISH")]        # HOLD -> second SETUP
     setups, _ = detect(rows)
     assert len(setups) == 2 and setups[1]["date"] == 10
+
+
+def test_ss_tags_drop_beats_roster():
+    # a recent SS drop is the invalidation tell — flagged, never hidden
+    assert ss_tag("BROS", {"BROS"}, {}) == "BROS·SS"
+    assert ss_tag("EXP", set(), {"EXP": "2026-07-08"}) == "EXP✗SSdrop@2026-07-08"
+    assert ss_tag("EXP", {"EXP"}, {"EXP": "2026-07-08"}) == \
+        "EXP✗SSdrop@2026-07-08"                    # drop outranks roster
+    assert ss_tag("KO", set(), {}) == "KO"
 
 
 def test_missing_range_days_never_crash():
