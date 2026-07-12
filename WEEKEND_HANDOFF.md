@@ -128,7 +128,13 @@ Late session (commits fe42467, 1522732, 8099c50, 1df3a2e — all deployed):
    TREND entry -> sells off -> holds TRADE support -> Keith adds. Detect
    across bot inventory to front-run Portfolio Solutions adds. BOT layer
    (Python-computed), not RAG.
-2. **tier1alpha deep parse** (on top of doc_uploads rows): 1M vs 3M vol,
+2. **Vision-OCR image ingest — BUILT 7/11 night** (live need: Tier One
+   Alpha arrives as screenshots). photo -> getFile -> Claude vision
+   transcription (extraction only, OCR_MODEL in doc_ingest) -> classify/
+   store; buffer-aware (DOC START -> photos -> DOC END = one stitched
+   row). VERIFY live next session; the deferred SS-PNG anchor can now
+   reuse ocr_image() directly.
+3. **tier1alpha deep parse** (on top of doc_uploads rows): 1M vs 3M vol,
    CTA buy/sell, risk-on/off -> actionable regime flags (e.g. 1M<3M ->
    vol-control funds set up to buy).
 3. Then the standing queue (unchanged, renumbered below).

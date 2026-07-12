@@ -181,6 +181,82 @@ def store_upload(file_name, kind, note_date, text, meta=None) -> int | None:
     return row_id
 
 
+# ═══════════════════════ photo / Vision-OCR ingest ══════════════════════════
+# Operator reality (7/11 night): Tier One Alpha arrives as SCREENSHOTS.
+# Photo -> getFile download -> Claude vision TRANSCRIBES (extraction, not
+# judgment — the LLM writes nothing but the transcribed text into the
+# staging table) -> same classify/store path as any document.
+# Composes with the paste buffer: while DOC START is active, each OCR'd
+# screenshot appends as a chunk; DOC END stitches them into ONE row.
+# A lone photo (no buffer) stores immediately as its own row.
+
+OCR_MODEL = "claude-sonnet-4-20250514"      # same model classifier.py uses
+OCR_MAX_TOKENS = 4000
+OCR_PROMPT = ("Transcribe ALL text visible in this image, exactly and "
+              "completely, preserving line structure and numbers. Output "
+              "ONLY the transcribed text — no commentary, no summary.")
+
+
+def ocr_image(data: bytes, mime: str = "image/jpeg") -> tuple:
+    """(text, note) — Claude vision transcription. Loud note on failure."""
+    import base64
+    try:
+        import anthropic
+        import os as _os
+        client = anthropic.Anthropic(api_key=_os.environ["ANTHROPIC_API_KEY"])
+        resp = client.messages.create(
+            model=OCR_MODEL, max_tokens=OCR_MAX_TOKENS,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": mime,
+                    "data": base64.b64encode(data).decode()}},
+                {"type": "text", "text": OCR_PROMPT}]}])
+        text = "".join(b.text for b in resp.content
+                       if getattr(b, "type", "") == "text").strip()
+        if not text:
+            return "", "vision returned no text"
+        return text, None
+    except Exception as e:
+        log.warning("vision OCR failed: %s", e)
+        return "", f"vision OCR failed: {e}"
+
+
+def handle_telegram_photo(token: str, photos: list, caption: str = "") -> str:
+    """One Telegram photo message -> OCR -> buffer-append (if DOC START
+    active) or immediate classified doc_uploads row. Never raises."""
+    if not photos:
+        return "🛑 photo message with no sizes — resend."
+    largest = max(photos, key=lambda p: p.get("file_size") or 0)
+    data = _download(token, largest.get("file_id", ""))
+    if data is None:
+        return "🛑 photo download from Telegram failed — resend."
+    text, note = ocr_image(data)
+    if not text:
+        return f"🛑 screenshot unreadable: {note}"
+
+    raw = _bs_get(BUFFER_KEY)
+    buf = json.loads(raw) if raw else None
+    if buf:                                 # active DOC buffer: append
+        buf["parts"].append(text)
+        _bs_set(BUFFER_KEY, json.dumps(buf))
+        return (f"📷→📋 OCR'd into buffer ({len(buf['parts'])} chunks, "
+                f"{len(text):,} chars this shot) — DOC END when done.")
+
+    hint = caption or "screenshot"
+    kind = classify_upload(hint, text)
+    note_date = parse_note_date(hint, text)
+    try:
+        row_id = store_upload(hint, kind, note_date, text,
+                              meta={"source_detail": "photo_ocr",
+                                    "ocr_note": note})
+    except Exception as e:
+        log.exception("photo store failed")
+        return f"🛑 OCR'd but store FAILED: {e}"
+    preview = re.sub(r"\s+", " ", text[:PREVIEW_CHARS]).strip()
+    return (summary_reply(kind, note_date, len(text), hint, note=note,
+                          preview=preview) + f"\n[id {row_id} · vision-OCR]")
+
+
 # ═══════════════════════ paste-capture (DOC START/END) ══════════════════════
 # Phone reality: copy-paste of a long report arrives as ~25 separate text
 # messages (Telegram splits at 4096). Buffer mode stitches them into ONE

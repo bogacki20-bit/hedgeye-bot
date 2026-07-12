@@ -115,6 +115,17 @@ stage that hit 0.
   (live price batch). Stored to `report_rows` kind=`now`. Read-only.
 - *(handler: `tools/report_now.py` via `tools/report.py`)*
 
+### `DAYPACK` — the whole day in one file
+- **Syntax:** `DAYPACK`
+- One .txt attachment for your daily LLM chat: REPORT v4 (upload mode) +
+  a FRESH `REPORT NOW` (live prices — expect the ~20-30s) + every document
+  uploaded in the last 24h under labeled headers (kind · date · chars).
+  Per-doc cap 40k chars (truncated loud); anything over 150k (the Equity
+  Hub CSV) is omitted with a note — upload that file to the chat
+  separately. Failing sections print their error in place; the pack always
+  assembles. Stored to `report_rows` kind=`daypack`.
+- *(handler: `tools/daypack.py`)*
+
 ### `MOVES` — bucket transitions
 - **Syntax:** `MOVES` or `MOVES <n>` (days, default 7)
 - Lists roster bucket transitions (`bench → active` etc.) with the quad
@@ -190,6 +201,11 @@ stage that hit 0.
   reply with kind, note date (`UNDATED ⚠` when none found), char count,
   and a preview. 20MB Telegram cap. Unknown binaries store flagged, never
   silently dropped. This replaces the dead 5K Equity-Hub scrape.
+- **Screenshots (Vision-OCR):** send photos directly — each is transcribed
+  by Claude vision (extraction only) and stored like any document. For a
+  MULTI-screenshot report (Tier One Alpha): `DOC START tier one alpha` →
+  send all the screenshots (each OCRs into the buffer) → `DOC END` = one
+  stitched row. A lone photo stores immediately; caption helps classify.
 - **Paste mode (no file needed):** `DOC START [hint]` → paste the whole
   report (Telegram splitting it into 25 messages is fine — the bot buffers
   silently, quiet ack every 10 chunks; pasted lines that look like commands

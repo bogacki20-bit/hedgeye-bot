@@ -343,12 +343,13 @@ def _dispatch_message(token, chat_id, text):
     def _wrap(): from tools.wrapper_links import handle_wrapper_command;  return handle_wrapper_command(text)
     def _tgt():  from tools.position_targets import handle_target_command; return handle_target_command(text)
     def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
+    def _dpk():  from tools.daypack import handle_daypack_command;        return handle_daypack_command(text)
 
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
                      ("quad", _quad), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
-                     ("report", _rpt)):
+                     ("report", _rpt), ("daypack", _dpk)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)
@@ -446,6 +447,22 @@ def _run_listener(token, allowed_chat_id):
                     except Exception as e:
                         log.error(f"document ingest failed: {e}", exc_info=True)
                         reply = f"🛑 document ingest error: {e}"
+                    _send_message(token, chat_id, reply)
+                    continue
+
+                # Photos: Vision-OCR ingest (7/11 — Tier One Alpha arrives
+                # as screenshots). Buffer-aware: appends to an active DOC
+                # START session, else stores immediately. Crash-contained.
+                if message.get("photo"):
+                    log.info(f"Received photo from {chat_id}")
+                    try:
+                        from tools.doc_ingest import handle_telegram_photo
+                        reply = handle_telegram_photo(
+                            token, message["photo"],
+                            caption=message.get("caption", ""))
+                    except Exception as e:
+                        log.error(f"photo ingest failed: {e}", exc_info=True)
+                        reply = f"🛑 photo ingest error: {e}"
                     _send_message(token, chat_id, reply)
                     continue
 
