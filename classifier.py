@@ -76,7 +76,20 @@ def classify_and_extract(item: dict) -> dict:
     """
     Pass a raw scraped/email item through Claude for classification and extraction.
     Returns the item dict enriched with structured fields.
+
+    GATED OFF BY DEFAULT (operator decision 2026-07-11): the per-email LLM
+    classify path had been dead for a while (retired model 404'd silently);
+    fixing the model string would have revived per-email spend the operator
+    chose not to resume. Behavior with the gate closed matches the status
+    quo: classified_type='other', no API call, dedicated Python parsers own
+    the pipeline. Revive anytime with CLASSIFIER_ENABLED=1 on Railway
+    (model via CLASSIFIER_MODEL, default claude-sonnet-5).
     """
+    if os.environ.get("CLASSIFIER_ENABLED", "0") != "1":
+        item["classified_type"] = "other"
+        log.debug("classifier gated off (CLASSIFIER_ENABLED != 1)")
+        return item
+
     # Build content string from available fields
     content_parts = []
     if item.get("title"):

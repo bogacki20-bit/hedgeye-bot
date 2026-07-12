@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hedgeye Bot — Daily Key (uploads + reports)</title>
+<style>
+  @page { size: letter; margin: 12mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 10pt/1.45 "Segoe UI", Arial, sans-serif; color: #111; padding: 10px; max-width: 7.5in; }
+  h1 { font-size: 14pt; margin-bottom: 2px; }
+  .sub { font-size: 8.5pt; color: #555; margin-bottom: 10px; }
+  h2 { font-size: 11pt; border-bottom: 2px solid #111; margin: 12px 0 5px; padding-bottom: 2px; }
+  ol { margin-left: 20px; }
+  li { margin: 3px 0; }
+  code { font: 9.5pt Consolas, monospace; background: #eee; padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
+  .note { font-size: 8.5pt; color: #444; margin: 3px 0 0 2px; }
+  .warn { color: #a00; font-weight: bold; }
+  table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  td { padding: 3px 6px 3px 0; vertical-align: top; font-size: 9.5pt; }
+  td:first-child { white-space: nowrap; font-family: Consolas, monospace; font-size: 9pt; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+<h1>DAILY KEY — uploads & reports <span style="font-size:9pt">v1 · 2026-07-11</span></h1>
+<div class="sub">Everything happens in the bot's Telegram chat unless marked 🖥️ Lenovo. Every action gets a loud reply — <span class="warn">no reply = something's wrong, tell the build chat.</span></div>
+
+<h2>📥 Get the day's reports INTO the bot</h2>
+<table>
+<tr><td>Equity Hub</td><td>export the CSV → send it as a <b>file attachment</b> → reply <code>📥 stored … kind=equity_hub</code></td></tr>
+<tr><td>Flow Patrol</td><td>can't export → <b>paste</b>: <code>DOC START flow patrol</code> → paste all of it (many messages is fine) → <code>DOC END</code></td></tr>
+<tr><td>Tier One Alpha</td><td>screenshots: <code>DOC START tier one alpha</code> → send each screenshot (wait for <code>📷→📋 OCR'd</code> per shot) → <code>DOC END</code></td></tr>
+<tr><td>Founder's Note</td><td>PDF file if you have it, else DOC START / paste / DOC END</td></tr>
+<tr><td>oops</td><td><code>DOC CANCEL</code> aborts a paste/screenshot session (30-min timeout otherwise)</td></tr>
+</table>
+<p class="note">Check the reply every time: kind should match what you sent (wrong kind or <code>⚠unclassified</code> → mention it in the build chat, we add the pattern) · date should be TODAY's report date (<code>UNDATED ⚠</code> or an old date = re-export, stale facts poison the corpus).</p>
+
+<h2>📦 Get the day OUT to your LLM chat</h2>
+<ol>
+<li>Upload the day's reports first (above).</li>
+<li>Send <code>DAYPACK</code> — wait ~40s — you get ONE .txt file: REPORT (full) + fresh REPORT NOW + every doc from the last 24h.</li>
+<li>Forward that .txt into your day's LLM chat. If the pack says a doc was <b>OMITTED</b> (the huge Equity Hub CSV), forward that CSV file to the chat too.</li>
+</ol>
+
+<h2>📊 Reports during the day</h2>
+<table>
+<tr><td>REPORT NOW</td><td>intraday: live prices vs ranges, rotation-cued LONG/SHORT candidates, book at range edges (~30s)</td></tr>
+<tr><td>REPORT</td><td>EOD fact sheet, compact (auto-stored nightly too)</td></tr>
+<tr><td>REPORT UPLOAD</td><td>verbose .txt for LLM upload (full targets, position table)</td></tr>
+<tr><td>BOOK FULL</td><td>per-account position table as .txt</td></tr>
+<tr><td>TARGET LIST</td><td>your size targets + cash-equivalents</td></tr>
+</table>
+
+<h2>🖥️ Lenovo (evening, unchanged)</h2>
+<table>
+<tr><td>python _daily_upload.py</td><td>Fidelity exports → book ingest → outcomes (ONE command)</td></tr>
+<tr><td>python _doc_uploads_check.py</td><td>verify what landed in the upload corpus today</td></tr>
+</table>
+
+<p class="note" style="margin-top:10px">Doctrine: every upload is stored with kind + date + char count — facts, loud. The uploads feed the RAG corpus (LLM decision support); the ML corpus (report_rows, outcomes) builds separately and automatically.</p>
+</body>
+</html>
