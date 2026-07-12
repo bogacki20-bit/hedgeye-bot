@@ -85,16 +85,55 @@ Evening session (commits 2132efa, f223755, 518a4e7 — all deployed):
    Reroute-proposal scanner lives in _apply_063.py (patterns: stock-routed-
    fund, sector-routed-sat) — reported none outstanding.
 
+Late session (commits fe42467, 1522732, 8099c50, 1df3a2e — all deployed):
+6. **REPORT NOW live** (sprint P1 complete, incl. an LLM review pass):
+   full-MFR universe w/ defined signal, ONE batched yf.download (per-name
+   pacing rate-limits ~300; MFR latestPrice fallback capped at 5), rotation
+   cues = the EOD sector-flow Δ3d/✓✗ math bridged ETF→GICS, LONGS from hot
+   / SHORTS from cooling (IND-only), grouped BY CUE with fade marks
+   (XLB✗: SHW …| XLY✓: BYD …), tier dots ●●/●, share-class collapse
+   (PBR/-A 0.75-0.95), named price-misses, sizing header (L 100bps add
+   50/100 · ETF 4%(6⚠) · S HARD 2%/50bps), flags ⚠cap4/⚠ceil6/⚠HARD2 —
+   surface, never hide. EDGES = book at live extremes (unclamped rp).
+   ~20-30s synchronous, ~750 chars. tools/report_now.py, kind='now'.
+   VSCO→VSXY mapped in HEDGEYE_TO_YFINANCE (rename, operator-confirmed);
+   GLASF/VRNO still unpriceable — operator to confirm OTC symbols.
+7. **Document ingest live** (sprint P2 complete): send a FILE to the bot
+   (getFile download, pypdf added to requirements) OR paste mode —
+   `DOC START [hint]` → paste (multi-message OK; buffer handler runs FIRST
+   in dispatch and claims command-lookalikes) → `DOC END` = ONE classified
+   doc_uploads row (migration 064). Kinds: founders_note_am/pm ·
+   flow_patrol · equity_hub · tier1alpha · other⚠. note_date parsed,
+   UNDATED loud. doc_uploads = RAG staging corpus. The 5K Equity-Hub
+   scrape is DEAD (operator-killed; nothing existed in bot repo anyway).
+   Lesson learned live: operator pasted Equity Hub as 25 raw messages
+   BEFORE paste mode existed — those hit the echo handler, harmless, but
+   the paste flow exists precisely for this.
+
 ## POST-DEPLOY CHECKS (do first next session if not yet done)
-- Telegram: REPORT (1 msg ~3.3k) · REPORT UPLOAD (.txt attach) · TARGET LIST
-  (4 rows + BUXX casheq) · BOOK FULL (.txt table). sendDocument is NEW
-  code — first live use.
+- Telegram: REPORT (~3.3k, 1 msg) · REPORT NOW (~25s, grouped cues) ·
+  REPORT UPLOAD (.txt attach) · TARGET LIST (4 rows + BUXX casheq) ·
+  BOOK FULL (.txt) · DOC START/paste/DOC END with a real Equity Hub paste
+  (operator may have already tested file-send — confirm a doc_uploads row
+  exists: kind, date, chars sane).
 - Verify VVIX + ^VIX snapshots flowing (enrolled 7/11); vol_regime
   auto-prefers spot ^VIX over VX_F once data exists (VOL line still shows
   6 sleeves, no VIX-spot/VVIX yet).
+- Monday 9:31 ET: first REAL REPORT NOW (tonight's renders = Friday
+  closes, EDGES empty by construction).
 
-## FIRST TASKS NEXT SESSION (operator sprint notes, Sat 7/11 pm — in order)
+## FIRST TASKS NEXT SESSION (sprint P1+P2 SHIPPED 7/11 — remaining below)
 0. Post-deploy checks above first.
+1. **Keith add-pattern detector** (sprint P3, floated mid-week): bullish
+   TREND entry -> sells off -> holds TRADE support -> Keith adds. Detect
+   across bot inventory to front-run Portfolio Solutions adds. BOT layer
+   (Python-computed), not RAG.
+2. **tier1alpha deep parse** (on top of doc_uploads rows): 1M vs 3M vol,
+   CTA buy/sell, risk-on/off -> actionable regime flags (e.g. 1M<3M ->
+   vol-control funds set up to buy).
+3. Then the standing queue (unchanged, renumbered below).
+
+ORIGINAL P1 SPEC (shipped — kept for reference):
 1. **REPORT NOW** (intraday Telegram command, companion to EOD/AM report):
    - Universe: FULL fractal range (MFR) DB — NOT just the SS list.
    - Filter: sector/style + factor-exposure compliant AND has defined

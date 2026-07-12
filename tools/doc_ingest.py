@@ -50,7 +50,10 @@ _KIND_PATTERNS = [
      rf"founder'?s\s+note.*{_PM}|{_PM}[\s\w]*founder'?s\s+note"),
     ("founders_note", r"founders?_?\s*note", r"founder'?s\s+note"),
     ("flow_patrol", r"flow_?\s*patrol", r"flow\s+patrol"),
-    ("equity_hub", r"equity_?\s*hub", r"equity\s+hub"),
+    # SpotGamma names Equity Hub exports '<idx>_data-table_<date>.csv'
+    # (operator-confirmed on the live 7/11 upload) — no 'equity hub' text
+    # anywhere in the file.
+    ("equity_hub", r"equity_?\s*hub|data[-_]?table", r"equity\s+hub"),
     ("tier1alpha",
      r"tier_?\s*(one|1)_?\s*alpha|(?<![a-z0-9])t1a(?![a-z0-9])",
      r"tier\s+(one|1)\s+alpha"),

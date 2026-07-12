@@ -15,6 +15,8 @@ def test_classify_from_filename():
     assert classify_upload("SpotGamma Founders Note PM.pdf", "") == "founders_note_pm"
     assert classify_upload("flow_patrol_jul11.pdf", "") == "flow_patrol"
     assert classify_upload("EquityHub_export.csv", "") == "equity_hub"
+    # SpotGamma's actual export naming (live 7/11 upload)
+    assert classify_upload("SPX_data-table_2026-07-11.csv", "") == "equity_hub"
     assert classify_upload("Tier One Alpha 7-11.pdf", "") == "tier1alpha"
     assert classify_upload("tier_1_alpha.pdf", "") == "tier1alpha"
 
