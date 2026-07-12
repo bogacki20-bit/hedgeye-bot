@@ -250,6 +250,18 @@ if __name__ == "__main__":
                             log.info("report: EOD row stored")
                         except Exception as e:
                             log.warning("EOD report store failed: %s", e)
+                        # KEITH weekly (operator spec 7/12): hardwired
+                        # Friday-EOD progress report. This nightly job runs
+                        # at 00:02 UTC = ~20:02 ET, so ET-Friday here IS
+                        # Friday EOD. Once/date via bot_state throttle.
+                        try:
+                            from zoneinfo import ZoneInfo as _ZI
+                            from datetime import datetime as _dtk
+                            if _dtk.now(_ZI("America/New_York")).weekday() == 4:
+                                from tools.keith_pattern import run_weekly
+                                log.info("keith weekly: %s", run_weekly())
+                        except Exception as e:
+                            log.warning("keith weekly failed: %s", e)
                     else:
                         log.debug("mfr_watchlist_sync: already synced today (%s)", today)
 

@@ -126,6 +126,21 @@ stage that hit 0.
   assembles. Stored to `report_rows` kind=`daypack`.
 - *(handler: `tools/daypack.py`)*
 
+### `KEITH` — add-pattern watchlist (UNVALIDATED paper signal)
+- **Syntax:** `KEITH` (loose mode) · `KEITH STRICT` (trend-transition
+  entries only) · `KEITH WEEKLY` (force the Friday report now)
+- The Keith add-pattern: bullish TREND → pullback → **held** TRADE support
+  → closed up. Shows setups fired in the last 3 sessions + brewing names
+  (T=on support, P=pulled back), `·SS` = on Signal Strength now.
+  Explicitly UNVALIDATED: the 7/12 backtest's evaluable sample was Quad-4
+  macro-ETF rotation (not this pattern's use case) — no automatic
+  per-setup alerts until recall proves out. A **hardwired Friday-EOD
+  weekly report** (fired setups + PS/SS-add recall counters) sends
+  automatically and stores to `report_rows` kind=`keith_weekly` — the
+  paper-trade record builds itself. Support source: RR buy_trade where
+  the name is in that day's RR email, else MFR range low.
+- *(handler: `tools/keith_pattern.py`; backtest: `_keith_backtest.py`)*
+
 ### `MOVES` — bucket transitions
 - **Syntax:** `MOVES` or `MOVES <n>` (days, default 7)
 - Lists roster bucket transitions (`bench → active` etc.) with the quad

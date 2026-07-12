@@ -344,12 +344,13 @@ def _dispatch_message(token, chat_id, text):
     def _tgt():  from tools.position_targets import handle_target_command; return handle_target_command(text)
     def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
     def _dpk():  from tools.daypack import handle_daypack_command;        return handle_daypack_command(text)
+    def _kp():   from tools.keith_pattern import handle_keith_command;    return handle_keith_command(text)
 
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
                      ("quad", _quad), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
-                     ("report", _rpt), ("daypack", _dpk)):
+                     ("report", _rpt), ("daypack", _dpk), ("keith", _kp)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)
