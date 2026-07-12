@@ -1,0 +1,1942 @@
+{
+ "AAAU": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AAAU",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "Goldman Sachs Physical Gold ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Goldman Sachs Physical Gold ETF"
+  }
+ },
+ "ADDYY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ADDYY",
+   "category": null,
+   "industry": "Footwear & Accessories",
+   "longName": "adidas AG",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "adidas AG"
+  }
+ },
+ "AGGH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AGGH",
+   "category": "Intermediate Core Bond",
+   "industry": null,
+   "longName": "Simplify Aggregate Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Simplify Aggregate Bond ETF"
+  }
+ },
+ "AMLP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "AMLP",
+   "category": "Energy Limited Partnership",
+   "industry": null,
+   "longName": "Alerian MLP ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Alerian MLP ETF"
+  }
+ },
+ "ARCO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ARCO",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Arcos Dorados Holdings Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Arcos Dorados Holdings Inc."
+  }
+ },
+ "ARGT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ARGT",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "Global X MSCI Argentina ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X MSCI Argentina ETF"
+  }
+ },
+ "ARKG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ARKG",
+   "category": "Health",
+   "industry": null,
+   "longName": "ARK Genomic Revolution ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ARK Genomic Revolution ETF"
+  }
+ },
+ "ATZAF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ATZAF",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": "Aritzia Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Aritzia Inc."
+  }
+ },
+ "BKLN": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BKLN",
+   "category": "Bank Loan",
+   "industry": null,
+   "longName": "Invesco Senior Loan ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco Senior Loan ETF"
+  }
+ },
+ "BLOK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BLOK",
+   "category": "Equity Digital Assets",
+   "industry": null,
+   "longName": "Amplify Blockchain Technology ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Amplify Blockchain Technology E"
+  }
+ },
+ "BMNR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BMNR",
+   "category": null,
+   "industry": "Capital Markets",
+   "longName": "Bitmine Immersion Technologies, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "BitMine Immersion Technologies,"
+  }
+ },
+ "BNDD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BNDD",
+   "category": "Long Government",
+   "industry": null,
+   "longName": "Quadratic Deflation ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Quadratic Deflation ETF"
+  }
+ },
+ "BNDX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BNDX",
+   "category": "Global Bond-USD Hedged",
+   "industry": null,
+   "longName": "Vanguard Total International Bond Index Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard Total International Bo"
+  }
+ },
+ "BNO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BNO",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "United States Brent Oil Fund, LP",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "United States Brent Oil Fund, L"
+  }
+ },
+ "BRKR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BRKR",
+   "category": null,
+   "industry": "Medical Devices",
+   "longName": "Bruker Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Healthcare",
+   "shortName": "Bruker Corporation"
+  }
+ },
+ "BTAL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BTAL",
+   "category": "Equity Market Neutral",
+   "industry": null,
+   "longName": "AGF U.S. Market Neutral Anti-Beta Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "AGF U.S. Market Neutral Anti-Be"
+  }
+ },
+ "CAT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CAT",
+   "category": null,
+   "industry": "Farm & Heavy Construction Machinery",
+   "longName": "Caterpillar Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Caterpillar, Inc."
+  }
+ },
+ "CBRL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CBRL",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Cracker Barrel Old Country Store, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Cracker Barrel Old Country Stor"
+  }
+ },
+ "CHEF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CHEF",
+   "category": null,
+   "industry": "Food Distribution",
+   "longName": "The Chefs' Warehouse, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "The Chefs' Warehouse, Inc."
+  }
+ },
+ "CLOX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CLOX",
+   "category": "Securitized Bond - Focused",
+   "industry": null,
+   "longName": "Eldridge AAA CLO ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Eldridge AAA CLO ETF"
+  }
+ },
+ "CLOZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CLOZ",
+   "category": "Securitized Bond - Focused",
+   "industry": null,
+   "longName": "Eldridge BBB-B CLO ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Eldridge BBB-B CLO ETF"
+  }
+ },
+ "COAL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COAL",
+   "category": "Equity Energy",
+   "industry": null,
+   "longName": "Range Global Coal ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Range Global Coal Index ETF"
+  }
+ },
+ "COMP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COMP",
+   "category": null,
+   "industry": "Real Estate Services",
+   "longName": "Compass, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Compass, Inc."
+  }
+ },
+ "CWB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CWB",
+   "category": "Convertibles",
+   "industry": null,
+   "longName": "State Street SPDR Bloomberg Convertible Securities ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR Bloomberg Con"
+  }
+ },
+ "DBJP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DBJP",
+   "category": "Japan Stock",
+   "industry": null,
+   "longName": "Xtrackers MSCI Japan Hedged Equity ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Xtrackers MSCI Japan Hedged Equ"
+  }
+ },
+ "DESK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DESK",
+   "category": "Real Estate",
+   "industry": null,
+   "longName": "Vaneck Office And Commercial REIT ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "VanEck Office and Commercial RE"
+  }
+ },
+ "DHI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DHI",
+   "category": null,
+   "industry": "Residential Construction",
+   "longName": "D.R. Horton, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "D.R. Horton, Inc."
+  }
+ },
+ "DRAM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DRAM",
+   "category": "Technology",
+   "industry": null,
+   "longName": "Roundhill Memory ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Roundhill Memory ETF"
+  }
+ },
+ "DRIP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "DRIP",
+   "category": "Trading--Inverse Equity",
+   "industry": null,
+   "longName": "Direxion Daily S&P Oil & Gas Exp. & Prod. Bear 2X Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Direxion Daily S&P Oil & Gas Ex"
+  }
+ },
+ "EIS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EIS",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Israel ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Israel ETF"
+  }
+ },
+ "EMB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EMB",
+   "category": "Emerging Markets Bond",
+   "industry": null,
+   "longName": "iShares J.P. Morgan USD Emerging Markets Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares J.P. Morgan USD Emergin"
+  }
+ },
+ "EMLC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EMLC",
+   "category": "Emerging-Markets Local-Currency Bond",
+   "industry": null,
+   "longName": "VanEck J.P. Morgan EM Local Currency Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "VanEck J. P. Morgan EM Local Cu"
+  }
+ },
+ "EMXC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EMXC",
+   "category": "Diversified Emerging Mkts",
+   "industry": null,
+   "longName": "iShares MSCI Emerging Markets ex China ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Emerging Markets e"
+  }
+ },
+ "EQRR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EQRR",
+   "category": "Mid-Cap Value",
+   "industry": null,
+   "longName": "ProShares Equities for Rising Rates ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares Equities for Rising R"
+  }
+ },
+ "ETHA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ETHA",
+   "category": "Digital Assets",
+   "industry": null,
+   "longName": "iShares Ethereum Trust ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Ethereum Trust ETF"
+  }
+ },
+ "EUO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EUO",
+   "category": "Trading--Miscellaneous",
+   "industry": null,
+   "longName": "ProShares UltraShort Euro",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares UltraShort Euro"
+  }
+ },
+ "EWA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWA",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Australia ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Australia Index Fu"
+  }
+ },
+ "EWC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWC",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Canada ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Canada Index Fund"
+  }
+ },
+ "EWG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWG",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Germany ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Germany Index Fund"
+  }
+ },
+ "EWH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWH",
+   "category": "Greater China Region",
+   "industry": null,
+   "longName": "iShares MSCI Hong Kong ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Hong Kong Index Fu"
+  }
+ },
+ "EWJ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWJ",
+   "category": "Japan Stock",
+   "industry": null,
+   "longName": "iShares MSCI Japan ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Japan Index Fund"
+  }
+ },
+ "EWM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWM",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Malaysia ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Malaysia Index Fun"
+  }
+ },
+ "EWQ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWQ",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI France ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI France Index Fund"
+  }
+ },
+ "EWS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWS",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Singapore ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Singapore ETF"
+  }
+ },
+ "EWU": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWU",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI United Kingdom ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI"
+  }
+ },
+ "EWW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWW",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Mexico ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Mexico ETF"
+  }
+ },
+ "EWY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWY",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI South Korea ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI South Korea ETF"
+  }
+ },
+ "EWZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWZ",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Brazil ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Brazil ETF"
+  }
+ },
+ "EZA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EZA",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI South Africa ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI South Africa Index"
+  }
+ },
+ "FAB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FAB",
+   "category": "Mid-Cap Value",
+   "industry": null,
+   "longName": "First Trust Multi Cap Value AlphaDEX Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "First Trust Multi Cap Value Alp"
+  }
+ },
+ "FAF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FAF",
+   "category": null,
+   "industry": "Insurance - Specialty",
+   "longName": "First American Financial Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "First American Corporation (New"
+  }
+ },
+ "FDRXX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FDRXX",
+   "category": null,
+   "industry": null,
+   "longName": "Fidelity Phillips Street Trust - Fidelity Cash Reserves",
+   "quoteType": "MONEYMARKET",
+   "sector": null,
+   "shortName": "Fidelity Cash Reserves"
+  }
+ },
+ "FI": {
+  "err": "empty yfinance info",
+  "info": null
+ },
+ "FUTY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FUTY",
+   "category": "Utilities",
+   "industry": null,
+   "longName": "Fidelity MSCI Utilities Index ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Fidelity MSCI Utilities Index E"
+  }
+ },
+ "FXB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXB",
+   "category": "Single Currency",
+   "industry": null,
+   "longName": "Invesco CurrencyShares British Pound Sterling Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco CurrencyShares British "
+  }
+ },
+ "FXE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXE",
+   "category": "Single Currency",
+   "industry": null,
+   "longName": "Invesco CurrencyShares Euro Currency Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco CurrencyShares Euro Cur"
+  }
+ },
+ "FXF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXF",
+   "category": "Single Currency",
+   "industry": null,
+   "longName": "Invesco CurrencyShares Swiss Franc Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco CurrencyShares Swiss Fr"
+  }
+ },
+ "FXH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXH",
+   "category": "Health",
+   "industry": null,
+   "longName": "First Trust Health Care AlphaDEX Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "First Trust Health Care AlphaDE"
+  }
+ },
+ "FXI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXI",
+   "category": "Greater China Region",
+   "industry": null,
+   "longName": "iShares China Large-Cap ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares China Large-Cap ETF"
+  }
+ },
+ "FXY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXY",
+   "category": "Single Currency",
+   "industry": null,
+   "longName": "Invesco CurrencyShares Japanese Yen Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco CurrencyShares Japanese"
+  }
+ },
+ "FYBR": {
+  "err": "empty yfinance info",
+  "info": null
+ },
+ "GDX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GDX",
+   "category": "Equity Precious Metals",
+   "industry": null,
+   "longName": "VanEck Gold Miners ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "VanEck Gold Miners ETF"
+  }
+ },
+ "GGLS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GGLS",
+   "category": "Trading--Inverse Equity",
+   "industry": null,
+   "longName": "Direxion Daily GOOGL Bear 1X Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Direxion Daily GOOGL Bear 1X ET"
+  }
+ },
+ "GII": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GII",
+   "category": "Infrastructure",
+   "industry": null,
+   "longName": "State Street SPDR S&P Global Infrastructure ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P Global In"
+  }
+ },
+ "GLD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "GLD",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "SPDR Gold Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "SPDR Gold Shares"
+  }
+ },
+ "HARD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HARD",
+   "category": "Commodities Broad Basket",
+   "industry": null,
+   "longName": "Simplify Commodities Strategy No K-1 ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Simplify Commodities Strategy N"
+  }
+ },
+ "HEFA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HEFA",
+   "category": "Foreign Large Blend",
+   "industry": null,
+   "longName": "iShares Currency Hedged MSCI EAFE ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Currency Hedged MSCI EA"
+  }
+ },
+ "HEFT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HEFT",
+   "category": null,
+   "industry": null,
+   "longName": "Hedgeye Fourth Turning ETF",
+   "quoteType": "EQUITY",
+   "sector": null,
+   "shortName": "Hedgeye Fourth Turning ETF"
+  }
+ },
+ "HST": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HST",
+   "category": null,
+   "industry": "REIT - Hotel & Motel",
+   "longName": "Host Hotels & Resorts, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Real Estate",
+   "shortName": "Host Hotels & Resorts, Inc."
+  }
+ },
+ "HYG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "HYG",
+   "category": "High Yield Bond",
+   "industry": null,
+   "longName": "iShares iBoxx $ High Yield Corporate Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares iBoxx $ High Yield Corp"
+  }
+ },
+ "IAK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IAK",
+   "category": "Financial",
+   "industry": null,
+   "longName": "iShares U.S. Insurance ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares U.S. Insurance ETF"
+  }
+ },
+ "IBIT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IBIT",
+   "category": "Digital Assets",
+   "industry": null,
+   "longName": "iShares Bitcoin Trust ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Bitcoin Trust ETF"
+  }
+ },
+ "IDX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IDX",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "VanEck Indonesia Index ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "VanEck Indonesia Index ETF"
+  }
+ },
+ "IEF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IEF",
+   "category": "Long Government",
+   "industry": null,
+   "longName": "iShares 7-10 Year Treasury Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares 7-10 Year Treasury Bond"
+  }
+ },
+ "IFRA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IFRA",
+   "category": "Infrastructure",
+   "industry": null,
+   "longName": "iShares U.S. Infrastructure ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares U.S. Infrastructure ETF"
+  }
+ },
+ "IGOV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IGOV",
+   "category": "Global Bond",
+   "industry": null,
+   "longName": "iShares International Treasury Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares International Treasury "
+  }
+ },
+ "IHI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IHI",
+   "category": "Health",
+   "industry": null,
+   "longName": "iShares U.S. Medical Devices ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares U.S. Medical Devices ET"
+  }
+ },
+ "ILF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ILF",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares Latin America 40 ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Latin America 40 ETF"
+  }
+ },
+ "INDA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "INDA",
+   "category": "India Equity",
+   "industry": null,
+   "longName": "iShares MSCI India ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Ishares MSCI India ETF"
+  }
+ },
+ "ITA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ITA",
+   "category": "Industrials",
+   "industry": null,
+   "longName": "iShares U.S. Aerospace & Defense ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares U.S. Aerospace & Defens"
+  }
+ },
+ "ITB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ITB",
+   "category": "Consumer Cyclical",
+   "industry": null,
+   "longName": "iShares U.S. Home Construction ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares U.S. Home Construction "
+  }
+ },
+ "IVES": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IVES",
+   "category": "Technology",
+   "industry": null,
+   "longName": "Dan IVES Wedbush AI Revolution ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Dan IVES Wedbush AI Revolution "
+  }
+ },
+ "IWM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IWM",
+   "category": "Small Blend",
+   "industry": null,
+   "longName": "iShares Russell 2000 ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Russell 2000 Index Fund"
+  }
+ },
+ "IWO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IWO",
+   "category": "Small Growth",
+   "industry": null,
+   "longName": "iShares Russell 2000 Growth ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Russell 2000 Growth Fun"
+  }
+ },
+ "JETS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "JETS",
+   "category": "Industrials",
+   "industry": null,
+   "longName": "U.S. Global Jets ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "U.S. Global Jets ETF"
+  }
+ },
+ "KMX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KMX",
+   "category": null,
+   "industry": "Auto & Truck Dealerships",
+   "longName": "CarMax, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "CarMax Inc"
+  }
+ },
+ "KXIAY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "KXIAY",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "KIOXIA HLDGS CORP"
+  }
+ },
+ "LMT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LMT",
+   "category": null,
+   "industry": "Aerospace & Defense",
+   "longName": "Lockheed Martin Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Lockheed Martin Corporation"
+  }
+ },
+ "LOTMY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LOTMY",
+   "category": null,
+   "industry": "Gambling",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "LOTTOMATICA GROUP SPA"
+  }
+ },
+ "LQD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LQD",
+   "category": "Corporate Bond",
+   "industry": null,
+   "longName": "iShares iBoxx $ Investment Grade Corporate Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares iBoxx $ Investment Grad"
+  }
+ },
+ "LRCX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "LRCX",
+   "category": null,
+   "industry": "Semiconductor Equipment & Materials",
+   "longName": "Lam Research Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Lam Research Corporation"
+  }
+ },
+ "MAGS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MAGS",
+   "category": "Technology",
+   "industry": null,
+   "longName": "Roundhill Magnificent Seven ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Roundhill Magnificent Seven ETF"
+  }
+ },
+ "MBB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MBB",
+   "category": "Government Mortgage-Backed Bond",
+   "industry": null,
+   "longName": "iShares MBS ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MBS ETF"
+  }
+ },
+ "METD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "METD",
+   "category": "Trading--Inverse Equity",
+   "industry": null,
+   "longName": "Direxion Daily META Bear 1X ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Direxion Daily META Bear 1X ETF"
+  }
+ },
+ "MLPX": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MLPX",
+   "category": "Energy Limited Partnership",
+   "industry": null,
+   "longName": "Global X MLP & Energy Infrastructure ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X MLP & Energy Infrastru"
+  }
+ },
+ "MSFD": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MSFD",
+   "category": "Trading--Inverse Equity",
+   "industry": null,
+   "longName": "Direxion Daily MSFT Bear 1X Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Direxion Daily MSFT Bear 1X ETF"
+  }
+ },
+ "MSTY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MSTY",
+   "category": "Derivative Income",
+   "industry": null,
+   "longName": "Yieldmax MSTR Option Income Strategy ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "YieldMax MSTR Option Income Str"
+  }
+ },
+ "MTUM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "MTUM",
+   "category": "Large Blend",
+   "industry": null,
+   "longName": "iShares MSCI USA Momentum Factor ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI USA Momentum Facto"
+  }
+ },
+ "NBIS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NBIS",
+   "category": null,
+   "industry": "Internet Content & Information",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Communication Services",
+   "shortName": "Nebius Group N.V."
+  }
+ },
+ "NFRA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NFRA",
+   "category": "Infrastructure",
+   "industry": null,
+   "longName": "FlexShares STOXX Global Broad Infrastructure Index Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "FlexShares STOXX Global Broad I"
+  }
+ },
+ "NORW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NORW",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "Global X MSCI Norway ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X MSCI Norway ETF"
+  }
+ },
+ "OC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OC",
+   "category": null,
+   "industry": "Building Products & Equipment",
+   "longName": "Owens Corning",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Owens Corning Inc"
+  }
+ },
+ "OIH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "OIH",
+   "category": "Equity Energy",
+   "industry": null,
+   "longName": "VanEck Oil Services ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "VanEck Oil Services ETF"
+  }
+ },
+ "ONTO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ONTO",
+   "category": null,
+   "industry": "Semiconductor Equipment & Materials",
+   "longName": "Onto Innovation Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "Onto Innovation Inc."
+  }
+ },
+ "PALL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PALL",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "abrdn Physical Palladium Shares ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "abrdn Physical Palladium Shares"
+  }
+ },
+ "PAVE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PAVE",
+   "category": "Infrastructure",
+   "industry": null,
+   "longName": "Global X U.S. Infrastructure Development ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X U.S. Infrastructure De"
+  }
+ },
+ "PDBC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PDBC",
+   "category": "Commodities Broad Basket",
+   "industry": null,
+   "longName": "Invesco Optimum Yield Diversified Commodity Strategy No K-1 ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco Optimum Yield Diversifi"
+  }
+ },
+ "PFF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PFF",
+   "category": "Preferred Stock",
+   "industry": null,
+   "longName": "iShares Preferred and Income Securities ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Preferred and Income Se"
+  }
+ },
+ "POET": {
+  "err": null,
+  "info": {
+   "_symbol_used": "POET",
+   "category": null,
+   "industry": "Semiconductors",
+   "longName": "POET Technologies Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "POET Technologies Inc."
+  }
+ },
+ "PPLT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "PPLT",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "abrdn Physical Platinum Shares ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "abrdn Physical Platinum Shares "
+  }
+ },
+ "QQQ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "QQQ",
+   "category": "Large Growth",
+   "industry": null,
+   "longName": "Invesco QQQ Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco QQQ Trust, Series 1"
+  }
+ },
+ "QSR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "QSR",
+   "category": null,
+   "industry": "Restaurants",
+   "longName": "Restaurant Brands International Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Restaurant Brands International"
+  }
+ },
+ "RSP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "RSP",
+   "category": "Large Blend",
+   "industry": null,
+   "longName": "Invesco S&P 500 Equal Weight ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco S&P 500 Equal Weight ET"
+  }
+ },
+ "SBIT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SBIT",
+   "category": "Digital Assets",
+   "industry": null,
+   "longName": "ProShares UltraShort Bitcoin ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares UltraShort Bitcoin ET"
+  }
+ },
+ "SETH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SETH",
+   "category": "Digital Assets",
+   "industry": null,
+   "longName": "ProShares Short Ether ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares Short Ether ETF"
+  }
+ },
+ "SHY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SHY",
+   "category": "Short Government",
+   "industry": null,
+   "longName": "iShares 1-3 Year Treasury Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares 1-3 Year Treasury Bond "
+  }
+ },
+ "SIL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SIL",
+   "category": "Equity Precious Metals",
+   "industry": null,
+   "longName": "Global X Silver Miners ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X Silver Miners ETF"
+  }
+ },
+ "SLV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SLV",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "iShares Silver Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares Silver Trust"
+  }
+ },
+ "SMH": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SMH",
+   "category": "Technology",
+   "industry": null,
+   "longName": "VanEck Semiconductor ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "VanEck Semiconductor ETF"
+  }
+ },
+ "SOLZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SOLZ",
+   "category": "Digital Assets",
+   "industry": null,
+   "longName": "Solana ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Solana ETF"
+  }
+ },
+ "SPY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SPY",
+   "category": "Large Blend",
+   "industry": null,
+   "longName": "State Street SPDR S&P 500 ETF Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P 500 ETF T"
+  }
+ },
+ "SQQQ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SQQQ",
+   "category": "Trading--Inverse Equity",
+   "industry": null,
+   "longName": "ProShares UltraPro Short QQQ",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares UltraPro Short QQQ"
+  }
+ },
+ "STKL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "STKL",
+   "category": null,
+   "industry": "Beverages - Non-Alcoholic",
+   "longName": "SunOpta Inc",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "SunOpta, Inc."
+  }
+ },
+ "SWBI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SWBI",
+   "category": null,
+   "industry": "Aerospace & Defense",
+   "longName": "Smith & Wesson Brands, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Industrials",
+   "shortName": "Smith & Wesson Brands, Inc."
+  }
+ },
+ "TGT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TGT",
+   "category": null,
+   "industry": "Discount Stores",
+   "longName": "Target Corporation",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Defensive",
+   "shortName": "Target Corporation"
+  }
+ },
+ "TINY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TINY",
+   "category": "Technology",
+   "industry": null,
+   "longName": "ProShares Nanotechnology ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares Nanotechnology ETF"
+  }
+ },
+ "TIP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TIP",
+   "category": "Inflation-Protected Bond",
+   "industry": null,
+   "longName": "iShares TIPS Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares TIPS Bond ETF"
+  }
+ },
+ "TLT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TLT",
+   "category": "Long Government",
+   "industry": null,
+   "longName": "iShares 20+ Year Treasury Bond ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares 20+ Year Treasury Bond "
+  }
+ },
+ "TOL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TOL",
+   "category": null,
+   "industry": "Residential Construction",
+   "longName": "Toll Brothers, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Toll Brothers, Inc."
+  }
+ },
+ "TPYP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TPYP",
+   "category": "Energy Limited Partnership",
+   "industry": null,
+   "longName": "Tortoise North American Pipeline Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Tortoise North American Pipelin"
+  }
+ },
+ "TSSI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TSSI",
+   "category": null,
+   "industry": "Information Technology Services",
+   "longName": "TSS, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Technology",
+   "shortName": "TSS, Inc."
+  }
+ },
+ "TUA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "TUA",
+   "category": "Long Government",
+   "industry": null,
+   "longName": "Simplify Short Term Treasury Futures Strategy ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Simplify Short Term Treasury Fu"
+  }
+ },
+ "UGA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UGA",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "United States Gasoline Fund, LP",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "United States Gasoline Fund LP"
+  }
+ },
+ "URA": {
+  "err": null,
+  "info": {
+   "_symbol_used": "URA",
+   "category": "Natural Resources",
+   "industry": null,
+   "longName": "Global X Uranium ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X Uranium ETF"
+  }
+ },
+ "USMV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "USMV",
+   "category": "Large Blend",
+   "industry": null,
+   "longName": "iShares MSCI USA Min Vol Factor ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI USA Min Vol Factor"
+  }
+ },
+ "USO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "USO",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "United States Oil Fund, LP",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "United States Oil Fund"
+  }
+ },
+ "UUP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "UUP",
+   "category": "Trading--Miscellaneous",
+   "industry": null,
+   "longName": "Invesco DB US Dollar Index Bullish Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco DB USD Index Bullish Fu"
+  }
+ },
+ "VCLT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VCLT",
+   "category": "Long-Term Bond",
+   "industry": null,
+   "longName": "Vanguard Long-Term Corporate Bond Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard Long-Term Corporate Bo"
+  }
+ },
+ "VGK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VGK",
+   "category": "Europe Stock",
+   "industry": null,
+   "longName": "Vanguard FTSE Europe ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard FTSEEuropean ETF"
+  }
+ },
+ "VMC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VMC",
+   "category": null,
+   "industry": "Building Materials",
+   "longName": "Vulcan Materials Company",
+   "quoteType": "EQUITY",
+   "sector": "Basic Materials",
+   "shortName": "Vulcan Materials Company (Holdi"
+  }
+ },
+ "VSXY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VSXY",
+   "category": null,
+   "industry": "Apparel Retail",
+   "longName": null,
+   "quoteType": "EQUITY",
+   "sector": "Consumer Cyclical",
+   "shortName": "Victorias Secret & Co."
+  }
+ },
+ "VT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VT",
+   "category": "Global Large-Stock Blend",
+   "industry": null,
+   "longName": "Vanguard Total World Stock Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard Total World Stock Inde"
+  }
+ },
+ "VXF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VXF",
+   "category": "Mid-Cap Blend",
+   "industry": null,
+   "longName": "Vanguard Extended Market Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard Extended Market ETF"
+  }
+ },
+ "VYM": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VYM",
+   "category": "Large Value",
+   "industry": null,
+   "longName": "Vanguard High Dividend Yield Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard High Dividend Yield ET"
+  }
+ },
+ "VYMI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VYMI",
+   "category": "Foreign Large Value",
+   "industry": null,
+   "longName": "Vanguard International High Dividend Yield Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard International High Div"
+  }
+ },
+ "XAR": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XAR",
+   "category": "Industrials",
+   "industry": null,
+   "longName": "State Street SPDR S&P Aerospace & Defense ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P Aerospace"
+  }
+ },
+ "XHB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XHB",
+   "category": "Consumer Cyclical",
+   "industry": null,
+   "longName": "State Street SPDR S&P Homebuilders ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P Homebuild"
+  }
+ },
+ "XLB": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLB",
+   "category": "Natural Resources",
+   "industry": null,
+   "longName": "State Street Materials Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Materials Select S"
+  }
+ },
+ "XLC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLC",
+   "category": "Communications",
+   "industry": null,
+   "longName": "State Street Communication Services Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Communication Serv"
+  }
+ },
+ "XLE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLE",
+   "category": "Equity Energy",
+   "industry": null,
+   "longName": "State Street Energy Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Energy Select Sect"
+  }
+ },
+ "XLF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLF",
+   "category": "Financial",
+   "industry": null,
+   "longName": "State Street Financial Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Financial Select S"
+  }
+ },
+ "XLI": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLI",
+   "category": "Industrials",
+   "industry": null,
+   "longName": "State Street Industrial Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Industrial Select "
+  }
+ },
+ "XLK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLK",
+   "category": "Technology",
+   "industry": null,
+   "longName": "State Street Technology Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Technology Select "
+  }
+ },
+ "XLP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLP",
+   "category": "Consumer Defensive",
+   "industry": null,
+   "longName": "State Street Consumer Staples Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Consumer Staples S"
+  }
+ },
+ "XLRE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLRE",
+   "category": "Real Estate",
+   "industry": null,
+   "longName": "State Street Real Estate Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Real Estate Select"
+  }
+ },
+ "XLU": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLU",
+   "category": "Utilities",
+   "industry": null,
+   "longName": "State Street Utilities Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Utilities Select S"
+  }
+ },
+ "XLV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLV",
+   "category": "Health",
+   "industry": null,
+   "longName": "State Street Health Care Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Health Care Select"
+  }
+ },
+ "XLY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XLY",
+   "category": "Consumer Cyclical",
+   "industry": null,
+   "longName": "State Street Consumer Discretionary Select Sector SPDR ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street Consumer Discretio"
+  }
+ },
+ "XME": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XME",
+   "category": "Natural Resources",
+   "industry": null,
+   "longName": "State Street SPDR S&P Metals & Mining ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P Metals & "
+  }
+ },
+ "XOP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XOP",
+   "category": "Equity Energy",
+   "industry": null,
+   "longName": "State Street SPDR S&P Oil & Gas Exploration & Production ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P Oil & Gas"
+  }
+ },
+ "XTL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "XTL",
+   "category": "Communications",
+   "industry": null,
+   "longName": "State Street SPDR S&P Telecom ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "State Street SPDR S&P Telecom E"
+  }
+ },
+ "YCS": {
+  "err": null,
+  "info": {
+   "_symbol_used": "YCS",
+   "category": "Trading--Miscellaneous",
+   "industry": null,
+   "longName": "ProShares UltraShort Yen",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares UltraShort Yen New"
+  }
+ },
+ "ZROZ": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ZROZ",
+   "category": "Long Government",
+   "industry": null,
+   "longName": "PIMCO 25+ Year Zero Coupon U.S. Treasury Index Exchange-Traded Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "PIMCO 25  Year Zero Coupon U.S."
+  }
+ }
+}
