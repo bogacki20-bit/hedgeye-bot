@@ -482,6 +482,16 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         except Exception as e:
             lines.append(f"CANDIDATES: unavailable ({e})")
 
+        # ── T1A regime facts (parsed from the day's Tier One Alpha upload;
+        #    rides into DAYPACK via this line — operator spec 7/12) ──
+        try:
+            from tools.t1a_parse import latest_line
+            t1a = latest_line()
+            lines.append(t1a if t1a else
+                         "T1A: n/a (no Tier One Alpha upload parsed yet)")
+        except Exception as e:
+            lines.append(f"T1A: unavailable ({e})")
+
         # ── P4 alert contents ──
         try:
             lines.extend(_alert_lines(cur))

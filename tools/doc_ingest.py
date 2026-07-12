@@ -59,15 +59,20 @@ _KIND_PATTERNS = [
      r"tier\s+(one|1)\s+alpha"),
 ]
 
+# TEXTUAL formats first (7/12 lesson, T1A doc 5: a numeric chart-axis
+# string beat the 'July 10, 2026' masthead — report dates are written in
+# words; bare numeric dates inside OCR'd content are usually axis noise).
+# Filenames only ever carry numeric forms, so filename parsing is
+# unaffected by the ordering.
 _DATE_RES = [
-    (re.compile(r"(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})"), "ymd"),
-    (re.compile(r"(\d{1,2})[/\-](\d{1,2})[/\-](20\d{2})"), "mdy"),
     (re.compile(r"(january|february|march|april|may|june|july|august|"
                 r"september|october|november|december)\s+(\d{1,2}),?\s+"
                 r"(20\d{2})", re.I), "monname"),
     # '10 Jul 2026' — Flow Patrol's format (live miss, 7/12)
     (re.compile(r"(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|"
                 r"nov|dec)[a-z]*\.?\s+(20\d{2})", re.I), "dmon"),
+    (re.compile(r"(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})"), "ymd"),
+    (re.compile(r"(\d{1,2})[/\-](\d{1,2})[/\-](20\d{2})"), "mdy"),
 ]
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july",
@@ -144,6 +149,21 @@ def extract_text(file_name: str | None, data: bytes) -> tuple:
         return text.strip(), None
     except UnicodeDecodeError:
         return "", "unextractable (unknown binary format)"
+
+
+def _maybe_deep_parse(kind, row_id, note_date, text) -> str:
+    """Post-store deep parses by kind (tier1alpha -> t1a_daily). Guarded:
+    a parse failure NEVER blocks the upload reply — it appends loudly."""
+    if kind != "tier1alpha":
+        return ""
+    try:
+        from tools.t1a_parse import ingest_hook
+        line = ingest_hook(row_id, note_date, text)
+        return "\n" + (line or "⚠ T1A deep-parse found no core fields "
+                               "(layout change? check _doc_dump)")
+    except Exception as e:
+        log.warning("t1a deep parse failed: %s", e)
+        return f"\n⚠ T1A deep-parse error: {e}"
 
 
 def summary_reply(kind, note_date, chars, file_name, note=None,
@@ -399,4 +419,6 @@ def handle_telegram_document(token: str, document: dict,
     preview = re.sub(r"\s+", " ", (text or "")[:PREVIEW_CHARS]).strip()
     reply = summary_reply(kind, note_date, len(text or ""), file_name,
                           note=note, preview=preview)
-    return reply + f"\n[id {row_id}]"
+    reply += f"\n[id {row_id}]"
+    reply += _maybe_deep_parse(kind, row_id, note_date, text)
+    return reply

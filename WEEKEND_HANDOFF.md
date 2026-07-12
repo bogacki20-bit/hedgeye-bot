@@ -122,12 +122,27 @@ Late session (commits fe42467, 1522732, 8099c50, 1df3a2e — all deployed):
 - Monday 9:31 ET: first REAL REPORT NOW (tonight's renders = Friday
   closes, EDGES empty by construction).
 
-## FIRST TASKS NEXT SESSION (sprint P1+P2 SHIPPED 7/11 — remaining below)
-0. Post-deploy checks above first.
-1. **Keith add-pattern detector** (sprint P3, floated mid-week): bullish
-   TREND entry -> sells off -> holds TRADE support -> Keith adds. Detect
-   across bot inventory to front-run Portfolio Solutions adds. BOT layer
-   (Python-computed), not RAG.
+## FIRST TASKS NEXT SESSION (ENTIRE SPRINT P1+P2+P3 SHIPPED 7/11-12)
+0. Post-deploy checks above first (+ KEITH · KEITH WEEKLY from phone).
+1. **Keith add-pattern detector — SHIPPED 7/12** (tools/keith_pattern.py):
+   state machine ENTRY(trend->BULL transition; loose mode accepts standing
+   bull while history is shallow) -> ARMED(rp>=.55) -> PULLED(rp<=.35) ->
+   TESTED(rp<=.15) -> HOLD(closed up, trend intact) = setup. Support = RR
+   buy_trade where in that day's RR email, else MFR range low. BACKTEST
+   VERDICT (7/12): UNVALIDATED — evaluable PS adds were Quad-4 macro-ETF
+   rotation (wrong sample for the pattern), SS corpus a week old. So: NO
+   auto per-setup alerts; KEITH/KEITH STRICT/KEITH WEEKLY commands +
+   hardwired Friday-EOD weekly report (fired setups + PS 7d / SS 14d
+   recall counters, stored kind='keith_weekly') — paper-trade record
+   builds itself; revisit wiring live alerts when recall proves out.
+   Re-run _keith_backtest.py weekly as corpora deepen. Operator insights
+   captured: SS shows the pattern mid-breakout (setups should LEAD SS
+   adds); SS drops = invalidation tell (future: reset brewing on SS drop);
+   futures in the list stay (country-ETF adds — FCE_F≈EWQ, FESX_F≈FEZ;
+   formalize via wrapper-links later); ONCE LONG SIDE VALIDATES, mirror
+   for SHORTS (bearish entry -> rally -> REJECTED at trade resistance ->
+   closes down; validate vs keiths_signals shorts + etfpro short bias) —
+   parameter flip, same machine.
 2. **Vision-OCR image ingest — BUILT 7/11 night** (live need: Tier One
    Alpha arrives as screenshots). photo -> getFile -> Claude vision
    transcription (extraction only, OCR_MODEL in doc_ingest) -> classify/

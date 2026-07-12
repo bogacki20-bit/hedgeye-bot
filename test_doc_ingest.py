@@ -54,6 +54,13 @@ def test_date_day_month_abbrev_flow_patrol_format():
     assert parse_note_date(None, "as of 5 September 2026 update") == date(2026, 9, 5)
 
 
+def test_masthead_beats_axis_noise():
+    # T1A doc-5 lesson: numeric chart-axis dates must not outrank the
+    # written masthead date
+    txt = "chart axis 2026-06-07 stuff ... Market Situation Report July 10, 2026"
+    assert parse_note_date(None, txt) == date(2026, 7, 10)
+
+
 def test_date_missing_is_none_never_guessed():
     assert parse_note_date("report.pdf", "no dates here") is None
     assert parse_note_date("bad_2026-13-45.pdf", "") is None   # invalid -> None
