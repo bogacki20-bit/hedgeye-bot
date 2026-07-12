@@ -126,7 +126,10 @@ def classify_and_extract(item: dict) -> dict:
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            # claude-sonnet-4-20250514 RETIRED (404'd live 2026-07-11 via the
+            # OCR path using the same string — email classification was
+            # silently broken). Env-overridable without a deploy.
+            model=os.environ.get("CLASSIFIER_MODEL", "claude-sonnet-5"),
             max_tokens=1000,
             system=SYSTEM_PROMPT,
             messages=[

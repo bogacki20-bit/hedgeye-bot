@@ -190,7 +190,10 @@ def store_upload(file_name, kind, note_date, text, meta=None) -> int | None:
 # screenshot appends as a chunk; DOC END stitches them into ONE row.
 # A lone photo (no buffer) stores immediately as its own row.
 
-OCR_MODEL = "claude-sonnet-4-20250514"      # same model classifier.py uses
+# claude-sonnet-4-20250514 404'd live on 7/11 (model retired) — pin a
+# current vision-capable model, env-overridable without a deploy.
+import os as _os_mod
+OCR_MODEL = _os_mod.getenv("OCR_MODEL", "claude-haiku-4-5-20251001")
 OCR_MAX_TOKENS = 4000
 OCR_PROMPT = ("Transcribe ALL text visible in this image, exactly and "
               "completely, preserving line structure and numbers. Output "
