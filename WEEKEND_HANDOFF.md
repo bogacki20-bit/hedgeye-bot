@@ -147,6 +147,12 @@ Post-sprint session (commits 408afae→, Sat night):
 
 ## FIRST TASKS NEXT SESSION (ENTIRE SPRINT P1+P2+P3 SHIPPED 7/11-12)
 0. Post-deploy checks above first (+ KEITH · KEITH WEEKLY from phone).
+0.5 **OPERATOR-CONFIRMED NEXT BUILD (Sun 7/12 am): FULL-UNIVERSE TAGGING
+   + quad-doctrine table + style factors.** Fixes at once: 201 names
+   invisible to REPORT NOW rotation cues, 36 GUESSED fill tiers, CONC 70%
+   untagged; quad-doctrine unlocks the deferred QUAD WATCH. Tag data
+   sourcing needs the identity-facts gate (batch proposals -> operator
+   CONFIRM, never auto-written labels).
 1. **Keith add-pattern detector — SHIPPED 7/12** (tools/keith_pattern.py):
    state machine ENTRY(trend->BULL transition; loose mode accepts standing
    bull while history is shallow) -> ARMED(rp>=.55) -> PULLED(rp<=.35) ->
