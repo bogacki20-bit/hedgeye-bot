@@ -78,6 +78,61 @@ def test_summary_reply_other_flags_unclassified():
     assert "⚠unclassified" in r and "head: hello" in r
 
 
+# ── paste-capture buffer (bot_state faked in-memory; store faked) ──
+
+def _fake_state():
+    import tools.doc_ingest as di
+    state = {}
+    di._bs_get = lambda k: state.get(k)
+    def _set(k, v):
+        state[k] = v
+    di._bs_set = _set
+    stored = []
+    di.store_upload = lambda fn, kind, nd, text, meta=None: (
+        stored.append((fn, kind, nd, text, meta)) or 77)
+    return di, state, stored
+
+
+def test_buffer_start_append_end_stitches_one_row():
+    di, _s, stored = _fake_state()
+    r = di.handle_doc_buffer("DOC START equity hub")
+    assert "buffering" in r and "(equity hub)" in r
+    assert di.handle_doc_buffer("row1,SPY,620") == ""     # silent claim
+    assert di.handle_doc_buffer("row2,QQQ,560") == ""
+    r = di.handle_doc_buffer("DOC END")
+    assert "kind=equity_hub" in r and "2 chunks stitched" in r
+    assert len(stored) == 1
+    _fn, kind, _nd, text, meta = stored[0]
+    assert kind == "equity_hub" and "row1,SPY,620" in text
+    assert meta["chunks"] == 2
+
+
+def test_buffer_claims_command_lookalikes():
+    di, _s, _st = _fake_state()
+    di.handle_doc_buffer("DOC START")
+    # a pasted line that LOOKS like a command must be swallowed, not executed
+    assert di.handle_doc_buffer("TARGET FXH 4.0") == ""
+    assert di.handle_doc_buffer("REPORT") == ""
+    r = di.handle_doc_buffer("DOC CANCEL")
+    assert "discarded (2 chunks)" in r
+
+
+def test_buffer_inactive_falls_through():
+    di, _s, _st = _fake_state()
+    assert di.handle_doc_buffer("SCREEN energy longs") is None
+    assert di.handle_doc_buffer("DOC END") is None        # nothing buffering...
+    # ^ no active buffer: END has no buffer -> falls through? spec: buf None
+    #   and up == 'DOC END' -> returns None (not a DOC session) — correct.
+
+
+def test_buffer_quiet_ack_every_10():
+    di, _s, _st = _fake_state()
+    di.handle_doc_buffer("DOC START")
+    for i in range(1, 10):
+        assert di.handle_doc_buffer(f"line {i}") == ""
+    assert di.handle_doc_buffer("line 10") == "📋 10 chunks…"
+
+
 if __name__ == "__main__":
     import sys, inspect
     fails = 0

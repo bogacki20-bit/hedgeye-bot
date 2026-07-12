@@ -36,8 +36,8 @@ def _api_get(token, method, params=None, timeout=HTTP_TIMEOUT):
 def _chunk_message(text, limit=TG_MAX_CHARS):
     """Split a reply into <=limit-char parts on line boundaries so long SCREEN
     output is delivered in pieces instead of being rejected (HTTP 400) and lost."""
-    if text is None:
-        return []
+    if not text:
+        return []      # None or '' — a claimed-but-silent reply sends nothing
     if len(text) <= limit:
         return [text]
     chunks, cur = [], ""
@@ -330,6 +330,9 @@ def _dispatch_message(token, chat_id, text):
 
     # (name, thunk) in priority order; imports inside the thunk so an import error is
     # caught too. Sentinel-gated handlers return None to decline.
+    # doc paste-buffer runs FIRST: while a DOC START buffer is active it
+    # claims EVERY message (pasted report lines must never hit real handlers)
+    def _doc():  from tools.doc_ingest import handle_doc_buffer;          return handle_doc_buffer(text)
     def _ss():   from tools.ss_roster import handle_telegram_text;        return handle_telegram_text(text)
     def _quad(): from tools.quad_manual import handle_quad_command;       return handle_quad_command(text)
     def _scr():  from tools.screener import handle_screen_command;        return handle_screen_command(text, chat_id)
@@ -341,7 +344,8 @@ def _dispatch_message(token, chat_id, text):
     def _tgt():  from tools.position_targets import handle_target_command; return handle_target_command(text)
     def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
 
-    for name, fn in (("ss_roster", _ss), ("quad", _quad), ("screen", _scr),
+    for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
+                     ("quad", _quad), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
                      ("report", _rpt)):

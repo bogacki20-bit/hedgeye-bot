@@ -190,6 +190,12 @@ stage that hit 0.
   reply with kind, note date (`UNDATED ⚠` when none found), char count,
   and a preview. 20MB Telegram cap. Unknown binaries store flagged, never
   silently dropped. This replaces the dead 5K Equity-Hub scrape.
+- **Paste mode (no file needed):** `DOC START [hint]` → paste the whole
+  report (Telegram splitting it into 25 messages is fine — the bot buffers
+  silently, quiet ack every 10 chunks; pasted lines that look like commands
+  are swallowed, never executed) → `DOC END` stitches everything into ONE
+  classified `doc_uploads` row with one summary reply. `DOC CANCEL`
+  discards; 30-min TTL.
 - **Writes:** `doc_uploads` only. *(handler: `tools/doc_ingest.py`)*
 
 ### Trade decisions — log against an alert (no gate; the message IS the action)

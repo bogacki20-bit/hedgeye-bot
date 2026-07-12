@@ -178,6 +178,107 @@ def store_upload(file_name, kind, note_date, text, meta=None) -> int | None:
     return row_id
 
 
+# ═══════════════════════ paste-capture (DOC START/END) ══════════════════════
+# Phone reality: copy-paste of a long report arrives as ~25 separate text
+# messages (Telegram splits at 4096). Buffer mode stitches them into ONE
+# doc_uploads row: DOC START [hint] -> paste everything -> DOC END. While
+# active this handler runs FIRST in the dispatch chain and claims every
+# message silently (a pasted line that looks like 'TARGET ...' must never
+# trigger a real handler). TTL guards an abandoned buffer.
+
+BUFFER_KEY = "doc_paste_buffer"
+BUFFER_TTL_MIN = 30
+_ACK_EVERY = 10          # quiet ack every N chunks so the operator sees life
+
+
+def _bs_get(key):
+    import db_pg
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT value FROM bot_state WHERE key=%s", (key,))
+        r = cur.fetchone()
+        return r[0] if r and r[0] else None
+
+
+def _bs_set(key, val):
+    import db_pg
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("INSERT INTO bot_state (key,value,updated_at) "
+                    "VALUES (%s,%s,NOW()) ON CONFLICT (key) DO UPDATE "
+                    "SET value=EXCLUDED.value, updated_at=NOW()", (key, val))
+        c.commit()
+
+
+def handle_doc_buffer(text):
+    """Dispatch-chain handler (registered FIRST). Returns a reply when it
+    owns the message, None to fall through. Owns: DOC START/END/CANCEL
+    always; EVERY message while a buffer is active."""
+    if text is None:
+        return None
+    up = text.strip().upper()
+    raw = _bs_get(BUFFER_KEY)
+    buf = json.loads(raw) if raw else None
+
+    if buf:
+        try:
+            started = datetime.fromisoformat(buf["started_at"])
+            if (datetime.utcnow() - started).total_seconds() > BUFFER_TTL_MIN * 60:
+                _bs_set(BUFFER_KEY, "")
+                buf = None
+        except Exception:
+            _bs_set(BUFFER_KEY, "")
+            buf = None
+        if buf is None and up not in ("DOC END", "DOC CANCEL"):
+            # expired mid-paste — loud, don't swallow the message silently
+            if up.startswith("DOC START"):
+                pass                       # falls through to fresh START below
+            else:
+                return ("⏱️ DOC buffer expired (>30 min) — paste lost. "
+                        "DOC START again.")
+
+    if up.startswith("DOC START"):
+        hint = text.strip()[len("DOC START"):].strip()
+        _bs_set(BUFFER_KEY, json.dumps(
+            {"started_at": datetime.utcnow().isoformat(),
+             "hint": hint, "parts": []}))
+        return (f"📋 buffering{' (' + hint + ')' if hint else ''} — paste "
+                f"everything, then DOC END. (DOC CANCEL to abort; "
+                f"{BUFFER_TTL_MIN} min TTL)")
+
+    if buf is None:
+        return None                        # no buffer, not a DOC command
+
+    if up == "DOC CANCEL":
+        _bs_set(BUFFER_KEY, "")
+        return f"📋 buffer discarded ({len(buf['parts'])} chunks)."
+
+    if up == "DOC END":
+        _bs_set(BUFFER_KEY, "")
+        body = "\n".join(buf["parts"])
+        if not body.strip():
+            return "📋 buffer was empty — nothing stored."
+        hint = buf.get("hint") or ""
+        kind = classify_upload(hint or None, body)
+        note_date = parse_note_date(hint or None, body)
+        try:
+            row_id = store_upload(hint or f"paste_{len(buf['parts'])}chunks",
+                                  kind, note_date, body,
+                                  meta={"source_detail": "paste",
+                                        "chunks": len(buf["parts"])})
+        except Exception as e:
+            log.exception("paste store failed")
+            return f"🛑 paste parsed but store FAILED: {e}"
+        preview = re.sub(r"\s+", " ", body[:PREVIEW_CHARS]).strip()
+        return (summary_reply(kind, note_date, len(body),
+                              hint or "pasted document", preview=preview)
+                + f"\n[id {row_id} · {len(buf['parts'])} chunks stitched]")
+
+    # active buffer: append silently (quiet ack every N chunks)
+    buf["parts"].append(text)
+    _bs_set(BUFFER_KEY, json.dumps(buf))
+    n = len(buf["parts"])
+    return f"📋 {n} chunks…" if n % _ACK_EVERY == 0 else ""
+
+
 def handle_telegram_document(token: str, document: dict,
                              caption: str = "") -> str:
     """Full ingest for one Telegram document message. Returns the reply
