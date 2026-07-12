@@ -211,6 +211,66 @@ def store_upload(file_name, kind, note_date, text, meta=None) -> int | None:
     return row_id
 
 
+# ═══════════════════ Equity Hub extract (for DAYPACK) ═══════════════════════
+
+_TKR_CELL = re.compile(r"^[A-Z][A-Z0-9.\-/]{0,6}$")
+EXTRACT_ALWAYS = ("SPX", "SPY", "QQQ", "IWM", "VIX")   # index context rows
+
+
+def extract_equity_hub(text: str, tickers, max_header_rows: int = 3) -> str | None:
+    """Distill a SpotGamma Equity Hub CSV (1.3M chars) to the rows for
+    `tickers` (+ index rows) so the slice fits INSIDE the daypack.
+
+    Structure-defensive (built without a full sample): the symbol column
+    is found by VOTING — the column whose cells most often look like
+    tickers AND hit the wanted set — never by assuming a position. Header
+    block = everything above the first data row (capped). Returns the
+    sliced CSV text, or None when no symbol column can be established
+    (caller falls back to the omit-note, loud)."""
+    if not text:
+        return None
+    wanted = {t.upper() for t in tickers} | set(EXTRACT_ALWAYS)
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    if len(lines) < 3:
+        return None
+
+    # vote for the symbol column over the first 200 candidate rows
+    votes: dict = {}
+    for ln in lines[:200]:
+        for i, cell in enumerate(c.strip().strip('"') for c in ln.split(",")):
+            if _TKR_CELL.match(cell) and cell in wanted:
+                votes[i] = votes.get(i, 0) + 1
+    if not votes:
+        return None
+    col = max(votes, key=votes.get)
+
+    # data starts at the first row whose symbol-cell is ticker-shaped
+    data_start = None
+    for idx, ln in enumerate(lines):
+        cells = [c.strip().strip('"') for c in ln.split(",")]
+        if len(cells) > col and _TKR_CELL.match(cells[col] or ""):
+            data_start = idx
+            break
+    if data_start is None:
+        return None
+    header = lines[max(0, data_start - max_header_rows):data_start]
+
+    hit_rows, seen = [], set()
+    for ln in lines[data_start:]:
+        cells = [c.strip().strip('"') for c in ln.split(",")]
+        sym = cells[col] if len(cells) > col else ""
+        if sym in wanted and sym not in seen:
+            hit_rows.append(ln)
+            seen.add(sym)
+    if not hit_rows:
+        return None
+    missing = sorted(wanted - seen - set(EXTRACT_ALWAYS))
+    out = header + hit_rows
+    tail = (f"# extract: {len(hit_rows)} rows (held + index) of full file; "
+            f"not in file: {' '.join(missing) if missing else 'none'}")
+    return "\n".join(out + [tail])
+
+
 # ═══════════════════════ photo / Vision-OCR ingest ══════════════════════════
 # Operator reality (7/11 night): Tier One Alpha arrives as SCREENSHOTS.
 # Photo -> getFile download -> Claude vision TRANSCRIBES (extraction, not

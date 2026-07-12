@@ -20,6 +20,18 @@ KNOWN_UNCOVERABLE = {
     "NKLA",                         # Nikola — Chapter 11, delisted
     "FDRXX",                        # Fidelity Govt Cash Reserves — money-market fund, no range
     "MICC", "OFRM", "YSWY",         # unresolved / stale-or-unrecognized tickers
+    # Verified NOT in MFR's ticker universe — live enrollment session
+    # 2026-07-12 (Claude-in-Chrome, operator-supervised): searched by
+    # symbol AND company name, no US listing found.
+    "ATUS",                         # Altice USA — absent from MFR search
+    "FI",                           # Fiserv — only foreign listings (FISV.XMEX etc.)
+    "FYBR",                         # Frontier Comms — delisted (Verizon acquisition)
+    "GDNSF",                        # OTC — zero search results
+    "PANDY",                        # Pandora ADR (OTC) — zero search results
+    "ZI",                           # ZoomInfo -> GTM rename; neither in MFR
+    "SETH",                         # ProShares UltraShort Ether — crypto ETFs absent
+                                    #   from MFR equities; ETHUSD covers the trend
+                                    #   via the wrapper link
 }
 
 # Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.

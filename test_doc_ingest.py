@@ -5,7 +5,8 @@ classification, date parsing, text extraction, reply formatting.
 from datetime import date
 
 from tools.doc_ingest import (classify_upload, parse_note_date,
-                              extract_text, summary_reply)
+                              extract_text, summary_reply,
+                              extract_equity_hub)
 
 
 # ── classification (filename wins, then content head) ──
@@ -91,6 +92,37 @@ def test_summary_reply_other_flags_unclassified():
     r = summary_reply("other", date(2026, 7, 11), 10, "x.pdf",
                       preview="hello")
     assert "⚠unclassified" in r and "head: hello" in r
+
+
+# ── equity hub extract (structure-defensive: column found by voting) ──
+
+EH_CSV = """,,Ticker Information,Ticker Information,Spot Gamma,Spot Gamma
+Rank,Sector,Ticker,Name,Spot,Gamma Flip
+1,Tech,AAPL,Apple Inc,232.10,228.50
+2,Health,UNH,UnitedHealth,505.00,498.20
+3,Tech,MSFT,Microsoft,470.30,461.00
+4,Index,SPY,SPDR S&P 500,620.10,616.40
+5,Energy,XOM,Exxon,118.00,115.20
+"""
+
+
+def test_extract_pulls_held_and_index_rows_only():
+    ex = extract_equity_hub(EH_CSV, {"UNH", "MSFT"})
+    assert ex is not None
+    assert "UNH,UnitedHealth" in ex and "MSFT,Microsoft" in ex
+    assert "SPY,SPDR" in ex                       # index context always
+    assert "XOM" not in ex and "AAPL" not in ex   # unheld dropped
+    assert "Rank,Sector,Ticker" in ex             # header block kept
+
+
+def test_extract_reports_missing_held_names():
+    ex = extract_equity_hub(EH_CSV, {"UNH", "ZZZZ"})
+    assert "not in file: ZZZZ" in ex
+
+
+def test_extract_returns_none_when_unparseable():
+    assert extract_equity_hub("no,ticker,data\n1,2,3\n4,5,6", {"UNH"}) is None
+    assert extract_equity_hub("", {"UNH"}) is None
 
 
 # ── paste-capture buffer (bot_state faked in-memory; store faked) ──

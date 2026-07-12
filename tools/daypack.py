@@ -66,13 +66,49 @@ def build_daypack() -> str:
                 WHERE uploaded_at >= now() - make_interval(hours => %s)
                 ORDER BY uploaded_at""", (LOOKBACK_HOURS,))
             rows = cur.fetchall()
+        # latest-per-kind dedupe (7/12): re-sends and stale vintages must
+        # not double the pack — keep the newest of each kind, note skips.
+        latest_of: dict = {}
+        for r in rows:
+            latest_of[r[2]] = r          # rows are uploaded_at-ascending
+        skipped = [f"{r[2]}·id{r[0]}" for r in rows
+                   if latest_of[r[2]][0] != r[0]]
+        rows = [latest_of[k] for k in sorted(latest_of)]
+        if skipped:
+            parts.append(_hdr("UPLOADED DOCS")
+                         + f"older duplicates skipped (latest-per-kind "
+                           f"wins): {' '.join(skipped)}")
         if not rows:
             parts.append(_hdr("UPLOADED DOCS") + "none in the last "
                          f"{LOOKBACK_HOURS}h")
+        held = set()
+        try:
+            from tools.book_direction import book_sides
+            held = {t for t, v in book_sides().items()
+                    if v.get("side") in ("long", "short")}
+        except Exception as e:
+            log.warning("daypack: book sides unavailable for extract: %s", e)
         for rid, fn, kind, nd, chars, text in rows:
             label = (f"DOC {kind} · {nd or 'UNDATED ⚠'} · {fn or '?'} "
                      f"· {chars or 0:,} chars · id {rid}")
             if (chars or 0) > OMIT_OVER:
+                # Equity Hub (operator 7/12): distill to HELD-name rows so
+                # the per-name gamma/vol levels ride INSIDE the pack —
+                # no extra command, DAYPACK does it.
+                if kind == "equity_hub" and held:
+                    try:
+                        from tools.doc_ingest import extract_equity_hub
+                        ex = extract_equity_hub(text, held)
+                    except Exception as e:
+                        log.warning("daypack: equity hub extract failed: %s", e)
+                        ex = None
+                    if ex:
+                        parts.append(_hdr(label + " — EXTRACT (held+index)")
+                                     + ex
+                                     + f"\n(full {chars:,}-char CSV omitted "
+                                       f"— upload separately if the whole "
+                                       f"table is needed)")
+                        continue
                 parts.append(_hdr(label)
                              + f"OMITTED — {chars:,} chars would drown the "
                                f"pack; upload this file to the chat "

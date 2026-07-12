@@ -110,6 +110,29 @@ Late session (commits fe42467, 1522732, 8099c50, 1df3a2e — all deployed):
    BEFORE paste mode existed — those hit the echo handler, harmless, but
    the paste flow exists precisely for this.
 
+Post-sprint session (commits 408afae→, Sat night):
+8. **T1A deep parse** (tools/t1a_parse.py, migration 065): regimes from
+   PROSE (dial selection doesn't survive OCR), levels + flip-distance
+   (Python math on clean prices), ratio fields stored RAW + scale_suspect
+   (OCR eats decimals), econ events. Auto-parses on tier1alpha upload
+   (ingest hook); T1A fact line in REPORT → rides into DAYPACK. First row
+   committed (7/10: gamma POSITIVE, flip 7456 +1.2%, throttle 7.27,
+   systematics BUYERS, strategic NEUTRAL, CPI 7/14 ~1.13%). Date parser:
+   TEXTUAL dates now beat numeric axis noise (doc-5 lesson). doc 5 = a
+   degraded duplicate of the 7/10 report (skipped via --skip; ages out).
+9. **KEITH SS-drop invalidation**: ✗SSdrop@date tags in KEITH + weekly
+   (flagged, never hidden).
+10. **DAYPACK Equity Hub EXTRACT**: held+index rows distilled from the
+    1.3M-char CSV INSIDE the pack (structure-defensive column voting) +
+    latest-per-kind dedupe with loud skip note. No new commands — upload
+    then DAYPACK, done. Pack ≈54k chars w/ everything.
+11. LLM economics settled: classifier GATED OFF (CLASSIFIER_ENABLED=1 to
+    revive, ~$8-24/mo); OCR on (pennies, operator-initiated); notifier
+    untouched (~$13/wk, WATCH via _llm_ledger.py — 5x'd this week);
+    heavyweight recommender still unreachable (5/24 rollback confirmed).
+    Retired-model fix: sonnet-4-20250514 404s; classifier→sonnet-5 (gated),
+    OCR→haiku-4.5, decision_engine sonnet-4-5 alive.
+
 ## POST-DEPLOY CHECKS (do first next session if not yet done)
 - Telegram: REPORT (~3.3k, 1 msg) · REPORT NOW (~25s, grouped cues) ·
   REPORT UPLOAD (.txt attach) · TARGET LIST (4 rows + BUXX casheq) ·
