@@ -79,14 +79,18 @@ def record_bucket_change(ticker, new_bucket, source_email_id=None,
             "date": str(eff), "quad_monthly": qm, "quad_quarterly": qq}
 
 
-def sync_buckets(mapping: dict, source_email_id=None, detect_removals=False) -> dict:
+def sync_buckets(mapping: dict, source_email_id=None, detect_removals=False,
+                 effective_date=None) -> dict:
     """Apply a full {ticker: bucket} mapping via record_bucket_change. When
     detect_removals=True, tickers currently in ticker_tags but absent from the
-    mapping are recorded as 'removed'. Returns a summary of transitions."""
+    mapping are recorded as 'removed'. effective_date stamps every transition
+    with the REPORT's date (a 7/6 PDF ingested 7/12 records 7/6 — a fact
+    without its own date isn't a fact). Returns a summary of transitions."""
     import db_pg
     transitions = []
     for tk, bk in mapping.items():
-        t = record_bucket_change(tk, bk, source_email_id=source_email_id)
+        t = record_bucket_change(tk, bk, source_email_id=source_email_id,
+                                 effective_date=effective_date)
         if t:
             transitions.append(t)
     if detect_removals:
@@ -95,7 +99,8 @@ def sync_buckets(mapping: dict, source_email_id=None, detect_removals=False) -> 
                         "WHERE hedgeye_bucket_0629 IS NOT NULL")
             current = {r[0] for r in cur.fetchall()}
         for tk in sorted(current - {k.strip().upper() for k in mapping}):
-            t = record_bucket_change(tk, "removed", source_email_id=source_email_id)
+            t = record_bucket_change(tk, "removed", source_email_id=source_email_id,
+                                     effective_date=effective_date)
             if t:
                 transitions.append(t)
     return {"transitions": len(transitions), "detail": transitions}

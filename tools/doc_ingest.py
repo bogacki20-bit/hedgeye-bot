@@ -57,6 +57,11 @@ _KIND_PATTERNS = [
     ("tier1alpha",
      r"tier_?\s*(one|1)_?\s*alpha|(?<![a-z0-9])t1a(?![a-z0-9])",
      r"tier\s+(one|1)\s+alpha"),
+    # Hedgeye's long/short-list PDF ('Updated Copy of Long Short List
+    # M.D.YY.pdf'); masthead 'HEDGEYE POSITION MONITOR (MM/DD/YYYY)'.
+    ("position_monitor",
+     r"position_?\s*monitor|long_?[\s_]*short_?[\s_]*list|posmon",
+     r"hedgeye\s+position\s+monitor"),
 ]
 
 # TEXTUAL formats first (7/12 lesson, T1A doc 5: a numeric chart-axis
@@ -152,18 +157,28 @@ def extract_text(file_name: str | None, data: bytes) -> tuple:
 
 
 def _maybe_deep_parse(kind, row_id, note_date, text) -> str:
-    """Post-store deep parses by kind (tier1alpha -> t1a_daily). Guarded:
-    a parse failure NEVER blocks the upload reply — it appends loudly."""
-    if kind != "tier1alpha":
-        return ""
-    try:
-        from tools.t1a_parse import ingest_hook
-        line = ingest_hook(row_id, note_date, text)
-        return "\n" + (line or "⚠ T1A deep-parse found no core fields "
-                               "(layout change? check _doc_dump)")
-    except Exception as e:
-        log.warning("t1a deep parse failed: %s", e)
-        return f"\n⚠ T1A deep-parse error: {e}"
+    """Post-store deep parses by kind (tier1alpha -> t1a_daily;
+    position_monitor -> bucket sync + CHANGES block). Guarded: a parse
+    failure NEVER blocks the upload reply — it appends loudly."""
+    if kind == "tier1alpha":
+        try:
+            from tools.t1a_parse import ingest_hook
+            line = ingest_hook(row_id, note_date, text)
+            return "\n" + (line or "⚠ T1A deep-parse found no core fields "
+                                   "(layout change? check _doc_dump)")
+        except Exception as e:
+            log.warning("t1a deep parse failed: %s", e)
+            return f"\n⚠ T1A deep-parse error: {e}"
+    if kind == "position_monitor":
+        try:
+            from tools.pm_parse import ingest_hook
+            line = ingest_hook(row_id, note_date, text)
+            return "\n" + (line or "⚠ PM deep-parse returned nothing "
+                                   "(layout change? check _doc_dump)")
+        except Exception as e:
+            log.warning("pm deep parse failed: %s", e)
+            return f"\n⚠ PM deep-parse error: {e}"
+    return ""
 
 
 def summary_reply(kind, note_date, chars, file_name, note=None,
