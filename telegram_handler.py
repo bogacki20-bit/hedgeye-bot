@@ -346,11 +346,15 @@ def _dispatch_message(token, chat_id, text):
     def _dpk():  from tools.daypack import handle_daypack_command;        return handle_daypack_command(text)
     def _kp():   from tools.keith_pattern import handle_keith_command;    return handle_keith_command(text)
 
+    # report runs BEFORE screen: report owns exact sentinels (REPORT*, BOOK
+    # FULL) while screen's orphan-modifier catcher claims loose words like
+    # 'book' — exact commands must win (live miss 7/12: 'book full' ate by
+    # the screener's no-active-screen reply).
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
-                     ("quad", _quad), ("screen", _scr),
+                     ("quad", _quad), ("report", _rpt), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
-                     ("report", _rpt), ("daypack", _dpk), ("keith", _kp)):
+                     ("daypack", _dpk), ("keith", _kp)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)
