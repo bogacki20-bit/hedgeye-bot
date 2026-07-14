@@ -581,7 +581,7 @@ def _fmt_gated(r) -> str:
     src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
     td = (r["trend_dir"] or "none") + (f"·{src}" if src else "")
     rp = _rp_str(r)
-    return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp} px={_px_str(r)}"
+    return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp} px={_px_str(r)} rng={_rng_str(r)}"
 
 
 def _num(v, sign=False, nd=2) -> str:
@@ -615,7 +615,7 @@ def _fmt_row(r, corr) -> str:
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     th = " ⚠️trend-against" if r.get("_thesis") else ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
-            f"rp={rp:<8} px={_px_str(r):<7} mom={md:<4} h={_num(r.get('hurst')):<5} "
+            f"rp={rp:<8} px={_px_str(r):<7} rng={_rng_str(r):<17} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
             f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}")
 
@@ -654,12 +654,14 @@ def _refresh_range_pos_live(rows):
         for r in rows:
             r["_rp_stale"] = True
             r["_price"] = None
+            r["_rlo"] = r["_rhi"] = None
         return
     for r in rows:
         lo, hi, px_eod, sd, fa = rng.get(r["ticker"], (None, None, None, None, None))
         lp = live.get(symmap.get(r["ticker"]))
         good = (lp is not None and lp > 0 and lo is not None and hi is not None and hi > lo
                 and (px_eod is None or (px_eod > 0 and _RP_LIVE_MIN <= lp / px_eod <= _RP_LIVE_MAX)))
+        r["_rlo"], r["_rhi"] = lo, hi
         if good:
             r["range_pos"] = (lp - lo) / (hi - lo)
             r["_price"] = lp
@@ -679,6 +681,13 @@ def _rp_str(r) -> str:
 def _px_str(r) -> str:
     px = r.get("_price")
     return f"{float(px):.2f}" if px is not None else "?"
+
+
+def _rng_str(r) -> str:
+    lo, hi = r.get("_rlo"), r.get("_rhi")
+    if lo is None or hi is None:
+        return "[?]"
+    return f"[{float(lo):.2f}-{float(hi):.2f}]"
 
 
 def run_screen_q(q: dict) -> str:
