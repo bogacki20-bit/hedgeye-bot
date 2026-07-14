@@ -30,7 +30,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -668,7 +668,32 @@ def _spotgamma_framing_line(sg: dict, price) -> str:
     return "\n".join(lines)
 
 
-def _zone_summary_line(label: str, price, low, high) -> str:
+MFR_SNAPSHOT_MAX_AGE_HOURS = float(os.getenv("MFR_SNAPSHOT_MAX_AGE_HOURS", "20"))
+
+
+def _snapshot_stale_note(snapshot_date, fetched_at, *, now=None,
+                         max_age_hours: float = MFR_SNAPSHOT_MAX_AGE_HOURS):
+    if now is None:
+        now = datetime.now(timezone.utc)
+    ref = None
+    if fetched_at is not None:
+        ref = fetched_at
+        if getattr(ref, "tzinfo", None) is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+    elif snapshot_date is not None:
+        d = snapshot_date
+        ref = datetime(d.year, d.month, d.day, 20, 0, 0, tzinfo=timezone.utc)
+    else:
+        return "age unknown"
+    age_hours = (now - ref).total_seconds() / 3600.0
+    if age_hours < max_age_hours:
+        return None
+    if age_hours >= 48:
+        return f"{int(round(age_hours / 24))}d old"
+    return f"{int(round(age_hours))}h old"
+
+
+def _zone_summary_line(label: str, price, low, high, *, stale_note=None) -> str:
     """Deterministic one-liner the LLM cannot misread.
 
     Pre-computes 'where is price within [low, high]' using price_monitor.compute_zone
@@ -698,8 +723,11 @@ def _zone_summary_line(label: str, price, low, high) -> str:
         verdict = "BREACH LOW"
     else:
         verdict = "NOT a breach"
-    return (f"{label} zone for price {p} in range [{lo}, {hi}]: "
+    line = (f"{label} zone for price {p} in range [{lo}, {hi}]: "
             f"{zone} ({pct:.0f}% through range; {verdict})")
+    if stale_note:
+        line = f"[STALE: {stale_note}] {line}"
+    return line
 
 
 def _hurst_regime_line(value) -> Optional[str]:
@@ -1047,7 +1075,30 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     yahoo_block = ctx.get("yahoo") or {}
     rr_block = ctx.get("risk_range") or {}
     etf_block = ctx.get("etf_pro_range") or {}
-    mfr_price = mfr_block.get("price") or yahoo_block.get("price")
+    _ticker = (ctx.get("ticker") or "").upper()
+    _live_price = None
+    try:
+        from price_monitor import HEDGEYE_TO_YFINANCE, fetch_prices
+        _yf = HEDGEYE_TO_YFINANCE.get(_ticker) or _ticker
+        if _yf:
+            _live_price = fetch_prices([_yf]).get(_yf)
+    except Exception as e:
+        log.warning("decision_engine: live price fetch failed for %s: %s", _ticker, e)
+    if _live_price is not None:
+        _pz = _live_price
+        _pnote = None
+        _psrc = f"{_live_price} (live yfinance @ decision time)"
+    else:
+        _pz = mfr_block.get("price") or yahoo_block.get("price")
+        _age = _snapshot_stale_note(mfr_block.get("snapshot_date"), mfr_block.get("fetched_at"))
+        _pnote = (f"live fetch failed; last snapshot {_age}" if _age else "live fetch failed; using last snapshot")
+        _psrc = f"{_pz} (!! {_pnote})"
+    dyn.append("## Position-in-range - LIVE (Python-computed at decision time; use THESE, not the range JSON below)")
+    dyn.append(f"Price used for all range math: {_psrc}")
+    dyn.append(_zone_summary_line("Hedgeye Risk Range", _pz, rr_block.get("buy_trade"), rr_block.get("sell_trade"), stale_note=_pnote))
+    dyn.append(_zone_summary_line("ETF Pro Range", _pz, etf_block.get("range_low"), etf_block.get("range_high"), stale_note=_pnote))
+    dyn.append(_zone_summary_line("MFR", _pz, mfr_block.get("range_low"), mfr_block.get("range_high"), stale_note=_pnote))
+    dyn.append("")
 
     # Cross-source range alignment FIRST, above the per-source dumps, so the
     # LLM reads the consensus/divergence verdict before the raw numbers.
@@ -1064,17 +1115,10 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
         sections.append("")
 
     sections.append("## Hedgeye Risk Range (latest daily signal — PRIMARY range source)")
-    sections.append(_zone_summary_line(
-        "Hedgeye Risk Range", mfr_price,
-        rr_block.get("buy_trade"), rr_block.get("sell_trade"),
-    ))
+    sections.append("(Range levels below are the daily signal. Current position-in-range is computed live in the per-call 'Position-in-range - LIVE' section.)")
     sections.append(json.dumps(_trim(rr_block), indent=2, default=str))
     sections.append("")
     sections.append("## Hedgeye ETF Pro Range (Monday weekly — SECONDARY range source for ETFs)")
-    sections.append(_zone_summary_line(
-        "ETF Pro Range", mfr_price,
-        etf_block.get("range_low"), etf_block.get("range_high"),
-    ))
     sections.append(json.dumps(_trim(etf_block), indent=2, default=str))
     sections.append("")
     # SpotGamma stripped from live path 2026-05-24 — block intentionally absent.
@@ -1086,10 +1130,6 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
     sections.append("## MFR (latest fractal range — TERTIARY range source; secondary to Hedgeye)")
     # Deterministic zone + trend so the LLM can't hallucinate "above range high"
     # or "pullback" out of the raw JSON. Anchor wording must match price_monitor.
-    sections.append(_zone_summary_line(
-        "MFR", mfr_block.get("price"),
-        mfr_block.get("range_low"), mfr_block.get("range_high"),
-    ))
     mfr_trend = mfr_block.get("trend_signal")
     if mfr_trend:
         sections.append(f"Recent trend: {mfr_trend} (from MFR trend_signal)")
