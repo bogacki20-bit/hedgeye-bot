@@ -580,8 +580,8 @@ def _is_mfr_only_topidea(r) -> bool:
 def _fmt_gated(r) -> str:
     src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
     td = (r["trend_dir"] or "none") + (f"·{src}" if src else "")
-    rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
-    return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp}"
+    rp = _rp_str(r)
+    return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp} px={_px_str(r)}"
 
 
 def _num(v, sign=False, nd=2) -> str:
@@ -592,7 +592,7 @@ def _num(v, sign=False, nd=2) -> str:
 
 def _fmt_row(r, corr) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
-    rp = "n/a" if r["range_pos"] is None else f"{float(r['range_pos']):.2f}"
+    rp = _rp_str(r)
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
     src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
     trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "")
@@ -615,9 +615,70 @@ def _fmt_row(r, corr) -> str:
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     th = " ⚠️trend-against" if r.get("_thesis") else ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
-            f"rp={rp:<5} mom={md:<4} h={_num(r.get('hurst')):<5} "
+            f"rp={rp:<8} px={_px_str(r):<7} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
             f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}")
+
+
+_RP_LIVE_MIN, _RP_LIVE_MAX = 0.2, 5.0
+
+
+def _st_ranges(tickers):
+    tickers = [t for t in {t for t in tickers if t}]
+    if not tickers:
+        return {}
+    import db_pg
+    out = {}
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT ON (ticker) ticker, range_low::float, range_high::float, "
+                "price::float, snapshot_date, fetched_at "
+                "FROM mfr_snapshots WHERE ticker = ANY(%s) "
+                "ORDER BY ticker, snapshot_date DESC", (tickers,))
+            for t, lo, hi, px, sd, fa in cur.fetchall():
+                out[t] = (lo, hi, px, sd, fa)
+    except Exception as e:
+        log.warning("SCREEN: short-term range fetch failed: %s", e)
+    return out
+
+
+def _refresh_range_pos_live(rows):
+    try:
+        rng = _st_ranges([r["ticker"] for r in rows])
+        from price_monitor import HEDGEYE_TO_YFINANCE, fetch_prices
+        symmap = {r["ticker"]: (HEDGEYE_TO_YFINANCE.get(r["ticker"]) or r["ticker"]) for r in rows}
+        live = fetch_prices(sorted({s for s in symmap.values() if s}))
+    except Exception as e:
+        log.warning("SCREEN: live range_pos refresh unavailable (%s) - using EOD", e)
+        for r in rows:
+            r["_rp_stale"] = True
+            r["_price"] = None
+        return
+    for r in rows:
+        lo, hi, px_eod, sd, fa = rng.get(r["ticker"], (None, None, None, None, None))
+        lp = live.get(symmap.get(r["ticker"]))
+        good = (lp is not None and lp > 0 and lo is not None and hi is not None and hi > lo
+                and (px_eod is None or (px_eod > 0 and _RP_LIVE_MIN <= lp / px_eod <= _RP_LIVE_MAX)))
+        if good:
+            r["range_pos"] = (lp - lo) / (hi - lo)
+            r["_price"] = lp
+            r["_rp_stale"] = False
+        else:
+            r["_price"] = px_eod
+            r["_rp_stale"] = True
+
+
+def _rp_str(r) -> str:
+    if r.get("range_pos") is None:
+        return "n/a"
+    s = f"{float(r['range_pos']):.2f}"
+    return s + "!eod" if r.get("_rp_stale") else s
+
+
+def _px_str(r) -> str:
+    px = r.get("_price")
+    return f"{float(px):.2f}" if px is not None else "?"
 
 
 def run_screen_q(q: dict) -> str:
@@ -692,6 +753,7 @@ def run_screen_q(q: dict) -> str:
 
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
+    _refresh_range_pos_live(ranged)
 
     # TREND gate — evaluates COALESCE(hedgeye, mfr) via v_screener.trend_dir, the
     # identical field _fmt_row displays. An MFR-bullish name with no Hedgeye RR
