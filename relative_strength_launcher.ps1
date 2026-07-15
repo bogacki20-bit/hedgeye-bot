@@ -52,8 +52,16 @@ Set-Location $repo
 & $python -m tools.relative_strength *>&1 |
     ForEach-Object { $_.ToString() } |
     Out-File -FilePath $logFile -Append -Encoding utf8
+$rsExit = $LASTEXITCODE
 
-$exit = $LASTEXITCODE
+# Volume signal (decelerating-dip trigger) — same daily run, right after RS.
+& $python -m tools.volume_signal *>&1 |
+    ForEach-Object { $_.ToString() } |
+    Out-File -FilePath $logFile -Append -Encoding utf8
+$volExit = $LASTEXITCODE
+
+# Surface either failure: exit nonzero if RS or volume failed (RS code wins).
+if ($rsExit -ne 0) { $exit = $rsExit } elseif ($volExit -ne 0) { $exit = $volExit } else { $exit = 0 }
 $end  = (Get-Date).ToString('o')
-Add-Content -Path $logFile -Value "==== relative_strength exit $end rc=$exit ===="
+Add-Content -Path $logFile -Value "==== relative_strength rc=$rsExit | volume_signal rc=$volExit | exit $end rc=$exit ===="
 exit $exit
