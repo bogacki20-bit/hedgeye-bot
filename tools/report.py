@@ -351,6 +351,13 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         except Exception as e:
             lines.append(f"RS/GRID: unavailable ({e})")
 
+        # ── volume signal (decelerating-dip trigger) ──
+        try:
+            from tools.volume_signal import render_report_block as _vol_block
+            lines.append(_vol_block())
+        except Exception as e:
+            lines.append(f"VOLUME: unavailable ({e})")
+
         # ── SS flow ──
         try:
             from tools.ss_flow import churn_summary

@@ -394,6 +394,11 @@ def build_report_now() -> str:
         lines.append(render_report_block())
     except Exception as e:
         lines.append(f"RS/GRID: unavailable ({e})")
+    try:
+        from tools.volume_signal import render_report_block as _vol_block
+        lines.append(_vol_block())
+    except Exception as e:
+        lines.append(f"VOLUME: unavailable ({e})")
     return "\n".join(lines)
 
 
