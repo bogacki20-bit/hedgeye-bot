@@ -52,6 +52,21 @@ SECTOR_ETFS = ["XLK", "XLV", "XLF", "XLE", "XLI",
                "XLY", "XLP", "XLU", "XLB", "XLRE", "XLC"]
 BENCHMARK = "SPY"
 
+# Bond / credit / dollar ETFs added to the RS universe so they rank against
+# SPY alongside the sectors (TLT strong vs SPY = risk-off; HYG weak = credit
+# stress). Roadmap benchmarks: SPY, TLT, SHY, HYG, LQD (+ UUP for correlation).
+MACRO_ETFS = ["TLT", "SHY", "HYG", "LQD", "UUP"]
+UNIVERSE = SECTOR_ETFS + MACRO_ETFS
+
+# Per-ticker return correlation is stored against each of these (roadmap: SPY
+# and UUP). SPY = beta-ish; UUP = dollar sensitivity.
+CORR_BENCHMARKS = ["SPY", "UUP"]
+
+# Risk-on/off + credit-quality ratios (spec #5). RS(HYG vs TLT) == HYG/TLT
+# momentum, so these are just RS rows with ticker=HYG, benchmark=TLT / LQD.
+# Rising = risk-on / credit leading.
+RORO_PAIRS = [("HYG", "TLT"), ("HYG", "LQD")]
+
 TRADE_WINDOW = 10     # sessions — Hedgeye TRADE horizon for RS
 TREND_WINDOW = 60     # sessions — Hedgeye TREND
 TAIL_WINDOW = 200     # sessions — Hedgeye TAIL
@@ -224,19 +239,22 @@ def diversification_regime(avg_corr: Optional[float]) -> Optional[str]:
 
 # ── Orchestration ────────────────────────────────────────────────────────────
 def _compute(benchmark: str, corr_window: int) -> dict:
-    """Fetch prices and compute the full RS + correlation payload. Pure of DB
+    """Fetch prices once and compute the full RS + correlation payload for the
+    UNIVERSE (11 sectors + TLT/SHY/HYG/LQD/UUP) vs `benchmark`, plus per-ticker
+    correlation to SPY & UUP and the HYG/TLT + HYG/LQD RORO ratios. Pure of DB
     writes so it can be printed in --dry-run."""
     lookback = max(TAIL_WINDOW + SLOPE_WINDOW, corr_window) + 25
+    need = list(dict.fromkeys(UNIVERSE + [benchmark] + CORR_BENCHMARKS))
     prices: dict[str, list[tuple[str, float]]] = {}
-    prices[benchmark] = fetch_close_series(benchmark, lookback)
-    for t in SECTOR_ETFS:
+    for t in need:
         prices[t] = fetch_close_series(t, lookback)
 
     bench = prices.get(benchmark) or []
     rows: dict[str, dict] = {}
-    ret_map: dict[str, list[float]] = {}
 
-    for t in SECTOR_ETFS:
+    for t in UNIVERSE:
+        if t == benchmark:
+            continue
         sec = prices.get(t) or []
         if not sec or not bench:
             log.warning("no price data for %s or benchmark; skipping", t)
@@ -255,11 +273,8 @@ def _compute(benchmark: str, corr_window: int) -> dict:
             "rs_slope": norm_slope(ratio, SLOPE_WINDOW),
             "n_obs": len(ratio),
         }
-        # daily returns aligned to the correlation window (own dates ok — the
-        # matrix pairs are aligned pairwise below on close series)
-        ret_map[t] = returns([c for _, c in sec])
 
-    # Ranks per duration.
+    # Ranks per duration — across the whole universe vs this benchmark.
     rt = rank_desc({t: r["rs_trade"] for t, r in rows.items()})
     rr = rank_desc({t: r["rs_trend"] for t, r in rows.items()})
     rl = rank_desc({t: r["rs_tail"] for t, r in rows.items()})
@@ -275,7 +290,7 @@ def _compute(benchmark: str, corr_window: int) -> dict:
         r["rs_high"] = rs_high
         r["rolling_over"] = bool(rs_high and (r["rs_slope"] or 0) < 0)
 
-    # ── rp join from Hedgeye risk ranges ────────────────────────────────────
+    # ── rp join from mfr ranges ─────────────────────────────────────────────
     ranges = _load_active_ranges()
     for t, r in rows.items():
         rp = None
@@ -290,12 +305,13 @@ def _compute(benchmark: str, corr_window: int) -> dict:
         r["range_broken"] = broken
         r["grid_cell"] = grid_cell(r.get("rs_high", False), rp)
 
-    # ── Sector-vs-sector correlation matrix ─────────────────────────────────
+    # ── Correlation matrix over the FULL universe (captures the HYG-TLT credit
+    #    relationship, stock/bond correlation, etc.) ──
     pairs: list[dict] = []
-    tickers = [t for t in SECTOR_ETFS if t in prices and prices[t]]
-    for i in range(len(tickers)):
-        for j in range(i + 1, len(tickers)):
-            a, b = tickers[i], tickers[j]
+    uni = [t for t in UNIVERSE if prices.get(t)]
+    for i in range(len(uni)):
+        for j in range(i + 1, len(uni)):
+            a, b = uni[i], uni[j]
             _d, ca, cb = align_on_date(prices[a], prices[b])
             ra, rb = returns(ca), returns(cb)
             c = pearson(ra[-corr_window:], rb[-corr_window:])
@@ -304,19 +320,62 @@ def _compute(benchmark: str, corr_window: int) -> dict:
             pairs.append({"a": a, "b": b, "corr": round(c, 5),
                           "n": min(len(ra[-corr_window:]), len(rb[-corr_window:]))})
 
-    corrs = [p["corr"] for p in pairs]
-    avg_corr = round(sum(corrs) / len(corrs), 5) if corrs else None
+    # Diversification gauge stays SECTOR-only (its job is equity-book crowding;
+    # including bonds would dilute the signal).
+    sec_corrs = [p["corr"] for p in pairs
+                 if p["a"] in SECTOR_ETFS and p["b"] in SECTOR_ETFS]
+    avg_corr = round(sum(sec_corrs) / len(sec_corrs), 5) if sec_corrs else None
     div = {
         "window": corr_window,
         "avg_pairwise_corr": avg_corr,
-        "max_pairwise_corr": round(max(corrs), 5) if corrs else None,
-        "min_pairwise_corr": round(min(corrs), 5) if corrs else None,
-        "n_pairs": len(pairs),
+        "max_pairwise_corr": round(max(sec_corrs), 5) if sec_corrs else None,
+        "min_pairwise_corr": round(min(sec_corrs), 5) if sec_corrs else None,
+        "n_pairs": len(sec_corrs),
         "regime": diversification_regime(avg_corr),
     }
 
+    # ── Per-ticker correlation to SPY and UUP (roadmap) ──
+    corr_to_bench: list[dict] = []
+    for tgt in CORR_BENCHMARKS:
+        tp = prices.get(tgt) or []
+        if not tp:
+            continue
+        for t in UNIVERSE:
+            if t == tgt:
+                continue
+            sp = prices.get(t) or []
+            if not sp:
+                continue
+            _d, ca, cb = align_on_date(sp, tp)
+            c = pearson(returns(ca)[-corr_window:], returns(cb)[-corr_window:])
+            if c is None:
+                continue
+            corr_to_bench.append({"a": t, "b": tgt, "corr": round(c, 5),
+                                  "n": min(corr_window, max(len(ca) - 1, 0))})
+
+    # ── RORO / credit-quality ratios (spec #5): RS of HYG vs TLT and vs LQD.
+    #    Rising = risk-on / credit leading. ──
+    roro: list[dict] = []
+    for num, den in RORO_PAIRS:
+        np_, dp = prices.get(num) or [], prices.get(den) or []
+        if not np_ or not dp:
+            continue
+        _d, nc, dc = align_on_date(np_, dp)
+        ratio = rs_ratio_series(nc, dc)
+        if len(ratio) < TRADE_WINDOW + 1:
+            continue
+        roro.append({
+            "ticker": num, "benchmark": den,
+            "rs_trade": roc(ratio, TRADE_WINDOW),
+            "rs_trend": roc(ratio, TREND_WINDOW),
+            "rs_tail": roc(ratio, TAIL_WINDOW),
+            "rs_slope": norm_slope(ratio, SLOPE_WINDOW),
+            "n_obs": len(ratio),
+        })
+
     return {"rows": rows, "pairs": pairs, "diversification": div,
-            "benchmark": benchmark}
+            "benchmark": benchmark, "corr_to_bench": corr_to_bench,
+            "roro": roro}
 
 
 def _load_active_ranges() -> dict[str, tuple[float, float]]:
@@ -382,6 +441,16 @@ def _print(payload: dict) -> None:
           f"{d['avg_pairwise_corr'] if d['avg_pairwise_corr'] is not None else 'n/a'} "
           f"[{d['regime'] or 'n/a'}]  "
           f"(min {d['min_pairwise_corr']}, max {d['max_pairwise_corr']})")
+    roro = payload.get("roro", [])
+    if roro:
+        def _rd(num, den):
+            m = next((x for x in roro
+                      if x["ticker"] == num and x["benchmark"] == den), None)
+            v = m["rs_trend"] if m else None
+            return f"{v*100:+.1f}%" if v is not None else "n/a"
+        print(f"\nRORO (60d ratio momentum, + = risk-on / credit leading): "
+              f"HYG/TLT {_rd('HYG','TLT')} · credit HYG/LQD {_rd('HYG','LQD')}")
+
     pucks = [r["ticker"] for r in rows if r.get("grid_cell") == "PASS_THE_PUCK"]
     if pucks:
         print(f"\n🟢 PASS THE PUCK (leader on sale): {', '.join(pucks)}")
@@ -441,6 +510,47 @@ def _persist(payload: dict, snapshot_date: dt.date) -> int:
                     )
                 except Exception as e:
                     log.warning("correlation insert failed %s-%s: %s", p["a"], p["b"], e)
+
+            # per-ticker correlation to SPY / UUP → correlation_snapshots
+            for p in payload.get("corr_to_bench", []):
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO correlation_snapshots
+                          (snapshot_date, ticker_a, ticker_b, window_days,
+                           correlation, n_obs)
+                        VALUES (%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (snapshot_date, ticker_a, ticker_b, window_days)
+                          DO UPDATE SET correlation=EXCLUDED.correlation,
+                                        n_obs=EXCLUDED.n_obs, computed_at=NOW()
+                        """,
+                        (snapshot_date, p["a"], p["b"],
+                         payload["diversification"]["window"], p["corr"], p["n"]),
+                    )
+                except Exception as e:
+                    log.warning("corr-to-bench insert failed %s-%s: %s",
+                                p["a"], p["b"], e)
+
+            # RORO / credit ratios → rs_snapshots (ticker=HYG, benchmark=TLT/LQD)
+            for r in payload.get("roro", []):
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO rs_snapshots
+                          (snapshot_date, ticker, benchmark, rs_trade, rs_trend,
+                           rs_tail, rs_slope, n_obs)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (snapshot_date, ticker, benchmark) DO UPDATE SET
+                           rs_trade=EXCLUDED.rs_trade, rs_trend=EXCLUDED.rs_trend,
+                           rs_tail=EXCLUDED.rs_tail, rs_slope=EXCLUDED.rs_slope,
+                           n_obs=EXCLUDED.n_obs, computed_at=NOW()
+                        """,
+                        (snapshot_date, r["ticker"], r["benchmark"], r["rs_trade"],
+                         r["rs_trend"], r["rs_tail"], r["rs_slope"], r["n_obs"]),
+                    )
+                except Exception as e:
+                    log.warning("roro insert failed %s/%s: %s",
+                                r["ticker"], r["benchmark"], e)
 
             d = payload["diversification"]
             try:
@@ -541,6 +651,17 @@ def render_report_block(benchmark: str = BENCHMARK,
             )
             d = cur.fetchone()
 
+            # RORO / credit ratios: RS(HYG vs TLT) and RS(HYG vs LQD) rows.
+            cur.execute(
+                """
+                SELECT benchmark, rs_trend FROM rs_snapshots
+                WHERE ticker = 'HYG' AND benchmark IN ('TLT','LQD')
+                  AND snapshot_date = (SELECT max(snapshot_date) FROM rs_snapshots
+                                       WHERE ticker = 'HYG' AND benchmark = 'TLT')
+                """
+            )
+            roro = {b: v for b, v in cur.fetchall()}
+
         line1 = (f"RS/GRID vs {benchmark}{stale} (rank 1-{len(rows)}): "
                  f"\U0001F7E2PUCK {' '.join(pucks[:max_names]) or 'none'} · "
                  f"\U0001F534TRAP {' '.join(traps[:max_names]) or 'none'} · "
@@ -551,6 +672,14 @@ def render_report_block(benchmark: str = BENCHMARK,
                      f"[{d[1]}] ({d[2]} pairs)")
         else:
             line2 = "DIVERSIFICATION: no snapshot"
+
+        def _r(b):
+            v = roro.get(b)
+            return f"{float(v)*100:+.1f}%" if v is not None else "n/a"
+        if roro:
+            line3 = (f"RORO: HYG/TLT {_r('TLT')} · credit HYG/LQD {_r('LQD')} "
+                     f"(+ = risk-on)")
+            return line1 + "\n" + line2 + "\n" + line3
         return line1 + "\n" + line2
     except Exception as e:
         log.warning("render_report_block failed: %s", e)
