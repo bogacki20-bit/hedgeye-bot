@@ -389,6 +389,11 @@ def build_report_now() -> str:
     lines.append(f"coverage: {len(wanted)} priced-universe · {miss_s} · "
                  f"{untagged_skipped} untagged (no sector tag — invisible "
                  f"to rotation cues)")
+    try:
+        from tools.relative_strength import render_report_block
+        lines.append(render_report_block())
+    except Exception as e:
+        lines.append(f"RS/GRID: unavailable ({e})")
     return "\n".join(lines)
 
 

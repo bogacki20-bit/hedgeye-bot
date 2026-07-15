@@ -344,6 +344,13 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         except Exception as e:
             lines.append(f"SECTOR FLOW/RANGE/MACRO: unavailable ({e})")
 
+        # ── RS / grid (companion to sector flow) ──
+        try:
+            from tools.relative_strength import render_report_block
+            lines.append(render_report_block())
+        except Exception as e:
+            lines.append(f"RS/GRID: unavailable ({e})")
+
         # ── SS flow ──
         try:
             from tools.ss_flow import churn_summary
