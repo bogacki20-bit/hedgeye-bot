@@ -502,7 +502,16 @@ def render_report_block(benchmark: str = BENCHMARK,
             if not rows:
                 return "RS/GRID: no snapshot (run tools.relative_strength)"
             snap = rows[0][7]
-            stale = "" if snap == _date.today() else f" [stale {snap}]"
+            # RS is a daily EOD signal, so through the trading day the latest
+            # snapshot is the prior close — that is NOT stale. Only warn when
+            # the daily job has genuinely stopped (older than a long weekend).
+            age = (_date.today() - snap).days
+            if age <= 0:
+                stale = ""
+            elif age <= 3:
+                stale = f" [{snap}]"          # last close — normal pre-EOD
+            else:
+                stale = f" [STALE {snap}]"    # daily refresh likely stopped
 
             pucks, traps, leaders, laggards = [], [], [], []
             for (tkr, _rst, rk, rp, cell, rolling, broken, _d) in rows:
