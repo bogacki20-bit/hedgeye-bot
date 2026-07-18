@@ -140,6 +140,22 @@ def down_day_volume_slope(closes: list[float], volumes: list[float],
     return _norm_slope(vols), len(down_idx)
 
 
+def decel_streak(closes: list[float], volumes: list[float]) -> int:
+    """Consecutive sessions ending today that are 'decelerating' — a down day
+    (close < prior close) on lighter volume (volume < prior volume). Counts
+    back from the latest session and stops at the first day that doesn't
+    qualify. 0 = today isn't a decelerating down day. "3rd day of decel vol" = 3.
+    """
+    n = min(len(closes), len(volumes))
+    streak = 0
+    for i in range(n - 1, 0, -1):
+        if closes[i] < closes[i - 1] and volumes[i] < volumes[i - 1]:
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def price_change(closes: list[float], window: int = PRICE_WINDOW) -> Optional[float]:
     if len(closes) <= window:
         return None
@@ -163,6 +179,7 @@ def _compute() -> dict:
         vv, avg = vol_vs_20d(volumes)
         slope, n_used = down_day_volume_slope(closes, volumes)
         pchg = price_change(closes)
+        streak = decel_streak(closes, volumes)
         decel = slope is not None and slope < 0
         pdown = pchg is not None and pchg < 0
         rows[t] = {
@@ -172,6 +189,7 @@ def _compute() -> dict:
             "vol_vs_20d": round(vv, 4) if vv is not None else None,
             "vol_slope_3d": round(slope, 8) if slope is not None else None,
             "down_days_used": n_used,
+            "decel_streak": streak,
             "decelerating": decel,
             "price_down_3d": pdown,
             "real_dip": bool(pdown and decel),
@@ -183,17 +201,18 @@ def _compute() -> dict:
 def _print(payload: dict) -> None:
     rows = sorted(payload["rows"].values(), key=lambda r: r["ticker"])
     print("\nVOLUME SIGNAL  (real_dip = price down + volume decelerating)\n")
-    hdr = f"{'TKR':<5} {'vs20d':>7} {'slope3d':>10} {'dnDays':>6} {'px<0':>5} {'DECEL':>6} {'REAL_DIP':>9}"
+    hdr = f"{'TKR':<5} {'vs20d':>7} {'slope3d':>10} {'dnDays':>6} {'strk':>4} {'px<0':>5} {'DECEL':>6} {'REAL_DIP':>9}"
     print(hdr)
     print("-" * len(hdr))
     for r in rows:
         vv = f"{r['vol_vs_20d']:.2f}" if r["vol_vs_20d"] is not None else "n/a"
         sl = f"{r['vol_slope_3d']:+.5f}" if r["vol_slope_3d"] is not None else "n/a"
         print(f"{r['ticker']:<5} {vv:>7} {sl:>10} {r['down_days_used']:>6} "
+              f"{r['decel_streak']:>4} "
               f"{('yes' if r['price_down_3d'] else 'no'):>5} "
               f"{('yes' if r['decelerating'] else 'no'):>6} "
               f"{('YES' if r['real_dip'] else '-'):>9}")
-    dips = [r["ticker"] for r in rows if r["real_dip"]]
+    dips = [f"{r['ticker']}({r['decel_streak']}d)" for r in rows if r["real_dip"]]
     dist = [r["ticker"] for r in rows
             if r["price_down_3d"] and not r["decelerating"]]
     print(f"\nreal dips (buyable weakness): {', '.join(dips) or 'none'}")
@@ -209,7 +228,8 @@ def render_report_block(max_names: int = 6) -> str:
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT ticker, real_dip, price_down_3d, decelerating, vol_vs_20d
+                SELECT ticker, real_dip, price_down_3d, decelerating, vol_vs_20d,
+                       COALESCE(decel_streak, 0)
                 FROM volume_snapshots
                 WHERE snapshot_date = (SELECT max(snapshot_date) FROM volume_snapshots)
                 ORDER BY ticker
@@ -218,8 +238,10 @@ def render_report_block(max_names: int = 6) -> str:
             rows = cur.fetchall()
         if not rows:
             return "VOLUME: no snapshot (run tools.volume_signal)"
-        dips = [t for (t, rd, pd, de, vv) in rows if rd]
-        dist = [t for (t, rd, pd, de, vv) in rows if pd and not de]
+        dip_rows = [(t, sk) for (t, rd, pd, de, vv, sk) in rows if rd]
+        dip_rows.sort(key=lambda x: x[1], reverse=True)   # longest streak first
+        dips = [f"{t}({sk}d)" for t, sk in dip_rows]
+        dist = [t for (t, rd, pd, de, vv, sk) in rows if pd and not de]
         return (f"VOLUME (decel dip = buyable · rising vol on down = avoid): "
                 f"real dips {' '.join(dips[:max_names]) or 'none'} · "
                 f"distribution {' '.join(dist[:max_names]) or 'none'}")
@@ -242,21 +264,22 @@ def _persist(payload: dict, snapshot_date: dt.date) -> int:
                         """
                         INSERT INTO volume_snapshots
                           (snapshot_date, ticker, volume, avg_vol_20d, vol_vs_20d,
-                           vol_slope_3d, down_days_used, decelerating,
+                           vol_slope_3d, down_days_used, decel_streak, decelerating,
                            price_down_3d, real_dip, n_obs, source)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'yfinance')
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'yfinance')
                         ON CONFLICT (snapshot_date, ticker) DO UPDATE SET
                            volume=EXCLUDED.volume, avg_vol_20d=EXCLUDED.avg_vol_20d,
                            vol_vs_20d=EXCLUDED.vol_vs_20d, vol_slope_3d=EXCLUDED.vol_slope_3d,
                            down_days_used=EXCLUDED.down_days_used,
+                           decel_streak=EXCLUDED.decel_streak,
                            decelerating=EXCLUDED.decelerating,
                            price_down_3d=EXCLUDED.price_down_3d, real_dip=EXCLUDED.real_dip,
                            n_obs=EXCLUDED.n_obs, computed_at=NOW()
                         """,
                         (snapshot_date, r["ticker"], r["volume"], r["avg_vol_20d"],
                          r["vol_vs_20d"], r["vol_slope_3d"], r["down_days_used"],
-                         r["decelerating"], r["price_down_3d"], r["real_dip"],
-                         r["n_obs"]),
+                         r["decel_streak"], r["decelerating"], r["price_down_3d"],
+                         r["real_dip"], r["n_obs"]),
                     )
                 except Exception as e:
                     log.warning("volume insert failed for %s: %s", r["ticker"], e)
