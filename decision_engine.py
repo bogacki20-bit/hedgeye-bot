@@ -693,6 +693,21 @@ def _snapshot_stale_note(snapshot_date, fetched_at, *, now=None,
     return f"{int(round(age_hours))}h old"
 
 
+def _mfr_line_stale_note(price_note, snapshot_date, fetched_at, *, now=None):
+    """Stale note for the MFR zone line specifically. The MFR range_low/high (and
+    any rp computed off them) come from the MFR snapshot, so the MFR rp is stale
+    whenever that snapshot is old — EVEN when a live price replaced the snapshot
+    price. Returns the price-source note when present (price staleness dominates),
+    else a 'MFR range <age>' note when the MFR snapshot itself is stale, else None.
+    Pure; no DB, no money logic; now injectable for tests. Only the MFR line uses
+    this — the Hedgeye RR / ETF Pro ranges are separately sourced and must NOT
+    inherit the MFR snapshot's age."""
+    if price_note:
+        return price_note
+    age = _snapshot_stale_note(snapshot_date, fetched_at, now=now)
+    return f"MFR range {age}" if age else None
+
+
 def _zone_summary_line(label: str, price, low, high, *, stale_note=None) -> str:
     """Deterministic one-liner the LLM cannot misread.
 
@@ -1093,11 +1108,14 @@ def _format_user_message(ctx: dict, *, signal_origin: str,
         _age = _snapshot_stale_note(mfr_block.get("snapshot_date"), mfr_block.get("fetched_at"))
         _pnote = (f"live fetch failed; last snapshot {_age}" if _age else "live fetch failed; using last snapshot")
         _psrc = f"{_pz} (!! {_pnote})"
+    # The MFR range comes from the MFR snapshot, so a stale snapshot means a stale
+    # MFR rp even when the price above is live — flag it on the MFR line only.
+    _mfr_note = _mfr_line_stale_note(_pnote, mfr_block.get("snapshot_date"), mfr_block.get("fetched_at"))
     dyn.append("## Position-in-range - LIVE (Python-computed at decision time; use THESE, not the range JSON below)")
     dyn.append(f"Price used for all range math: {_psrc}")
     dyn.append(_zone_summary_line("Hedgeye Risk Range", _pz, rr_block.get("buy_trade"), rr_block.get("sell_trade"), stale_note=_pnote))
     dyn.append(_zone_summary_line("ETF Pro Range", _pz, etf_block.get("range_low"), etf_block.get("range_high"), stale_note=_pnote))
-    dyn.append(_zone_summary_line("MFR", _pz, mfr_block.get("range_low"), mfr_block.get("range_high"), stale_note=_pnote))
+    dyn.append(_zone_summary_line("MFR", _pz, mfr_block.get("range_low"), mfr_block.get("range_high"), stale_note=_mfr_note))
     dyn.append("")
 
     # Cross-source range alignment FIRST, above the per-source dumps, so the

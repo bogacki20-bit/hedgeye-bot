@@ -47,6 +47,7 @@ def classify_row(price, range_low, range_high, trend_signal, momentum_signal,
     (None -> phase 'n-a')."""
     out = {"price": price, "trend": _MAP.get(trend_signal),
            "momentum": _MOM.get(momentum_signal),
+           "range_low": range_low, "range_high": range_high,
            "range_pos": None, "width_pct": None, "width_chg5d": None,
            "phase": "n-a"}
     if price and range_low is not None and range_high is not None:
@@ -153,12 +154,13 @@ def write_for_date(d: date, dry_run: bool = False) -> dict:
             cur.execute(
                 """INSERT INTO vol_regime_daily
                    (as_of, index_name, sleeve, price, trend, momentum,
-                    range_pos, width_pct, width_chg5d, phase)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    range_pos, width_pct, width_chg5d, phase,
+                    range_low, range_high)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (as_of, index_name) DO NOTHING""",
                 (d, name, VOL_COMPLEX[name], c["price"], c["trend"],
                  c["momentum"], c["range_pos"], c["width_pct"],
-                 c["width_chg5d"], c["phase"]))
+                 c["width_chg5d"], c["phase"], c["range_low"], c["range_high"]))
             summary["written"] += cur.rowcount or 0
         if not dry_run:
             conn.commit()
@@ -172,8 +174,8 @@ def regime_line(d: date | None = None) -> str:
     d = d or date.today()
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """SELECT DISTINCT ON (index_name) index_name, trend, range_pos,
-                      phase
+            """SELECT DISTINCT ON (index_name) index_name, trend, range_pos, phase,
+                      price, range_low, range_high
                FROM vol_regime_daily WHERE as_of <= %s
                ORDER BY index_name, as_of DESC""", (d,))
         rows = cur.fetchall()
@@ -181,9 +183,11 @@ def regime_line(d: date | None = None) -> str:
         return "VOL: no regime data"
     short = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT", None: "?"}
     parts = []
-    for name, tr, rp, ph in sorted(rows):
-        rp_s = f"@{float(rp):.2f}" if rp is not None else ""
-        parts.append(f"{name} {short.get(tr, '?')}{rp_s} {ph}")
+    for name, tr, rp, ph, price, range_low, range_high in sorted(rows):
+        lvl = f"{float(price):.1f}" if price is not None else "?"
+        rng = f" [{float(range_low):.1f}-{float(range_high):.1f}]" if (range_low is not None and range_high is not None) else ""
+        rp_s = f" rp={float(rp):.2f}" if rp is not None else ""
+        parts.append(f"{name} {lvl}{rng}{rp_s} {short.get(tr,'?')} {ph}")
     return "VOL: " + " · ".join(parts)
 
 
