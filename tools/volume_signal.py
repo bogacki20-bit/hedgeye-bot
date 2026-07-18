@@ -88,21 +88,21 @@ def _yf_ohlcv(ticker: str, lookback_days: int) -> list[tuple[str, float, float]]
         return []
 
 
-def _monitored_universe() -> list[str]:
-    """The screener/monitored universe — every mfr_snapshots ticker with a
-    defined range (the same set SCREEN covers). Falls back to the 16-ETF
-    UNIVERSE if the DB is unreachable."""
+def _all_assets() -> list[str]:
+    """EVERY asset the bot tracks — the union of all mfr_snapshots tickers and
+    the full ticker_tags roster (not just names with a defined range). Names
+    with no yfinance volume (indices, spot symbols, thin tickers) simply skip
+    downstream. Falls back to the 16-ETF UNIVERSE if the DB is unreachable."""
     try:
         import db_pg
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT ticker FROM mfr_snapshots "
-                "WHERE range_low IS NOT NULL AND range_high IS NOT NULL "
-                "AND range_high > range_low")
+                "UNION SELECT ticker FROM ticker_tags")
             names = sorted({r[0] for r in cur.fetchall() if r[0]})
         return names or list(UNIVERSE)
     except Exception as e:
-        log.warning("volume: monitored universe unavailable (%s) - using 16 ETFs", e)
+        log.warning("volume: full asset universe unavailable (%s) - using 16 ETFs", e)
         return list(UNIVERSE)
 
 
@@ -227,7 +227,7 @@ def price_change(closes: list[float], window: int = PRICE_WINDOW) -> Optional[fl
 # ── Orchestration ────────────────────────────────────────────────────────────
 def _compute(universe=None) -> dict:
     lookback = AVG_WINDOW + DOWN_LOOKBACK + 15
-    names = universe if universe is not None else _monitored_universe()
+    names = universe if universe is not None else _all_assets()
     batch = fetch_ohlcv_batch(names, lookback)
     rows: dict[str, dict] = {}
     for t in names:
