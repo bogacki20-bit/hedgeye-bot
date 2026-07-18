@@ -64,16 +64,22 @@ def run(dry_run=False):
         print("[dry-run] no persist"); return 0
     import db_pg
     today = dt.date.today()
-    with db_pg.get_conn() as conn, conn.cursor() as cur:
-        for c in cells:
-            cur.execute("INSERT INTO rs_pairwise (as_of, base, vs, rs_trend, rs_delta_3d, n_obs) "
-                        "VALUES (%s,%s,%s,%s,%s,%s) "
-                        "ON CONFLICT (as_of, base, vs) DO UPDATE SET "
-                        "rs_trend=EXCLUDED.rs_trend, rs_delta_3d=EXCLUDED.rs_delta_3d, "
-                        "n_obs=EXCLUDED.n_obs, computed_at=NOW()",
-                        (today, c["base"], c["vs"], c["rs_trend"], c["rs_delta_3d"], c["n_obs"]))
-        conn.commit()
-    return 0
+    # ON CONFLICT upserts make this idempotent — a retried persist can't dupe.
+    def _do():
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            for c in cells:
+                cur.execute("INSERT INTO rs_pairwise (as_of, base, vs, rs_trend, rs_delta_3d, n_obs) "
+                            "VALUES (%s,%s,%s,%s,%s,%s) "
+                            "ON CONFLICT (as_of, base, vs) DO UPDATE SET "
+                            "rs_trend=EXCLUDED.rs_trend, rs_delta_3d=EXCLUDED.rs_delta_3d, "
+                            "n_obs=EXCLUDED.n_obs, computed_at=NOW()",
+                            (today, c["base"], c["vs"], c["rs_trend"], c["rs_delta_3d"], c["n_obs"]))
+            conn.commit()
+    try:
+        db_pg.with_db_retry(_do)
+        return 0
+    except Exception as e:
+        print(f"ERROR: persistence failed: {e}", file=sys.stderr); return 3
 
 def _cli(argv=None):
     import argparse
