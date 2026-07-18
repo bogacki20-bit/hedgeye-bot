@@ -358,6 +358,13 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         except Exception as e:
             lines.append(f"RS PAIRS: unavailable ({e})")
 
+        # ── book risk clusters (full correlation matrix) ──
+        try:
+            from tools.correlation_matrix import render_report_block as _bookrisk
+            lines.append(_bookrisk())
+        except Exception as e:
+            lines.append(f"BOOK RISK: unavailable ({e})")
+
         # ── volume signal (decelerating-dip trigger) ──
         try:
             from tools.volume_signal import render_report_block as _vol_block

@@ -66,8 +66,14 @@ $volExit = $LASTEXITCODE
     Out-File -FilePath $logFile -Append -Encoding utf8
 $rsMatrixExit = $LASTEXITCODE
 
-# Surface any failure: exit nonzero if RS, volume, or rs_matrix failed (first nonzero wins).
-if ($rsExit -ne 0) { $exit = $rsExit } elseif ($volExit -ne 0) { $exit = $volExit } elseif ($rsMatrixExit -ne 0) { $exit = $rsMatrixExit } else { $exit = 0 }
+# Full correlation matrix + book risk-cluster read — same daily run, after rs_matrix.
+& $python -m tools.correlation_matrix *>&1 |
+    ForEach-Object { $_.ToString() } |
+    Out-File -FilePath $logFile -Append -Encoding utf8
+$corrExit = $LASTEXITCODE
+
+# Surface any failure: exit nonzero if RS, volume, rs_matrix, or correlation failed (first nonzero wins).
+if ($rsExit -ne 0) { $exit = $rsExit } elseif ($volExit -ne 0) { $exit = $volExit } elseif ($rsMatrixExit -ne 0) { $exit = $rsMatrixExit } elseif ($corrExit -ne 0) { $exit = $corrExit } else { $exit = 0 }
 $end  = (Get-Date).ToString('o')
-Add-Content -Path $logFile -Value "==== relative_strength rc=$rsExit | volume_signal rc=$volExit | rs_matrix rc=$rsMatrixExit | exit $end rc=$exit ===="
+Add-Content -Path $logFile -Value "==== relative_strength rc=$rsExit | volume_signal rc=$volExit | rs_matrix rc=$rsMatrixExit | correlation rc=$corrExit | exit $end rc=$exit ===="
 exit $exit
