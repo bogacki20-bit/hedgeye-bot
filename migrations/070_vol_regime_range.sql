@@ -1,0 +1,3 @@
+ALTER TABLE vol_regime_daily
+    ADD COLUMN IF NOT EXISTS range_low  NUMERIC,
+    ADD COLUMN IF NOT EXISTS range_high NUMERIC;

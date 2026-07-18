@@ -395,6 +395,11 @@ def build_report_now() -> str:
     except Exception as e:
         lines.append(f"RS/GRID: unavailable ({e})")
     try:
+        from tools.rs_matrix import render_report_block as _rspair
+        lines.append(_rspair())
+    except Exception as e:
+        lines.append(f"RS PAIRS: unavailable ({e})")
+    try:
         from tools.volume_signal import render_report_block as _vol_block
         lines.append(_vol_block())
     except Exception as e:

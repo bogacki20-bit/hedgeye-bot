@@ -60,8 +60,14 @@ $rsExit = $LASTEXITCODE
     Out-File -FilePath $logFile -Append -Encoding utf8
 $volExit = $LASTEXITCODE
 
-# Surface either failure: exit nonzero if RS or volume failed (RS code wins).
-if ($rsExit -ne 0) { $exit = $rsExit } elseif ($volExit -ne 0) { $exit = $volExit } else { $exit = 0 }
+# RS pairwise matrix (sectors + QQQ + IWM) — same daily run, after volume.
+& $python -m tools.rs_matrix *>&1 |
+    ForEach-Object { $_.ToString() } |
+    Out-File -FilePath $logFile -Append -Encoding utf8
+$rsMatrixExit = $LASTEXITCODE
+
+# Surface any failure: exit nonzero if RS, volume, or rs_matrix failed (first nonzero wins).
+if ($rsExit -ne 0) { $exit = $rsExit } elseif ($volExit -ne 0) { $exit = $volExit } elseif ($rsMatrixExit -ne 0) { $exit = $rsMatrixExit } else { $exit = 0 }
 $end  = (Get-Date).ToString('o')
-Add-Content -Path $logFile -Value "==== relative_strength rc=$rsExit | volume_signal rc=$volExit | exit $end rc=$exit ===="
+Add-Content -Path $logFile -Value "==== relative_strength rc=$rsExit | volume_signal rc=$volExit | rs_matrix rc=$rsMatrixExit | exit $end rc=$exit ===="
 exit $exit

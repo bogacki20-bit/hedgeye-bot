@@ -337,6 +337,29 @@ def _vol_for(tickers) -> dict:
     return out
 
 
+def _ivpd_pct_for(tickers, window=60) -> dict:
+    """{ticker: percentile 0-100 of today's ivpd vs its own trailing `window`
+    sessions} from mfr_snapshots.full_payload. None when <10 history pts."""
+    out = {}
+    if not tickers: return out
+    import db_pg
+    try:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            for t in tickers:
+                cur.execute(
+                    "SELECT (full_payload->>'ivpd')::numeric FROM mfr_snapshots "
+                    "WHERE ticker=%s AND full_payload->>'ivpd' IS NOT NULL "
+                    "ORDER BY snapshot_date DESC LIMIT %s", (t, window))
+                vals = [float(r[0]) for r in cur.fetchall() if r[0] is not None]
+                if len(vals) < 10: continue
+                today = vals[0]
+                below = sum(1 for v in vals if v < today)
+                out[t] = round(100.0 * below / len(vals))
+    except Exception as e:
+        log.warning("SCREEN: ivpd pct unavailable: %s", e)
+    return out
+
+
 _SLICE_COLS = ("SELECT ticker, subsector, hedgeye_bucket_0629, range_pos, momentum_ok, "
                "momentum_dir, divergence, hurst, iv, rv, ivpd, trend_dir, trend_source, "
                "held, has_range FROM v_screener")
@@ -617,7 +640,12 @@ def _num(v, sign=False, nd=2) -> str:
     return f"{float(v):+.{nd}f}" if sign else f"{float(v):.{nd}f}"
 
 
-def _fmt_row(r, corr, vol=None) -> str:
+def _ivpd_tag(r, ivpct):
+    p = (ivpct or {}).get(r["ticker"])
+    return f"({p}%)" if p is not None else ""
+
+
+def _fmt_row(r, corr, vol=None, ivpct=None) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
     rp = _rp_str(r)
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
@@ -650,7 +678,7 @@ def _fmt_row(r, corr, vol=None) -> str:
         volmark = ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<8} px={_px_str(r):<7} rng={_rng_str(r):<17} mom={md:<4} h={_num(r.get('hurst')):<5} "
-            f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
+            f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)}{_ivpd_tag(r, ivpct)} "
             f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}{volmark}")
 
 
@@ -842,6 +870,7 @@ def run_screen_q(q: dict) -> str:
         reverse=(q["direction"] == "shorts"),
     )
     corr = _corr_for([r["ticker"] for r in result]) if result else {}
+    ivpct = _ivpd_pct_for([r["ticker"] for r in result]) if result else {}
 
     filt = [q["direction"].upper()]
     if src:           filt.append(_source_label(src))
@@ -862,7 +891,7 @@ def run_screen_q(q: dict) -> str:
     if result:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
         lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
-        lines += [_fmt_row(r, corr, vol) for r in result]
+        lines += [_fmt_row(r, corr, vol, ivpct) for r in result]
         if any(r.get("divergence") for r in result):
             lines.append("⚡ = MFR trade vs momentum divergence (momentum-exhaustion fade setup).")
         if any(r.get("_thesis") for r in result):
