@@ -163,6 +163,12 @@ def parse_query(text: str) -> dict:
     m = re.search(r"momentum", s)
     if m:
         q["momentum"] = True; consumed.append(m.span())
+    m = re.search(r"\bdecel(?:erating)?\b", s)
+    if m:
+        q["decel"] = True; consumed.append(m.span())
+    m = re.search(r"\bdistribution\b", s)
+    if m:
+        q["distribution"] = True; consumed.append(m.span())
     m = re.search(_HELD, s)
     if m:
         q["held"] = True; consumed.append(m.span())
@@ -307,6 +313,27 @@ def _corr_for(tickers) -> dict:
                 common = sorted(set(r) & set(bench))
                 return _pearson([r[d] for d in common], [bench[d] for d in common])
             out[t] = (c(spy), c(uup))
+    return out
+
+
+def _vol_for(tickers) -> dict:
+    """{ticker: (real_dip, price_down_3d, decelerating, decel_streak)} from the
+    latest volume_snapshots. Empty when volume hasn't been computed. Never raises."""
+    out = {}
+    if not tickers:
+        return out
+    import db_pg
+    try:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT ticker, real_dip, price_down_3d, decelerating, COALESCE(decel_streak, 0) "
+                "FROM volume_snapshots WHERE ticker = ANY(%s) "
+                "AND snapshot_date = (SELECT max(snapshot_date) FROM volume_snapshots)",
+                (list(tickers),))
+            for t, rd, pd, de, sk in cur.fetchall():
+                out[t] = (rd, pd, de, sk)
+    except Exception as e:
+        log.warning("SCREEN: volume overlay unavailable: %s", e)
     return out
 
 
@@ -590,7 +617,7 @@ def _num(v, sign=False, nd=2) -> str:
     return f"{float(v):+.{nd}f}" if sign else f"{float(v):.{nd}f}"
 
 
-def _fmt_row(r, corr) -> str:
+def _fmt_row(r, corr, vol=None) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
     rp = _rp_str(r)
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
@@ -614,10 +641,17 @@ def _fmt_row(r, corr) -> str:
         wrap = ""
     warn = " ⚠mfr-only" if _is_mfr_only_topidea(r) else ""
     th = " ⚠️trend-against" if r.get("_thesis") else ""
+    v = (vol or {}).get(r["ticker"])
+    if v and v[0]:
+        volmark = f" vol=↓{v[3] or 0}d"
+    elif v and v[1] and not v[2]:
+        volmark = " vol=↑"
+    else:
+        volmark = ""
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<8} px={_px_str(r):<7} rng={_rng_str(r):<17} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)} "
-            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}")
+            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}{volmark}")
 
 
 _RP_LIVE_MIN, _RP_LIVE_MAX = 0.2, 5.0
@@ -794,8 +828,16 @@ def run_screen_q(q: dict) -> str:
     after_mom = [r for r in after_near if r["momentum_ok"] is True] if q["momentum"] else after_near
     after_cloud = [r for r in after_mom if r.get("_cloud") == q["cloud"]] if q["cloud"] else after_mom
 
+    vol = _vol_for([r["ticker"] for r in after_cloud]) if after_cloud else {}
+    def _real_dip(t):     v = vol.get(t); return bool(v and v[0])
+    def _distribution(t): v = vol.get(t); return bool(v and v[1] and not v[2])
+    after_vol = after_cloud
+    if q.get("decel"):
+        after_vol = [r for r in after_cloud if _real_dip(r["ticker"])]
+    elif q.get("distribution"):
+        after_vol = [r for r in after_cloud if _distribution(r["ticker"])]
     result = sorted(
-        after_cloud,   # held already applied at the base scope above
+        after_vol,
         key=lambda r: (r["range_pos"] is None, float(r["range_pos"]) if r["range_pos"] is not None else 0),
         reverse=(q["direction"] == "shorts"),
     )
@@ -807,6 +849,8 @@ def run_screen_q(q: dict) -> str:
     if q["near"]:     filt.append(f"near_{q['near']}")
     if q["cloud"]:    filt.append(f"{q['cloud']}-cloud")
     if q["momentum"]: filt.append("momentum_ok")
+    if q.get("decel"):        filt.append("decel-vol")
+    if q.get("distribution"): filt.append("distribution")
     if q["held"]:     filt.append("in-book")
     if book_mode:
         head = (f"🔎 SCREEN — {' · '.join(filt)}  (side = POSITION side; "
@@ -817,8 +861,8 @@ def run_screen_q(q: dict) -> str:
     lines = [head, ""]
     if result:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
-        lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP]")
-        lines += [_fmt_row(r, corr) for r in result]
+        lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
+        lines += [_fmt_row(r, corr, vol) for r in result]
         if any(r.get("divergence") for r in result):
             lines.append("⚡ = MFR trade vs momentum divergence (momentum-exhaustion fade setup).")
         if any(r.get("_thesis") for r in result):
@@ -857,6 +901,8 @@ def run_screen_q(q: dict) -> str:
         if q["near"]:     stages.append((near_lbl, len(after_near)))
         if q["momentum"]: stages.append(("momentum_ok", len(after_mom)))
         if q["cloud"]:    stages.append((f"{q['cloud']}-cloud", len(after_cloud)))
+        if q.get("decel"):        stages.append(("decel-vol", len(after_vol)))
+        if q.get("distribution"): stages.append(("distribution", len(after_vol)))
         culprit = next((name for name, n in stages if n == 0), "unknown")
         lines.append(f"0 matches — emptied by: **{culprit}**")
         lines.append("")
