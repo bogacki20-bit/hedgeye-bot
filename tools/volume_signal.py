@@ -88,6 +88,65 @@ def _yf_ohlcv(ticker: str, lookback_days: int) -> list[tuple[str, float, float]]
         return []
 
 
+def _all_assets() -> list[str]:
+    """EVERY asset the bot tracks — the union of all mfr_snapshots tickers and
+    the full ticker_tags roster (not just names with a defined range). Names
+    with no yfinance volume (indices, spot symbols, thin tickers) simply skip
+    downstream. Falls back to the 16-ETF UNIVERSE if the DB is unreachable."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT ticker FROM mfr_snapshots "
+                "UNION SELECT ticker FROM ticker_tags")
+            names = sorted({r[0] for r in cur.fetchall() if r[0]})
+        return names or list(UNIVERSE)
+    except Exception as e:
+        log.warning("volume: full asset universe unavailable (%s) - using 16 ETFs", e)
+        return list(UNIVERSE)
+
+
+def fetch_ohlcv_batch(tickers, lookback_days):
+    """{ticker: [(iso_date, close, volume)]} via ONE batched yf.download for the
+    whole set (per-ticker fetch rate-limits past ~300 names). yfinance only;
+    a paid vendor falls back to per-ticker fetch_ohlcv."""
+    vendor = os.environ.get("VOL_PRICE_VENDOR", "yfinance").lower()
+    if vendor != "yfinance":
+        return {t: fetch_ohlcv(t, lookback_days) for t in tickers}
+    try:
+        import yfinance as yf
+    except Exception as e:
+        log.warning("yfinance unavailable: %s", e)
+        return {}
+    uniq = sorted({t for t in tickers if t})
+    if not uniq:
+        return {}
+    period = f"{int(lookback_days * 1.6) + 15}d"
+    try:
+        df = yf.download(uniq, period=period, interval="1d", group_by="ticker",
+                         threads=True, progress=False, auto_adjust=False)
+    except Exception as e:
+        log.warning("volume: batch download failed (%s) - per-ticker fallback", e)
+        return {t: fetch_ohlcv(t, lookback_days) for t in uniq}
+    out = {}
+    for t in uniq:
+        try:
+            sub = df[t] if len(uniq) > 1 else df
+            if sub is None or sub.empty or "Close" not in sub or "Volume" not in sub:
+                continue
+            bars = []
+            for idx, row in sub.iterrows():
+                c, v = row["Close"], row["Volume"]
+                if c != c or v != v:
+                    continue
+                bars.append((idx.date().isoformat(), float(c), float(v)))
+            if bars:
+                out[t] = bars[-lookback_days:] if lookback_days else bars
+        except Exception:
+            continue
+    return out
+
+
 # ── Pure math (no I/O — unit-testable) ───────────────────────────────────────
 def vol_vs_20d(volumes: list[float], window: int = AVG_WINDOW) -> tuple[Optional[float], Optional[float]]:
     """(vol_vs_20d, avg) — latest volume over the average of the `window`
@@ -166,11 +225,13 @@ def price_change(closes: list[float], window: int = PRICE_WINDOW) -> Optional[fl
 
 
 # ── Orchestration ────────────────────────────────────────────────────────────
-def _compute() -> dict:
+def _compute(universe=None) -> dict:
     lookback = AVG_WINDOW + DOWN_LOOKBACK + 15
+    names = universe if universe is not None else _all_assets()
+    batch = fetch_ohlcv_batch(names, lookback)
     rows: dict[str, dict] = {}
-    for t in UNIVERSE:
-        bars = fetch_ohlcv(t, lookback)
+    for t in names:
+        bars = batch.get(t) or []
         if len(bars) < AVG_WINDOW + 2:
             log.warning("insufficient volume history for %s (n=%d)", t, len(bars))
             continue
