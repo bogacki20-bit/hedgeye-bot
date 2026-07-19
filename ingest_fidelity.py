@@ -392,6 +392,72 @@ def commit(positions, activity):
         conn.close()
 
 
+def _infer_snapshot_date(path):
+    """Snapshot date from a Fidelity positions filename
+    (Portfolio_Positions_Mmm-DD-YYYY.csv, or a YYYY-MM-DD variant). The date is
+    authoritative for the reconcile, so fall back to today only as a last resort
+    and say so loudly on stderr."""
+    base = os.path.basename(path)
+    m = re.search(r"([A-Za-z]{3})-(\d{1,2})-(20\d{2})", base)
+    if m:
+        try:
+            return datetime.strptime(
+                f"{m.group(1)}-{int(m.group(2)):02d}-{m.group(3)}",
+                "%b-%d-%Y").date().isoformat()
+        except ValueError:
+            pass
+    m = re.search(r"(20\d{2})[-_.](\d{2})[-_.](\d{2})", base)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    print(f"WARN ingest_fidelity: no date in filename {base!r} — using today",
+          file=sys.stderr)
+    return datetime.today().date().isoformat()
+
+
+def ingest(csv_path):
+    """Parse a Fidelity positions CSV into book_positions (broker = truth).
+    Infers snapshot_date from the filename; reuses parse_positions + the existing
+    ON CONFLICT (snapshot_date, account_number, symbol) book_positions upsert.
+    Positions only (no activity). Returns {snapshot_date, rows, anomalies}."""
+    snapshot_date = _infer_snapshot_date(csv_path)
+    positions, anomalies = parse_positions(csv_path, snapshot_date,
+                                           keep_cash=False, accounts=set())
+    # The book write is the most critical persist there is — retry transient
+    # Railway drops. commit() upserts ON CONFLICT, so a retry can't duplicate.
+    import db_pg
+    db_pg.with_db_retry(lambda: commit(positions, []))
+    return {"snapshot_date": snapshot_date, "rows": len(positions),
+            "anomalies": anomalies}
+
+
+def reconcile_book(new_date):
+    """Diff book_positions at new_date vs the immediately-prior snapshot_date.
+    Broker CSV is truth, so:
+      added   = symbols the broker holds that the prior book lacked (bot missed)
+      removed = symbols the prior book had that the broker no longer holds
+      unchanged = count held across both dates.
+    Cash sweeps (asset_class='cash') are excluded — they aren't book desyncs.
+    Returns {prior_date, added, removed, unchanged}."""
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT max(snapshot_date) FROM book_positions "
+                    "WHERE snapshot_date < %s", (new_date,))
+        prior = cur.fetchone()[0]
+
+        def _syms(d):
+            cur.execute("SELECT DISTINCT symbol FROM book_positions "
+                        "WHERE snapshot_date = %s "
+                        "AND asset_class IS DISTINCT FROM 'cash'", (d,))
+            return {r[0] for r in cur.fetchall()}
+
+        new_syms = _syms(new_date)
+        prior_syms = _syms(prior) if prior else set()
+    return {"prior_date": prior,
+            "added": sorted(new_syms - prior_syms),
+            "removed": sorted(prior_syms - new_syms),
+            "unchanged": len(new_syms & prior_syms)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--positions")

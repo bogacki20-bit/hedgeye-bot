@@ -42,6 +42,10 @@ _AM = r"(?<![a-z])(?:am|morning)(?![a-z])"
 _PM = r"(?<![a-z])(?:pm|evening)(?![a-z])"
 _KIND_PATTERNS = [
     # (kind, filename regex, content regex) — first hit wins, top-down
+    # Broker CSVs FIRST: they overwrite the real book, so they must out-rank any
+    # note/report pattern. Content regexes match the Fidelity export header row.
+    ("fidelity_positions", r"portfolio_positions.*\.csv", r"account (number|name).*symbol"),
+    ("fidelity_actions",   r"accounts_history.*\.csv",    r"run date.*action.*symbol"),
     ("founders_note_am",
      rf"founders?_?\s*note.*{_AM}|{_AM}.*founders?",
      rf"founder'?s\s+note.*{_AM}|{_AM}[\s\w]*founder'?s\s+note"),
@@ -466,6 +470,57 @@ def handle_doc_buffer(text):
     return f"📋 {n} chunks…" if n % _ACK_EVERY == 0 else ""
 
 
+def _handle_fidelity_upload(kind: str, file_name: str, data: bytes) -> str:
+    """Broker CSV is the source of truth: write it to a temp file (keeping the
+    ORIGINAL filename so the importer can read the snapshot date), overwrite the
+    book (positions) or actions_log (actions), and return a diff reply. Wrapped
+    so a bad file yields a clear message. NB: ingest_fidelity uses sys.exit on a
+    bad header, so SystemExit is caught here too — this can never kill the
+    listener."""
+    import os
+    import shutil
+    import tempfile
+    tmpdir = tempfile.mkdtemp(prefix="fid_")
+    try:
+        tmp = os.path.join(tmpdir, os.path.basename(file_name))
+        with open(tmp, "wb") as f:
+            f.write(data)
+        if kind == "fidelity_positions":
+            import ingest_fidelity
+            res = ingest_fidelity.ingest(tmp)
+            rec = ingest_fidelity.reconcile_book(res["snapshot_date"])
+
+            def _fmt(xs, cap=12):
+                if not xs:
+                    return "none"
+                return ", ".join(xs[:cap]) + (f" +{len(xs) - cap} more"
+                                              if len(xs) > cap else "")
+            anom = res.get("anomalies") or []
+            anom_s = f" · ⚠{len(anom)} parse anomalies" if anom else ""
+            return (f"📒 Book synced to broker ({res['snapshot_date']}). "
+                    f"+{len(rec['added'])} (broker holds, bot was missing): "
+                    f"{_fmt(rec['added'])} · "
+                    f"−{len(rec['removed'])} (bot had, broker closed): "
+                    f"{_fmt(rec['removed'])} · {rec['unchanged']} unchanged · "
+                    f"{res['rows']} positions written{anom_s}")
+        # fidelity_actions
+        from tools import import_fidelity_trades
+        res = import_fidelity_trades.ingest(tmp)
+        errs = res.get("errors") or []
+        err_s = f" · ⚠{'; '.join(errs)}" if errs else ""
+        return (f"🧾 Actions synced to broker: {res.get('rows_inserted', 0)} "
+                f"inserted, {res.get('rows_dup_skipped', 0)} dup-skipped, "
+                f"{res.get('rows_non_trade_skipped', 0)} non-trade, of "
+                f"{res.get('rows_seen', 0)} seen{err_s}")
+    except SystemExit as e:
+        return f"🛑 {file_name}: broker ingest refused — {e}"
+    except Exception as e:
+        log.exception("fidelity ingest failed for %s", file_name)
+        return f"🛑 {file_name}: broker ingest FAILED — {e}"
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def handle_telegram_document(token: str, document: dict,
                              caption: str = "") -> str:
     """Full ingest for one Telegram document message. Returns the reply
@@ -491,6 +546,10 @@ def handle_telegram_document(token: str, document: dict,
     except Exception as e:
         log.exception("doc_uploads store failed")
         return f"🛑 {file_name}: parsed OK but store FAILED: {e}"
+    # Broker CSVs overwrite the REAL book — route to the importer. The
+    # doc_uploads row above stays as the audit trail; the book write is the point.
+    if kind in ("fidelity_positions", "fidelity_actions"):
+        return f"{_handle_fidelity_upload(kind, file_name, data)}\n[id {row_id}]"
     preview = re.sub(r"\s+", " ", (text or "")[:PREVIEW_CHARS]).strip()
     reply = summary_reply(kind, note_date, len(text or ""), file_name,
                           note=note, preview=preview)
