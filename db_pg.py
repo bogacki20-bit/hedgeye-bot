@@ -68,6 +68,35 @@ def get_conn():
         conn.close()
 
 
+def with_db_retry(fn, attempts: int = 3, base_delay: float = 1.0):
+    """Run fn() and return its result, retrying ONLY transient connection
+    failures — psycopg2 OperationalError / InterfaceError (a connect timeout or
+    'server closed the connection unexpectedly' mid-operation, both of which we
+    have seen against the Railway proxy). Backoff is base_delay * 2**i between
+    tries (1s, 2s, 4s, ...); the last error is re-raised after the final attempt.
+
+    Data/logic errors (ProgrammingError, IntegrityError, DataError, ...) are NOT
+    caught here — real bugs must surface immediately, unretried.
+
+    Callers wrap their WHOLE connect+execute+commit block in fn so a mid-op drop
+    re-runs the entire unit. That is safe because every signal-tool _persist
+    upserts via ON CONFLICT, so a retried persist cannot create duplicate rows.
+    """
+    import time
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            last = e
+            if i == attempts - 1:
+                raise
+            log.warning("db_pg: transient DB error (attempt %d/%d) — retrying in "
+                        "%.1fs: %s", i + 1, attempts, base_delay * (2 ** i), str(e)[:120])
+            time.sleep(base_delay * (2 ** i))
+    raise last  # unreachable: loop returns or raises above
+
+
 _COLUMN_CACHE: dict[tuple[str, str], bool] = {}
 
 

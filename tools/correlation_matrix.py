@@ -108,7 +108,8 @@ def _persist(payload, snapshot_date):
         for w in WINDOWS:
             if p.get(w) is not None: rows.append((p["a"], p["b"], w, p[w], p["n"], snapshot_date))
     if not rows: print("no correlation rows", file=sys.stderr); return 0
-    try:
+    # ON CONFLICT upserts make this idempotent — a retried persist can't dupe.
+    def _do():
         from psycopg2.extras import execute_values
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             execute_values(cur,
@@ -116,6 +117,8 @@ def _persist(payload, snapshot_date):
                 "ON CONFLICT (ticker_a,ticker_b,window_days) DO UPDATE SET correlation=EXCLUDED.correlation, "
                 "n_obs=EXCLUDED.n_obs, as_of=EXCLUDED.as_of, computed_at=NOW()", rows, page_size=1000)
             conn.commit()
+    try:
+        db_pg.with_db_retry(_do)
         return 0
     except Exception as e:
         print(f"ERROR: persistence failed: {e}", file=sys.stderr); return 3

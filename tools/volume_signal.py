@@ -317,7 +317,8 @@ def _persist(payload: dict, snapshot_date: dt.date) -> int:
     except Exception as e:
         print(f"ERROR: db_pg unavailable: {e}", file=sys.stderr)
         return 2
-    try:
+    # ON CONFLICT upserts make this idempotent — a retried persist can't dupe.
+    def _do():
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             for r in payload["rows"].values():
                 try:
@@ -345,6 +346,9 @@ def _persist(payload: dict, snapshot_date: dt.date) -> int:
                 except Exception as e:
                     log.warning("volume insert failed for %s: %s", r["ticker"], e)
             conn.commit()
+
+    try:
+        db_pg.with_db_retry(_do)
         return 0
     except Exception as e:
         print(f"ERROR: persistence failed: {e}", file=sys.stderr)
