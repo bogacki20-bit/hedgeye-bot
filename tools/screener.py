@@ -128,7 +128,7 @@ def parse_query(text: str) -> dict:
     s = " " + (text or "").lower() + " "
     q: dict = {"sector": None, "direction": None, "near": None, "momentum": False,
                "held": False, "show_gated": False, "source": None, "cloud": None,
-               "unrecognized": [], "raw": (text or "").strip()}
+               "everything": False, "unrecognized": [], "raw": (text or "").strip()}
     consumed: list = []   # (start, end) spans of matched screen tokens
 
     # Source lens (etf pro / keiths / portfolio solutions / …). Consumed here so its
@@ -139,6 +139,14 @@ def parse_query(text: str) -> dict:
             q["source"] = tag
             consumed.append(m.span())
             break
+
+    # 'everything' lens — the explicit full-universe scope (vs the silent posmon
+    # default). Consumed so the words don't trip the unrecognized-token guard.
+    m = re.search(r"\b(everything|all assets|all names|all tickers|"
+                  r"whole universe|full universe|entire universe|universe)\b", s)
+    if m:
+        q["everything"] = True
+        consumed.append(m.span())
 
     for pat, canon in _SECTORS:
         m = re.search(pat, s)
@@ -392,6 +400,20 @@ def _fetch_book_slice(sector):
     where a name is tagged (untagged ETFs have NULL sector and drop out of a sector
     screen, as intended)."""
     sql = _SLICE_COLS + " WHERE held = true"
+    args = []
+    if sector:
+        sql += " AND gics_sector = %s"
+        args.append(sector)
+    return _rows(sql, args)
+
+
+def _fetch_everything_slice(sector):
+    """The 'everything' lens: the FULL enrolled universe — every v_screener row
+    with a live MFR range (has_range), NOT bucket-filtered. This is the whole
+    MFR-enrolled set, not the ~433 posmon roster the default screens. Self-
+    maintaining: grows as names get tagged/enrolled. Direction is still enforced
+    downstream by the mandatory TREND gate."""
+    sql = _SLICE_COLS + " WHERE has_range = true"
     args = []
     if sector:
         sql += " AND gics_sector = %s"
@@ -774,6 +796,8 @@ def run_screen_q(q: dict) -> str:
                 slice_ = [r for r in slice_ if r["held"]]
         elif q["held"]:
             slice_ = _fetch_book_slice(q["sector"])
+        elif q.get("everything"):                # explicit full-universe lens
+            slice_ = _fetch_everything_slice(q["sector"])
         else:
             slice_ = _fetch_tag_slice(q["sector"], buckets)
     except Exception as e:
@@ -873,7 +897,12 @@ def run_screen_q(q: dict) -> str:
     ivpct = _ivpd_pct_for([r["ticker"] for r in result]) if result else {}
 
     filt = [q["direction"].upper()]
-    if src:           filt.append(_source_label(src))
+    if src:
+        filt.append(_source_label(src))
+    elif q.get("everything"):
+        filt.append("EVERYTHING · enrolled universe")
+    elif not q["held"]:
+        filt.append("posmon roster (default — say 'everything' for all)")
     if q["sector"]:   filt.append(q["sector"])
     if q["near"]:     filt.append(f"near_{q['near']}")
     if q["cloud"]:    filt.append(f"{q['cloud']}-cloud")
@@ -907,6 +936,8 @@ def run_screen_q(q: dict) -> str:
             base_lbl = _source_label(src) + (" (in book)" if q["held"] else "")
         elif q["held"]:
             base_lbl = "book holdings"
+        elif q.get("everything"):
+            base_lbl = "everything (enrolled universe)"
         else:
             base_lbl = "tag match (sector+bucket)"
         side_lbl = f"position side = {q['direction'][:-1]}"
@@ -985,7 +1016,33 @@ def run_screen_q(q: dict) -> str:
     return "\n".join(lines)
 
 
-def _resolve(q: dict, chat_id) -> str:
+# Long SCREEN output → .txt attachment (REPORT UPLOAD pattern) rather than an
+# inline wall. Telegram caps at 4096 chars; the 'everything' lens easily exceeds
+# it. Thresholds match the DAYPACK/REPORT convention.
+_SCREEN_INLINE_MAX_LINES = 40
+_SCREEN_INLINE_MAX_CHARS = 3500
+
+
+def _maybe_attach(result, q):
+    """Short SCREEN result → inline str (unchanged). Long result → a document-reply
+    dict {document_name, document_text, caption} the telegram listener sends as a
+    .txt. Non-str results (guards/prompts) pass through untouched."""
+    if not isinstance(result, str):
+        return result
+    n_lines = result.count("\n") + 1
+    if n_lines <= _SCREEN_INLINE_MAX_LINES and len(result) <= _SCREEN_INLINE_MAX_CHARS:
+        return result
+    from datetime import date
+    scope = ("everything" if q.get("everything")
+             else q.get("source") or ("book" if q.get("held") else "posmon"))
+    direction = q.get("direction") or "screen"
+    return {"document_name": f"screen_{scope}_{direction}_{date.today()}.txt",
+            "document_text": result,
+            "caption": (f"🔎 SCREEN {scope} {direction} — {n_lines} rows, "
+                        f"{len(result):,} chars (full list attached)")}
+
+
+def _resolve(q: dict, chat_id):
     """Token-guard, ask-for-direction (storing pending), or execute. The reply is
     always the acknowledgment — a follow-up is never acked without running."""
     if q.get("unrecognized"):
@@ -997,7 +1054,7 @@ def _resolve(q: dict, chat_id) -> str:
                 "(the TREND gate is tied to it)."
                 + (f"\nFilters so far: {got}." if got else ""))
     _set_pending(chat_id, q)       # remember the executed query so "show gated" etc. re-run it
-    return run_screen_q(q)
+    return _maybe_attach(run_screen_q(q), q)
 
 
 def run_screen(text: str) -> str:
