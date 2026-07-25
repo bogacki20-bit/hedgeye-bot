@@ -299,6 +299,24 @@ check("BLOK -> btc-sensitivity", _op("BLOK"),
       (None, "btc-sensitivity", 0, None))
 check("HEFT -> multi-asset (operator; no funds_data)", _op("HEFT"),
       (None, "multi-asset", 0, None))
+# commit-5 stragglers
+check("FXC -> currency (Canadian dollar)", _op("FXC"),
+      (None, "currency", 0, None))
+check("REW -> Technology inverse 2x (-2x tech)", _op("REW"),
+      ("Technology", None, 1, 2))
+
+# blocked stocks resolved via OPERATOR_OVERRIDES (yfinance empty for the symbol)
+from _tag_proposals import OPERATOR_OVERRIDES
+check("EXPN -> stock/Industrials override",
+      (OPERATOR_OVERRIDES["EXPN"]["instrument"],
+       OPERATOR_OVERRIDES["EXPN"]["gics_sector"]), ("stock", "Industrials"))
+check("FI -> stock/Financials override",
+      (OPERATOR_OVERRIDES["FI"]["instrument"],
+       OPERATOR_OVERRIDES["FI"]["gics_sector"]), ("stock", "Financials"))
+check("FYBR -> stock/Communication Services override",
+      (OPERATOR_OVERRIDES["FYBR"]["instrument"],
+       OPERATOR_OVERRIDES["FYBR"]["gics_sector"]),
+      ("stock", "Communication Services"))
 
 # duration is carried on the bond rows (checked separately from the 4-tuple)
 _tlt = classify_from_holdings("TLT", "Long-Term Bond", {"bondPosition": 0.99},

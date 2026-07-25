@@ -60,6 +60,14 @@ OPERATOR_OVERRIDES = {
     "HEFT": {"instrument": "etf",
              "subsector": "Thematic — Fourth Turning",
              "src": "operator 2026-07-12"},
+    # Blocked stocks — yfinance returns empty for the bare symbol (foreign /
+    # ambiguous listing). Web-confirmed 2026-07-25.
+    "EXPN": {"instrument": "stock", "gics_sector": "Industrials",
+             "src": "operator web 2026-07-25"},   # Experian — data/business svcs
+    "FI":   {"instrument": "stock", "gics_sector": "Financials",
+             "src": "operator web 2026-07-25"},   # Fiserv — payments
+    "FYBR": {"instrument": "stock", "gics_sector": "Communication Services",
+             "src": "operator web 2026-07-25"},   # Frontier Communications — telecom
 }
 
 # Operator-confirmed ETF labels for names holdings data CAN'T resolve — currency
@@ -74,6 +82,7 @@ OPERATOR_ETF_LABELS = {
     "FXF": {"exposure": "currency"},                 # long swiss franc
     "FXY": {"exposure": "currency"},                 # long yen
     "UUP": {"exposure": "currency"},                 # long US dollar
+    "FXC": {"exposure": "currency"},                 # long Canadian dollar
     "EUO": {"exposure": "currency", "inverse": 1, "leverage_factor": 2},  # -2x euro
     "YCS": {"exposure": "currency", "inverse": 1, "leverage_factor": 2},  # -2x yen
     # ── geared / single-stock wrappers (issuer-confirmed) ──
@@ -82,6 +91,7 @@ OPERATOR_ETF_LABELS = {
     "GGLS": {"gics_sector": "Communication Services", "inverse": 1},  # short GOOGL
     "METD": {"gics_sector": "Communication Services", "inverse": 1},  # short META
     "MSFD": {"gics_sector": "Technology", "inverse": 1},              # short MSFT
+    "REW": {"gics_sector": "Technology", "inverse": 1, "leverage_factor": 2},  # -2x tech
     "MSTY": {"exposure": "crypto-proxy"},            # MSTR option-income (bitcoin driver)
     "MAGS": {"exposure": "mega-cap-core"},           # equal-weight Mag-7 core long
     "BLOK": {"exposure": "btc-sensitivity"},         # blockchain equities — btc-sensitive
