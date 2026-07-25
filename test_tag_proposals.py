@@ -204,6 +204,64 @@ check("ARKK -> diversified-equity (no dominant sector)",
          {"technology": 0.35, "healthcare": 0.30, "consumer_cyclical": 0.20}),
       (None, "diversified-equity", 0, None))
 
+# CRYPTO — must BEAT the commodity branch (both are empty-sector + other-heavy).
+# Spot/wrapped crypto is 'Digital Assets' category + ~100% other; keeps its own
+# axis (crypto-proxy), inverse/leverage flags carry through.
+check("IBIT -> crypto-proxy (not commodity)",
+      _h("IBIT", "Digital Assets", {"otherPosition": 1.0}, {},
+         "iShares Bitcoin Trust"),
+      ("Digital Assets", "crypto-proxy", 0, None))
+check("ETHA -> crypto-proxy",
+      _h("ETHA", "Digital Assets", {"otherPosition": 1.0}, {},
+         "iShares Ethereum Trust"),
+      ("Digital Assets", "crypto-proxy", 0, None))
+check("SOLZ -> crypto-proxy (other 64%, Digital Assets cat)",
+      _h("SOLZ", "Digital Assets", {"otherPosition": 0.64, "cashPosition": 0.36},
+         {}, "Grayscale Solana Trust"),
+      ("Digital Assets", "crypto-proxy", 0, None))
+check("SBIT -> crypto-proxy + 2x (leveraged bitcoin)",
+      _h("SBIT", "Digital Assets", {"otherPosition": 0.31, "cashPosition": 0.69},
+         {}, "ProShares Ultra Bitcoin ETF"),
+      ("Digital Assets", "crypto-proxy", 0, 2.0))
+check("SETH -> crypto-proxy + inverse (short ether)",
+      _h("SETH", "Digital Assets", {"otherPosition": 1.0}, {},
+         "ProShares Short Ether ETF"),
+      ("Digital Assets", "crypto-proxy", 1, 1.0))
+
+# COUNTRY beats sector concentration: EWY is Korea (~61% tech) — stays country.
+check("EWY -> single-country despite tech 61% (region wins)",
+      _h("EWY", "Focused Region", {"stockPosition": 0.99},
+         {"technology": 0.61, "financial_services": 0.15, "industrials": 0.10},
+         "iShares MSCI South Korea ETF"),
+      (None, "single-country", 0, None))
+
+# GEARED / single-stock funds whose underlying can't be resolved -> REVIEW,
+# never a wrong broad-market/multi-asset label (the MSTY/DRIP class).
+_msty = classify_from_holdings(
+    "MSTY", "Derivative Income", {"stockPosition": -0.66, "cashPosition": 1.66},
+    {}, "YieldMax MSTR Option Income Strategy ETF")
+check("MSTY inverse+unresolved -> review, no exposure written",
+      (_msty["exposure"], _msty["gics_sector"], _msty["review"]),
+      (None, None, 1))
+_drip = classify_from_holdings(
+    "DRIP", "Trading--Leveraged Equity",
+    {"stockPosition": 0.18, "cashPosition": 0.82}, {},
+    "Direxion Daily S&P Oil & Gas Exp Bear 2X Shares")
+check("DRIP geared-mixed -> review, no multi-asset label",
+      (_drip["exposure"], _drip["review"]), (None, 1))
+# SH stays broad-market (its name resolves) — the resolved-underlying case
+check("SH still resolves to broad-market inverse",
+      _h("SH", "Trading--Inverse Equity",
+         {"stockPosition": -1.0001, "cashPosition": 1.82}, {},
+         "ProShares Short S&P500"),
+      (None, "broad-market", 1, 1.0))
+# HEFT stays multi-asset (no leverage/inverse — a genuine allocation fund)
+check("HEFT still multi-asset (un-geared mix)",
+      _h("HEFT", "Tactical Allocation",
+         {"stockPosition": 0.55, "bondPosition": 0.26, "otherPosition": 0.11},
+         {}, "Hedgeye Fourth Turning ETF"),
+      (None, "multi-asset", 0, None))
+
 # duration is carried on the bond rows (checked separately from the 4-tuple)
 _tlt = classify_from_holdings("TLT", "Long-Term Bond", {"bondPosition": 0.99},
                               {}, "iShares 20+ Year Treasury Bond ETF")

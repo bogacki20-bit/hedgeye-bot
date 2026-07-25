@@ -286,29 +286,45 @@ def classify_from_holdings(ticker, category, asset_classes, sector_weightings,
         return out(exposure="fixed-income", rate=1, dur=dur,
                    why=f"bond {bond:.0%}")
 
-    # 2. INVERSE equity — net short (SH). Underlying from the name if we can.
+    # 2. CRYPTO — spot/wrapped crypto funds: ~100% 'other' with category
+    #    'Digital Assets' (IBIT/ETHA/SOLZ) or an obvious crypto name. MUST beat
+    #    the commodity branch (both look like empty-sector + other-heavy) so
+    #    crypto stays on its OWN axis instead of being mislabeled commodity.
+    #    Keeps the 'Digital Assets' pseudo-sector; inverse/leverage flags carry
+    #    through (SETH -> crypto-proxy/INV, SBIT -> crypto-proxy/2x).
+    if "digital asset" in catl or _XP_CRYPTO_RE.search(blob):
+        return out(gics="Digital Assets", exposure="crypto-proxy",
+                   why=f"crypto: cat='{cat}', other {other:.0%}")
+
+    # 3. INVERSE equity — net short (SH). Underlying from the name if we can;
+    #    if the name doesn't resolve (single-stock option-income funds like
+    #    MSTY read as net-short), route to REVIEW rather than guess broad-market.
     if stock <= -0.05:
         exp = classify_exposure(ticker, {"longName": name, "category": cat})[0]
-        return out(exposure=exp or "broad-market",
-                   why=f"stock {stock:+.0%} (inverse)")
+        if exp is None:
+            return out(review=1,
+                       why=f"stock {stock:+.0%} inverse, underlying unresolved")
+        return out(exposure=exp, why=f"stock {stock:+.0%} (inverse {exp})")
 
-    # 3. COMMODITY — empty sector weights + other-heavy, or category says so
+    # 4. COMMODITY — empty sector weights + other-heavy, or category says so
     #    (GLD other=100%; USO other=43%; BOIL levered commodity, sw={})
     if not sw and (other >= _COMMOD_OTHER or "commodit" in catl):
         return out(exposure="commodity-proxy",
                    why=f"other {other:.0%}, no sector weights, cat='{cat}'")
 
-    # 4. EQUITY — stock-dominant with sector weights (XLV, SKYY, SPY, EWZ, SOXL)
+    # 5. EQUITY — stock-dominant with sector weights (XLV, SKYY, SPY, EWZ, SOXL)
     if stock >= _STOCK_DOMINANT and sw:
+        # Region wins over sector concentration: a single-country fund is a
+        # COUNTRY bet even when one sector dominates it (EWY = Korea, ~61% tech).
+        if _REGION_RE.search(cat):                 # EWZ, FXI, EWY — geographic
+            return out(exposure="single-country",
+                       why=f"equity, region cat='{cat}'")
         slug, wt = _dominant_sector(sw)
         if wt >= _SECTOR_DOMINANT:
             gics = _sector_from_slug(slug)
             return out(gics=gics, review=0 if gics else 1,
                        why=f"{slug} {wt:.0%}"
                            + ("" if gics else " — sector slug UNMAPPED"))
-        if _REGION_RE.search(cat):                 # EWZ, FXI — geographic
-            return out(exposure="single-country",
-                       why=f"equity, no dominant sector, region cat='{cat}'")
         if _XP_BROAD_RE.search(blob):              # SPY — a real broad index
             return out(exposure="broad-market",
                        why=f"equity broad-index cat='{cat}'")
@@ -316,16 +332,23 @@ def classify_from_holdings(ticker, category, asset_classes, sector_weightings,
                    why=f"equity, {len(sw)} sectors, none >= "
                        f"{_SECTOR_DOMINANT:.0%}")
 
-    # 5. MULTI-ASSET — meaningful stock AND bond, or nothing dominant (HEFT).
+    # 6. MULTI-ASSET — meaningful stock AND bond, or nothing dominant (HEFT).
     #    Honest label is 'multi-asset'; the real fix is look-through (later).
     if (stock >= 0.10 and bond >= 0.10) or (0 < (stock + bond + other)
                                             and stock < _STOCK_DOMINANT
                                             and bond < _BOND_DOMINANT):
+        # A GEARED fund is not a genuine allocation fund — the mixed asset_class
+        # read is a swap/leverage artifact (DRIP/GGLS/METD/MSFD). Route to
+        # REVIEW; only un-geared mixes (HEFT) get the honest 'multi-asset'.
+        if inverse or lev:
+            return out(review=1,
+                       why=f"geared, mixed stock {stock:.0%}/bond {bond:.0%}/"
+                           f"other {other:.0%} — underlying unresolved")
         return out(exposure="multi-asset",
                    why=f"mixed stock {stock:.0%}/bond {bond:.0%}/other "
                        f"{other:.0%} — look-through candidate")
 
-    # 6. UNROUTED — operator pass (loud, never a silent guess)
+    # 7. UNROUTED — operator pass (loud, never a silent guess)
     return out(review=1,
                why=f"unrouted: stock {stock}/bond {bond}/other {other}, "
                    f"sector_weights={bool(sw)}, cat='{cat}'")
