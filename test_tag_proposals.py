@@ -262,6 +262,44 @@ check("HEFT still multi-asset (un-geared mix)",
          {}, "Hedgeye Fourth Turning ETF"),
       (None, "multi-asset", 0, None))
 
+# BLOK holds blockchain EQUITIES (has sector weights) — the empty-sw gate keeps
+# it OUT of the crypto branch. (In holdings_label the operator override then
+# sets 'btc-sensitivity'; here we check the classifier no longer says crypto.)
+check("BLOK (equity, has sectors) -> not crypto-proxy",
+      _h("BLOK", "Equity Digital Assets",
+         {"stockPosition": 0.90, "otherPosition": 0.10},
+         {"financial_services": 0.35, "technology": 0.30,
+          "communication_services": 0.20, "consumer_cyclical": 0.15},
+         "Amplify Transformational Data Sharing ETF"),
+      (None, "diversified-equity", 0, None))
+
+# operator-confirmed ETF labels (currency + geared/single-stock wrappers that
+# holdings data can't resolve) — web cross-checked, beat the classifier.
+from _tag_proposals import _operator_etf_proposal
+
+
+def _op(t):
+    p = _operator_etf_proposal(t)
+    return (p["gics_sector"], p["exposure"], p["inverse"], p["leverage_factor"])
+
+
+print("operator ETF labels (web cross-check):")
+check("EUO -> currency inverse 2x", _op("EUO"), (None, "currency", 1, 2))
+check("UUP -> currency long", _op("UUP"), (None, "currency", 0, None))
+check("SQQQ -> broad-market inverse 3x", _op("SQQQ"),
+      (None, "broad-market", 1, 3))
+check("DRIP -> Energy inverse 2x", _op("DRIP"), ("Energy", None, 1, 2))
+check("MSFD -> Technology inverse (short MSFT)", _op("MSFD"),
+      ("Technology", None, 1, None))
+check("METD -> Comm Services inverse (short META)", _op("METD"),
+      ("Communication Services", None, 1, None))
+check("MSTY -> crypto-proxy", _op("MSTY"), (None, "crypto-proxy", 0, None))
+check("MAGS -> mega-cap-core", _op("MAGS"), (None, "mega-cap-core", 0, None))
+check("BLOK -> btc-sensitivity", _op("BLOK"),
+      (None, "btc-sensitivity", 0, None))
+check("HEFT -> multi-asset (operator; no funds_data)", _op("HEFT"),
+      (None, "multi-asset", 0, None))
+
 # duration is carried on the bond rows (checked separately from the 4-tuple)
 _tlt = classify_from_holdings("TLT", "Long-Term Bond", {"bondPosition": 0.99},
                               {}, "iShares 20+ Year Treasury Bond ETF")

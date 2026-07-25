@@ -62,6 +62,32 @@ OPERATOR_OVERRIDES = {
              "src": "operator 2026-07-12"},
 }
 
+# Operator-confirmed ETF labels for names holdings data CAN'T resolve — currency
+# funds (yfinance returns no asset_classes) and single-stock / geared wrappers
+# (asset_classes is a swap artifact). Cross-checked on issuer sites 2026-07-25.
+# These BEAT the classifier in holdings_label (identity fact = operator gate).
+# Keys not present: gics_sector=None, exposure=None, inverse=0, leverage_factor=None.
+OPERATOR_ETF_LABELS = {
+    # ── currency funds (no funds_data) ──
+    "FXE": {"exposure": "currency"},                 # long euro
+    "FXB": {"exposure": "currency"},                 # long pound
+    "FXF": {"exposure": "currency"},                 # long swiss franc
+    "FXY": {"exposure": "currency"},                 # long yen
+    "UUP": {"exposure": "currency"},                 # long US dollar
+    "EUO": {"exposure": "currency", "inverse": 1, "leverage_factor": 2},  # -2x euro
+    "YCS": {"exposure": "currency", "inverse": 1, "leverage_factor": 2},  # -2x yen
+    # ── geared / single-stock wrappers (issuer-confirmed) ──
+    "SQQQ": {"exposure": "broad-market", "inverse": 1, "leverage_factor": 3},  # -3x Nasdaq-100
+    "DRIP": {"gics_sector": "Energy", "inverse": 1, "leverage_factor": 2},     # -2x oil&gas E&P
+    "GGLS": {"gics_sector": "Communication Services", "inverse": 1},  # short GOOGL
+    "METD": {"gics_sector": "Communication Services", "inverse": 1},  # short META
+    "MSFD": {"gics_sector": "Technology", "inverse": 1},              # short MSFT
+    "MSTY": {"exposure": "crypto-proxy"},            # MSTR option-income (bitcoin driver)
+    "MAGS": {"exposure": "mega-cap-core"},           # equal-weight Mag-7 core long
+    "BLOK": {"exposure": "btc-sensitivity"},         # blockchain equities — btc-sensitive
+    "HEFT": {"exposure": "multi-asset"},             # fund-of-ETFs (no funds_data)
+}
+
 QUOTETYPE_TO_INSTRUMENT = {
     "ETF": "etf", "EQUITY": "stock", "MUTUALFUND": "fund",
     "MONEYMARKET": "fund", "INDEX": "index", "FUTURE": "future",
@@ -292,7 +318,10 @@ def classify_from_holdings(ticker, category, asset_classes, sector_weightings,
     #    crypto stays on its OWN axis instead of being mislabeled commodity.
     #    Keeps the 'Digital Assets' pseudo-sector; inverse/leverage flags carry
     #    through (SETH -> crypto-proxy/INV, SBIT -> crypto-proxy/2x).
-    if "digital asset" in catl or _XP_CRYPTO_RE.search(blob):
+    #    Gate on EMPTY sector weights: true spot/wrapped crypto holds no
+    #    equities (sw={}). A blockchain-EQUITY fund (BLOK: Coinbase/MSTR/miners)
+    #    has sector weights, so it falls through to the equity branch.
+    if not sw and ("digital asset" in catl or _XP_CRYPTO_RE.search(blob)):
         return out(gics="Digital Assets", exposure="crypto-proxy",
                    why=f"crypto: cat='{cat}', other {other:.0%}")
 
@@ -495,6 +524,21 @@ def _label_str(d) -> str:
     return "/".join(parts) or "—"
 
 
+def _operator_etf_proposal(ticker):
+    """Full proposal dict from an OPERATOR_ETF_LABELS entry — operator-confirmed
+    identity, always written (review=0)."""
+    o = OPERATOR_ETF_LABELS[ticker]
+    return {"ticker": ticker, "instrument": "etf",
+            "gics_sector": o.get("gics_sector"), "exposure": o.get("exposure"),
+            "inverse": o.get("inverse", 0),
+            "leverage_factor": o.get("leverage_factor"),
+            "rate_sensitive": o.get("rate_sensitive"),
+            "duration_char": o.get("duration_char"),
+            "subsector": None, "name": "", "src": "operator", "review": 0,
+            "raw_quotetype": "ETF", "raw_sector": "",
+            "why": "operator-confirmed (web cross-check 2026-07-25)"}
+
+
 def holdings_label(commit=False, refresh=False):
     """Label every enrolled ETF from what it HOLDS (funds_data), not its name.
     Dry-run prints a current -> truth DIFF so corrections (e.g. HEFT's fake
@@ -514,6 +558,19 @@ def holdings_label(commit=False, refresh=False):
 
     props, changed, skipped = [], 0, 0
     for tk, g0, e0, i0, l0 in rows:
+        cur0 = {"gics_sector": g0, "exposure": e0, "inverse": i0,
+                "leverage_factor": l0}
+        # Operator-confirmed labels win outright — currency funds and geared
+        # single-stock wrappers that holdings data can't resolve. No fetch.
+        if tk in OPERATOR_ETF_LABELS:
+            p = _operator_etf_proposal(tk)
+            is_changed = _label_str(p) != _label_str(cur0)
+            if is_changed:
+                changed += 1
+            print(f"  {'Δ' if is_changed else ' '} {tk:<8} "
+                  f"{_label_str(cur0):<26} -> {_label_str(p):<26} {p['why']}")
+            props.append(p)
+            continue
         fd = cache.get(tk) if not refresh else None
         if fd is None and tk not in cache:
             fd = fetch_funds_data(tk)
@@ -528,8 +585,6 @@ def holdings_label(commit=False, refresh=False):
             continue
         p = classify_from_holdings(tk, fd["category"], fd["asset_classes"],
                                    fd["sector_weightings"], fd["name"])
-        cur0 = {"gics_sector": g0, "exposure": e0, "inverse": i0,
-                "leverage_factor": l0}
         routed = not p["review"]
         is_changed = routed and _label_str(p) != _label_str(cur0)
         if is_changed:
