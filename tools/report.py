@@ -131,10 +131,21 @@ def delta_line(prev, cur) -> str:
 
 def conc_clusters(positions) -> dict:
     """P3 concentration. positions: [(ticker, weight_pct, tags|None)] where
-    tags = (gics_sector, rate_sensitive, duration_char). Clusters OVERLAP by
-    design (a name can be rate_sensitive AND healthcare AND duration) — each
-    is a fact. Untagged names cluster as 'untagged' (ZG lesson: labels only
-    from actual membership, never guessed).
+    tags = (gics_sector, rate_sensitive, duration_char, commodity_linked,
+            exposure, inverse). Older 3-tuples (sector, rate, dur) are still
+    accepted (padded). Clusters OVERLAP by design (a name can be
+    rate_sensitive AND healthcare AND duration) — each is a fact; a single
+    position never counts twice into the SAME cluster.
+
+    Two honest residual buckets replace the old lying 'untagged':
+      • 'no-tags' — the name is ABSENT from ticker_tags (genuinely unknown).
+      • 'no-gics' — the name HAS a row but no grouping axis fired (it IS
+        tagged — instrument etc. — just not on a sector/theme axis).
+
+    ETFs now cluster on commodity_linked -> 'commodity', the non-GICS exposure
+    axis ('-proxy' folded in, so commodity-proxy joins 'commodity'), and
+    inverse -> 'inverse'. That makes a correlated commodity/thematic book
+    visible to CONC (the energy-lesson failure mode).
     Returns {cluster: [n_pos, weight_pct]}."""
     out: dict = {}
 
@@ -145,33 +156,44 @@ def conc_clusters(positions) -> dict:
 
     for _t, w, tags in positions:
         if tags is None:
-            add("untagged", w)
+            add("no-tags", w)
             continue
-        sector, rate_sens, dur = tags
-        hit = False
+        sector, rate_sens, dur, commodity, exposure, inverse = (
+            list(tags) + [None] * 6)[:6]
+        keys = set()
         if rate_sens:
-            add("rate_sensitive", w); hit = True
+            keys.add("rate_sensitive")
         if sector:
-            add(str(sector).strip().lower().replace(" ", "_"), w); hit = True
+            keys.add(str(sector).strip().lower().replace(" ", "_"))
         if dur:
             # 'dur:' prefix — duration_char values like 'long' would otherwise
             # read as a position side in the CONC line (2026-07-11 dry-run).
-            add("dur:" + str(dur).strip().lower().replace(" ", "_"), w)
-            hit = True
-        if not hit:
-            add("untagged", w)
+            keys.add("dur:" + str(dur).strip().lower().replace(" ", "_"))
+        if commodity:
+            keys.add("commodity")
+        if exposure:
+            keys.add((str(exposure).strip().lower().replace(" ", "_")
+                      .replace("-proxy", "")))   # commodity-proxy -> commodity
+        if inverse:
+            keys.add("inverse")
+        for k in (keys or {"no-gics"}):
+            add(k, w)
     return out
 
 
+_CONC_TRAILING = ("no-gics", "no-tags")     # honest residuals, shown last
+
+
 def conc_line(clusters, top_n=3) -> str:
-    real = {k: v for k, v in clusters.items() if k != "untagged"}
-    if not real and "untagged" not in clusters:
+    real = {k: v for k, v in clusters.items() if k not in _CONC_TRAILING}
+    if not real and not any(k in clusters for k in _CONC_TRAILING):
         return "CONC: n/a (no positions)"
     top = sorted(real.items(), key=lambda kv: -kv[1][1])[:top_n]
     parts = [f"{k} {n}pos/{w:.1f}%w" for k, (n, w) in top]
-    if "untagged" in clusters:
-        n, w = clusters["untagged"]
-        parts.append(f"untagged {n}pos/{w:.1f}%w")
+    for k in _CONC_TRAILING:
+        if k in clusters:
+            n, w = clusters[k]
+            parts.append(f"{k} {n}pos/{w:.1f}%w")
     line = "CONC: " + " · ".join(parts)
     if top:
         line += f" · top_cluster: {top[0][0]}"
@@ -458,10 +480,12 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         try:
             if ctx:
                 cur.execute("""SELECT ticker, gics_sector, rate_sensitive,
-                                      duration_char
+                                      duration_char, commodity_linked,
+                                      exposure, inverse
                                FROM ticker_tags WHERE ticker = ANY(%s)""",
                             (sorted(ctx),))
-                tags = {t: (s, rs, dc) for t, s, rs, dc in cur.fetchall()}
+                tags = {t: (s, rs, dc, cl, xp, inv)
+                        for t, s, rs, dc, cl, xp, inv in cur.fetchall()}
                 positions = [(t, c["weight"] or 0.0, tags.get(t))
                              for t, c in ctx.items()]
                 lines.append(conc_line(conc_clusters(positions)))
