@@ -42,6 +42,10 @@ KNOWN_UNCOVERABLE = {
 #     like "COIN/SOL/AVAX/XRP=NEUTRAL", so ETH/SOL/AVAX are covered).
 #   STILL PARKED: RUNEUSD, TRXUSD — never designated by the product; no live source yet.
 # No name is promoted without a signal backing it.
+# NB (2026-07-26): btcquant is TREND-ONLY — hedgeye_crypto_quant carries no range levels,
+# so a btcquant promotion never supplied a range. MFR ranges these under CRYPTO.*, and
+# XRPUSD/AVAXUSD/RUNEUSD/TRXUSD are now force-fanned-out (mfr_client._CRYPTO_FORCE_FANOUT)
+# so ranges flow from MFR while trend continues to come from btcquant.
 PARKED_FOR_SOURCE = {
     "RUNEUSD", "TRXUSD",
 }
