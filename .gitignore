@@ -21,3 +21,6 @@ logs/
 # Bot-state export dumps — contain full positions/trades/PnL (credentials are
 # redacted, but holdings are NOT). Generated into the repo tree; never commit.
 bot_state_export_*.md
+
+commit*.patch
+_holdings_cache.json
