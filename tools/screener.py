@@ -792,6 +792,47 @@ def _refresh_range_pos_live(rows):
         else:
             r["_price"] = px_eod
             r["_rp_stale"] = True
+    _apply_shadow_failover(rows)
+
+
+def _apply_shadow_failover(rows) -> None:
+    """Where MFR has no usable range (dark / stale / validation-flagged), publish
+    the SHADOW band instead and tag the row 'shd' so every line shows which
+    authority set the level.
+
+    Equity + ETF only — the failover map is built from status='ok' shadow rows,
+    and futures/crypto/fx are stored as class_uncalibrated. hdg is untouched:
+    Hedgeye levels live in hedgeye_risk_ranges and feed decision_engine, not this
+    display path. Best-effort — any failure leaves the MFR values exactly as they
+    were.
+    """
+    try:
+        from tools.shadow_ingest import shadow_failover_map
+        fmap = shadow_failover_map({r["ticker"] for r in rows})
+    except Exception as e:
+        log.warning("SCREEN: shadow failover unavailable (%s) - MFR values stand", e)
+        return
+    if not fmap:
+        return
+    for r in rows:
+        sh = fmap.get(r["ticker"])
+        if not sh:
+            continue
+        usable_mfr = (r.get("_rlo") is not None and r.get("_rhi") is not None
+                      and not r.get("_snap_stale"))
+        if usable_mfr:
+            continue                       # healthy MFR band wins — byte-identical
+        lo, hi, srp, sh_hurst = sh
+        r["_rlo"], r["_rhi"] = lo, hi
+        r["_rsrc"] = "shd"
+        r["_snap_stale"] = False           # a shadow band is current by construction
+        px = r.get("_price")
+        if px is not None and hi > lo:
+            r["range_pos"] = (float(px) - lo) / (hi - lo)
+        elif srp is not None:
+            r["range_pos"] = srp
+        if r.get("hurst") is None and sh_hurst is not None:
+            r["hurst"] = sh_hurst
 
 
 def _rp_str(r) -> str:
@@ -815,7 +856,10 @@ def _rng_str(r) -> str:
     lo, hi = r.get("_rlo"), r.get("_rhi")
     if lo is None or hi is None:
         return "[?]"
-    return f"[{float(lo):.2f}-{float(hi):.2f}]"
+    # range-source tag: only set when the shadow engine supplied the band, so
+    # rows on a healthy MFR range render byte-identically to before.
+    src = f"·{r['_rsrc']}" if r.get("_rsrc") else ""
+    return f"[{float(lo):.2f}-{float(hi):.2f}]{src}"
 
 
 def run_screen_q(q: dict) -> str:

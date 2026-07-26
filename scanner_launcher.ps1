@@ -79,6 +79,22 @@ while ($true) {
         } else {
             Add-Content -Path $logFile -Value "---- mfr_fanout: watchlist sync FAILED rc=$LASTEXITCODE (will retry next cycle) ----"
         }
+
+        # Shadow range ingest - runs immediately AFTER the MFR fan-out, inside the
+        # same once-per-UTC-day block, so shadow bands are computed against the MFR
+        # rows just written and the validator compares like for like. Writes only
+        # shadow_snapshots + shadow_validation; never touches mfr_snapshots or
+        # hedgeye_risk_ranges. Non-fatal by design: a shadow failure must not stop
+        # the scanner, and the MFR marker above is already set either way.
+        Add-Content -Path $logFile -Value "---- shadow_ingest: starting ($todayUtc UTC) ----"
+        & $python -m tools.shadow_ingest *>&1 |
+            ForEach-Object { $_.ToString() } |
+            Out-File -FilePath $logFile -Append -Encoding utf8
+        if ($LASTEXITCODE -eq 0) {
+            Add-Content -Path $logFile -Value "---- shadow_ingest: complete ----"
+        } else {
+            Add-Content -Path $logFile -Value "---- shadow_ingest: FAILED rc=$LASTEXITCODE (non-fatal; MFR data unaffected) ----"
+        }
     }
 
     # Polling universe: full union of Quad slice + ETF Pro long/short + Signal

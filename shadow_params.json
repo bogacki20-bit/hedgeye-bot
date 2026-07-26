@@ -1,0 +1,41 @@
+{
+  "_comment": "Calibrated parameters for shadow_range.py. Produced by grid search against clean midweek mfr_snapshots rows (Tue-Fri, width 1-30% of price, equities only), 41 tickers across 11 GICS sectors, 1282 reference rows over 2026-06-02..2026-07-24. Regenerate by re-running the calibration when the reference set materially changes.",
+  "shadow_failover": true,
+  "_shadow_failover_note": "Kill switch. true = names with no usable MFR range (dark / stale / validation-flagged) publish the shadow band tagged 'shd'. Set false to pull every shadow range back out of the reports with no code change. Applies to equity and ETF only - futures/crypto/fx are stored as status=class_uncalibrated and never fail over, because these params are equity-fit. Hedgeye (hdg) levels in hedgeye_risk_ranges are never touched by this: hierarchy stays hdg > mfr > shadow.",
+  "calibrated_on": "2026-07-26",
+  "asset_class": "equities",
+  "reference": {
+    "rows": 1282,
+    "tickers": 41,
+    "span": "2026-06-02..2026-07-24",
+    "filter": "midweek Tue-Fri (excludes weekend carry-forward), width 1-30% of price, equities only"
+  },
+  "range_params": {
+    "k_width": 1.7,
+    "horizon_days": 2.0,
+    "hurst_skew_gain": 0.4,
+    "donchian_blend": 0.15
+  },
+  "fit_quality": {
+    "edge_mae_low_pct": 1.683,
+    "edge_mae_high_pct": 1.868,
+    "rp_mae": 0.1697,
+    "next_day_coverage": 0.956,
+    "_note": "Edge MAE ~1.7% and rp MAE ~0.17 are the vendor-noise floor, not model error. MFR price vs yfinance close differs by a median 0.447% (p90 2.24%), which passes through roughly 1:1 into band-edge error. Calibration already matched mean band width exactly (1.45x -> 1.00x); the residual is dispersion. An implied-vol width driver was tested and REJECTED: R^2 iv 0.536 vs realized 0.758, blend 0.765 with a negative iv coefficient (collinearity, corr(iv,sigma)=0.885), and residual width disagreement is uncorrelated with the iv-rv spread (0.016)."
+  },
+  "validator": {
+    "rp_tol": 0.46,
+    "width_ratio_tol": 1.6,
+    "_note": "Empirical, set at p95 of the observed shadow-vs-MFR divergence on the clean midweek reference (NOT the shipped defaults of 0.25/2.0, which flagged 22% of known-good rows). Per-metric flag rate ~4.9%; combined either-flag rate ~8.6% - that is the expected false-positive floor, so a run flagging under ~9% of names is showing NORMAL disagreement, not feed trouble.",
+    "distribution": {
+      "rp_diff_p50": 0.1301,
+      "rp_diff_p90": 0.3605,
+      "rp_diff_p95": 0.4574,
+      "rp_diff_p99": 0.6866,
+      "width_ratio_p50": 1.163,
+      "width_ratio_p90": 1.476,
+      "width_ratio_p95": 1.599,
+      "width_ratio_p99": 2.061
+    }
+  }
+}
