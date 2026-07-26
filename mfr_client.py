@@ -142,6 +142,9 @@ def _report_fanout_completeness(ok: int, total: int, missing: list) -> None:
             log.warning("fan-out completeness squawk failed: %s", e)
 
 
+_CRYPTO_FORCE_FANOUT = ["XRPUSD", "AVAXUSD", "RUNEUSD", "TRXUSD"]
+
+
 def refresh_watchlist() -> dict:
     """Pull the operator's MFR watchlist, fetch+save every ticker (paced to avoid MFR's
     bulk-cadence throttling), RE-SWEEP any that still failed, and report completeness.
@@ -154,7 +157,8 @@ def refresh_watchlist() -> dict:
     if not watchlist:
         return {"tickers": 0, "ok": 0, "skip": 0, "fail": 0, "failed": [],
                 "source": "mfr_watchlist"}
-    summary = refresh_for_tickers(watchlist)
+    fanout = sorted(set(watchlist) | set(_CRYPTO_FORCE_FANOUT))
+    summary = refresh_for_tickers(fanout)
     # Re-sweep: one more paced pass over names that still failed — catches tickers MFR
     # briefly throttled/timed-out during the main pass.
     missing = list(summary.get("failed", []))
@@ -167,9 +171,9 @@ def refresh_watchlist() -> dict:
         summary["fail"] = resweep["fail"]
         summary["failed"] = resweep["failed"]
     summary["source"] = "mfr_watchlist"
-    _report_fanout_completeness(summary["ok"], len(watchlist), summary.get("failed", []))
+    _report_fanout_completeness(summary["ok"], len(fanout), summary.get("failed", []))
     log.info("mfr_fanout: refresh complete — ok=%d fail=%d (of %d) reswept=%d recovered=%d",
-             summary["ok"], summary["fail"], len(watchlist),
+             summary["ok"], summary["fail"], len(fanout),
              summary.get("reswept", 0), summary.get("recovered", 0))
     return summary
 
@@ -193,10 +197,18 @@ def fetch_raw(ticker: str) -> dict | None:
     # currency ETF tickers (FXC, FXB, etc.). Try multiple variants per code.
     aliases = {
         # Crypto
-        "BITCOIN": ["BTCUSD", "BTC"],
-        "BTC":     ["BTCUSD"],
-        "ETH":     ["ETHUSD"],
-        "ETHEREUM":["ETHUSD"],
+        "BITCOIN": ["BTCUSD", "BTC", "CRYPTO.BTC"],
+        "BTC":     ["BTCUSD", "CRYPTO.BTC"],
+        "BTCUSD":  ["CRYPTO.BTC"],
+        "ETH":     ["ETHUSD", "CRYPTO.ETH"],
+        "ETHEREUM":["ETHUSD", "CRYPTO.ETH"],
+        "ETHUSD":  ["CRYPTO.ETH"],
+        "SOL":     ["SOLUSD", "CRYPTO.SOL"],
+        "SOLUSD":  ["CRYPTO.SOL"],
+        "XRP":     ["CRYPTO.XRP"],   "XRPUSD":  ["CRYPTO.XRP"],
+        "AVAX":    ["CRYPTO.AVAX"],  "AVAXUSD": ["CRYPTO.AVAX"],
+        "RUNE":    ["CRYPTO.RUNE"],  "RUNEUSD": ["CRYPTO.RUNE"],
+        "TRX":     ["CRYPTO.TRX"],   "TRXUSD":  ["CRYPTO.TRX"],
 
         # Commodities
         "WTIC":    ["WTI", "CRUDE"],
