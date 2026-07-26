@@ -10,7 +10,8 @@ from tools.weekend_report import (lower_high_streak, aggregate_rotation,
                                    detect_flip, dist_to_trend, format_changes,
                                    _coarse_sector, _is_hard_flip, _ret_dir,
                                    is_adverse_momentum, select_stop_adding,
-                                   format_stop_adding)
+                                   format_stop_adding, select_short_gate,
+                                   select_puck, format_screens, _wow, _volmark)
 
 FAIL = 0
 
@@ -178,10 +179,40 @@ check("flip label rendered", _sa[0]["flip"], "bull→bear")
 _saf = format_stop_adding(_sa)
 check("section says stop adding", "STOP ADDING" in _saf and "don't add" in _saf, True)
 
+print("select_short_gate / select_puck — pre-computed screens:")
+_sg_assets = [
+    {"ticker": "NFLX", "trend": "bearish", "range_pos": 0.85, "sector": "Comm", "lh_streak": 4},
+    {"ticker": "XYZ", "trend": "bearish", "range_pos": 0.50, "sector": "Fin"},          # rp too low
+    {"ticker": "AAA", "trend": "bullish", "range_pos": 0.90, "sector": "Tech"},          # not bear
+]
+_sg = select_short_gate(_sg_assets)
+check("SHORT GATE keeps bear+rp>=0.80 only", [a["ticker"] for a in _sg], ["NFLX"])
+_puck_assets = [
+    {"ticker": "XLE", "trend": "bullish", "range_pos": 0.30, "sector": "Energy", "held": True},
+    {"ticker": "CVX", "trend": "bullish", "range_pos": 0.30, "sector": "Energy", "held": False},  # not held
+    {"ticker": "MSFT", "trend": "bullish", "range_pos": 0.30, "sector": "Tech", "held": True},     # sector not top-half
+]
+_pk = select_puck(_puck_assets, top_half_sectors={"Energy"})
+check("PUCK keeps own+bull+rp<0.5+top-half sector", [a["ticker"] for a in _pk], ["XLE"])
+_scr = format_screens(_sg, _pk)
+check("screens: SHORT GATE qualifier count", "1 qualifier" in _scr, True)
+check("empty screen prints 0 qualifiers", "0 qualifiers" in format_screens([], []), True)
+
+print("_volmark — volume overlay (real_dip, price_down_3d, decel, streak):")
+check("real_dip -> decel dip tag", _volmark((True, True, True, 3)), "↓3d")
+check("down on heavy (non-decel) vol -> distribution ↑", _volmark((False, True, False, 0)), "↑")
+check("no signal -> blank", _volmark((False, False, False, 0)), "")
+check("None -> blank", _volmark(None), "")
+
+print("_wow — sector week-over-week rank tag:")
+check("moved up 5->1", _wow({"rank": 1, "prev_rank": 5}), "5→1")
+check("unchanged =", _wow({"rank": 3, "prev_rank": 3}), "=")
+check("no prior -> ·new", _wow({"rank": 2, "prev_rank": None}), "·new")
+
 print("format_weekend_report — full-universe render:")
-_regime = {"date": "Sun Jul 26", "quad": "QUAD3 reflation", "vix": "15.6",
-           "vix_bucket": "Investable→full size", "n_names": 613, "n_sectors": 11,
-           "pct_bull": 41, "pct_bear": 38, "pct_neut": 21}
+_regime = {"date": "Sun Jul 26", "monthly_quad": "Quad 4", "quarterly_quad": "Quad 4",
+           "vix": "15.6", "vix_bucket": "Investable→full size", "n_names": 613,
+           "n_sectors": 11, "pct_bull": 41, "pct_bear": 38, "pct_neut": 21}
 _uni = [
     {"sector": "Energy", "trend": "bullish", "range_pos": 0.44, "rs_slope": 0.05,
      "1w": 0.021, "1m": 0.047, "3m": 0.155},
@@ -199,10 +230,14 @@ _uni = [
      "1w": -0.008, "1m": -0.020, "3m": -0.030},
 ]
 _rot = aggregate_rotation(_uni)
+for _i, _s in enumerate(_rot):
+    _s["rank"] = _i + 1
+    _s["prev_rank"] = {"Energy": 5}.get(_s["sector"])   # Energy 5th -> 1st
 _assets = [
     {"ticker": "XLE", "sector": "Energy", "trend": "bullish", "range_pos": 0.42,
      "rs_rank": 2, "1w": 0.021, "1m": 0.047, "3m": 0.155, "lh_streak": 0, "held": False,
-     "vs_trend": 3.2, "trend_edge": "support"},
+     "vs_trend": 3.2, "trend_edge": "support", "iv": 0.28, "rv": 0.21, "ivpd": 0.31,
+     "vol": (False, True, False, 0)},
     {"ticker": "XLU", "sector": "Utilities", "trend": "bullish", "range_pos": 0.55,
      "rs_rank": 6, "1w": 0.010, "1m": 0.028, "3m": 0.062, "lh_streak": 0, "held": False,
      "vs_trend": 5.0, "trend_edge": "support"},
@@ -225,14 +260,27 @@ _lead = [{"ticker": "XLE", "rs_rank": 2, "hurst": 0.68, "range_pos": 0.42}]
 _book = {"held_count": 31, "with_flow": ["WMT-short", "XLE"],
          "against": ["MSFT 📗 (RS↓, 2d ↓highs)"]}
 _stopadd = [{"ticker": "MSFT", "side": "long", "flip": "bull→bear", "range_pos": 0.22}]
+_footer = {"book_full": "AAA  IND  1.0%  1.5% set  67%  equity  +2.1%",
+           "cash": "  Individual: $5,000", "book_risk": "  BOOK RISK (60d): 55 positions ≈ 30 bets",
+           "roro": "  HYG/TLT +1.2% risk-on↑", "diversification": "  60d avg pairwise sector corr: 0.42 (loose)"}
 _txt = format_weekend_report({
     "regime": _regime, "stop_adding": _stopadd,
+    "book_reconciled": "2026-07-25", "dark_held": ["2513.HK", "2408.TW"],
     "trend_flips": _tflips, "momo_flips": _mflips,
     "rotation": _rot, "assets": _assets, "rolling": _roll,
-    "leaders": _lead, "book": _book,
+    "short_gate": [{"ticker": "NFLX", "range_pos": 0.85, "sector": "Comm", "lh_streak": 4}],
+    "puck": [{"ticker": "XLE", "range_pos": 0.30, "sector": "Energy"}],
+    "leaders": _lead, "book": _book, "footer": _footer,
 })
 check("header names the universe size", "613 names" in _txt, True)
-check("regime line present", "QUAD3" in _txt, True)
+check("quad header monthly+quarterly", "QUAD: monthly=Quad 4 quarterly=Quad 4" in _txt, True)
+check("legend defines vsTR/flow", "LEGEND" in _txt and "vsTR" in _txt and "ACCUM when" in _txt, True)
+check("book source stamp present", "book source: bot · last reconciled: 2026-07-25" in _txt, True)
+check("dark held footnote present", "dark (held, no live range" in _txt and "2513.HK" in _txt, True)
+check("iv/rv/ivpd/vol columns in asset table", all(c in _txt for c in ("iv", "rv", "ivpd", "vol")), True)
+check("WoW rank delta renders (Energy 5->1)", "5→1" in _txt, True)
+check("pre-computed screens render", "SHORT GATE" in _txt and "PUCK" in _txt, True)
+check("BOOK STATE footer renders", "BOOK STATE" in _txt and "BOOK RISK" in _txt and "RORO" in _txt, True)
 check("STOP ADDING section renders with held name", "STOP ADDING" in _txt and "MSFT" in _txt, True)
 check("what-changed section renders", "WHAT CHANGED" in _txt and "GOOGL bull→bear" in _txt, True)
 check("a sector row renders", "Energy" in _txt and "ACCUM" in _txt, True)
