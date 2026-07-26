@@ -56,28 +56,44 @@ def test_delta_resolved_flags_are_not_new():
 # ── P3 concentration ──
 
 def test_conc_clusters_overlap_and_untagged():
-    pos = [("TLT", 10.0, ("Fixed Income", 1, "duration")),
-           ("SHY", 8.0, ("Fixed Income", 1, "duration")),
-           ("XLV", 6.0, ("Health Care", 0, None)),
-           ("ZZZZ", 2.0, None)]                       # not in ticker_tags
+    # 6-tuple: (gics_sector, rate_sensitive, duration_char, commodity_linked,
+    #           exposure, inverse). 3-tuples still accepted (padded).
+    pos = [("TLT", 10.0, ("Fixed Income", 1, "duration", None, None, 0)),
+           ("SHY", 8.0, ("Fixed Income", 1, "duration", None, None, 0)),
+           ("XLV", 6.0, ("Health Care", 0, None, None, None, 0)),
+           ("USO", 5.0, (None, 0, None, 1, "commodity-proxy", 0)),   # energy
+           ("UGA", 4.0, (None, 0, None, 1, "commodity-proxy", 0)),   # energy
+           ("SH", 3.0, (None, 0, None, None, "broad-market", 1)),    # inverse
+           ("IBIT", 2.0, ("Legacy Row", 0, None)),                   # 3-tuple
+           ("NOGX", 1.0, (None, 0, None, None, None, 0)),  # row, no axis
+           ("ZZZZ", 2.0, None)]                            # not in ticker_tags
     c = conc_clusters(pos)
     assert c["rate_sensitive"] == [2, 18.0]
     assert c["fixed_income"] == [2, 18.0]
-    assert c["dur:duration"] == [2, 18.0]      # dur: prefix — 'long' as a bare
-    assert "duration" not in c                 # cluster reads as a side
+    assert c["dur:duration"] == [2, 18.0]      # dur: prefix — 'duration' as a
+    assert "duration" not in c                 # bare word would read as a side
     assert c["health_care"] == [1, 6.0]
-    assert c["untagged"] == [1, 2.0]
+    # commodity_linked AND commodity-proxy fold into ONE 'commodity' cluster;
+    # a single position is not double-counted (USO+UGA = 2 pos, 9.0%w).
+    assert c["commodity"] == [2, 9.0]
+    assert c["broad-market"] == [1, 3.0]       # SH's underlying
+    assert c["inverse"] == [1, 3.0]            # SH's geared flag
+    assert c["legacy_row"] == [1, 2.0]         # 3-tuple padded, still clusters
+    assert c["no-gics"] == [1, 1.0]            # has a row, no grouping axis
+    assert c["no-tags"] == [1, 2.0]            # absent from ticker_tags
+    assert "untagged" not in c                 # the lying label is gone
 
 
 def test_conc_line_top3_and_top_cluster():
     line = conc_line({"rate_sensitive": [8, 22.4], "healthcare": [6, 17.8],
-                      "duration": [5, 12.0], "tech": [2, 3.0],
-                      "untagged": [1, 1.5]})
+                      "commodity": [5, 12.0], "tech": [2, 3.0],
+                      "no-gics": [1, 1.5], "no-tags": [1, 0.8]})
     assert line.startswith("CONC: rate_sensitive 8pos/22.4%w · "
-                           "healthcare 6pos/17.8%w · duration 5pos/12.0%w")
-    assert "untagged 1pos/1.5%w" in line
+                           "healthcare 6pos/17.8%w · commodity 5pos/12.0%w")
+    assert "no-gics 1pos/1.5%w" in line
+    assert "no-tags 1pos/0.8%w" in line
     assert "top_cluster: rate_sensitive" in line
-    assert "tech" not in line                          # only top 3 + untagged
+    assert "tech" not in line                       # only top 3 + residuals
 
 
 # ── P6 candidates ──

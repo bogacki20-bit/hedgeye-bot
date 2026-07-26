@@ -4,13 +4,15 @@ second-opinion AI. No DB/code mutations. Secrets redacted."""
 import os, io, re, sys, glob, ast, subprocess, traceback
 from datetime import date, datetime, timezone, timedelta
 
-os.chdir(r"C:\Projects\hedgeye-bot")
+# Path-dynamic: run from wherever the repo actually lives (no hardcoded path).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+os.chdir(_HERE)
 from dotenv import load_dotenv
-load_dotenv(r"C:\Projects\hedgeye-bot\.env")
+load_dotenv(os.path.join(_HERE, ".env"))
 import psycopg2, psycopg2.extras
 
-TODAY = date(2026, 6, 10)
-OUT = r"C:\Users\bogac\OneDrive\Desktop\bot_state_export_2026-06-10.md"
+TODAY = date.today()
+OUT = os.path.join(_HERE, f"bot_state_export_{TODAY}.md")
 W = io.StringIO()
 def w(s=""): W.write(s + "\n")
 
@@ -35,7 +37,8 @@ def sh(cmd):
     except Exception as e:
         return f"(error: {e})"
 
-conn = psycopg2.connect(os.environ["DATABASE_PUBLIC_URL"]); conn.autocommit = True
+conn = psycopg2.connect(os.environ.get("DATABASE_PUBLIC_URL")
+                        or os.environ["DATABASE_URL"]); conn.autocommit = True
 def q(sql, args=None):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:

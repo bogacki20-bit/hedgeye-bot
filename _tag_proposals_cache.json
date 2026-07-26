@@ -975,6 +975,18 @@
    "shortName": "British American Tobacco  Indus"
   }
  },
+ "BUG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "BUG",
+   "category": "Technology",
+   "industry": null,
+   "longName": "Global X Cybersecurity ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X Cybersecurity ETF"
+  }
+ },
  "BURL": {
   "err": null,
   "info": {
@@ -1419,6 +1431,18 @@
    "shortName": "Coinbase Global, Inc."
   }
  },
+ "COLO": {
+  "err": null,
+  "info": {
+   "_symbol_used": "COLO",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "Global X MSCI Colombia ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Global X MSCI Colombia ETF"
+  }
+ },
  "COMP": {
   "err": null,
   "info": {
@@ -1489,6 +1513,18 @@
    "quoteType": "EQUITY",
    "sector": "Consumer Defensive",
    "shortName": "The Campbell's Company"
+  }
+ },
+ "CPER": {
+  "err": null,
+  "info": {
+   "_symbol_used": "CPER",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "United States Copper Index Fund, LP",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "United States Copper Index Fund"
   }
  },
  "CPRI": {
@@ -2127,6 +2163,30 @@
    "shortName": "Enbridge Inc"
   }
  },
+ "ENZL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "ENZL",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI New Zealand ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI New Zealand ETF"
+  }
+ },
+ "EPHE": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EPHE",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Philippines ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Philippines ETF"
+  }
+ },
  "EQRR": {
   "err": null,
   "info": {
@@ -2233,6 +2293,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "iShares MSCI Japan Index Fund"
+  }
+ },
+ "EWK": {
+  "err": null,
+  "info": {
+   "_symbol_used": "EWK",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Belgium ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Belgium ETF"
   }
  },
  "EWM": {
@@ -2354,6 +2426,10 @@
    "sector": "Industrials",
    "shortName": "Experian plc"
   }
+ },
+ "EXPN": {
+  "err": "empty yfinance info",
+  "info": null
  },
  "EYE": {
   "err": null,
@@ -2491,6 +2567,18 @@
    "shortName": "Floor & Decor Holdings, Inc."
   }
  },
+ "FNF": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FNF",
+   "category": null,
+   "industry": "Insurance - Specialty",
+   "longName": "Fidelity National Financial, Inc.",
+   "quoteType": "EQUITY",
+   "sector": "Financial Services",
+   "shortName": "Fidelity National Financial, In"
+  }
+ },
  "FNV": {
   "err": null,
   "info": {
@@ -2597,6 +2685,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Invesco CurrencyShares British "
+  }
+ },
+ "FXC": {
+  "err": null,
+  "info": {
+   "_symbol_used": "FXC",
+   "category": "Single Currency",
+   "industry": null,
+   "longName": "Invesco CurrencyShares Canadian Dollar Trust",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco CurrencyShares Canadian"
   }
  },
  "FXE": {
@@ -3273,6 +3373,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Ishares MSCI India ETF"
+  }
+ },
+ "IPAY": {
+  "err": null,
+  "info": {
+   "_symbol_used": "IPAY",
+   "category": "Miscellaneous Sector",
+   "industry": null,
+   "longName": "Amplify Digital Payments ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Amplify Digital Payments ETF"
   }
  },
  "ITA": {
@@ -4335,6 +4447,18 @@
   "err": "empty yfinance info",
   "info": null
  },
+ "NOBL": {
+  "err": null,
+  "info": {
+   "_symbol_used": "NOBL",
+   "category": "Large Value",
+   "industry": null,
+   "longName": "ProShares S&P 500 Dividend Aristocrats ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares S&P 500 Dividend Aris"
+  }
+ },
  "NORW": {
   "err": null,
   "info": {
@@ -4971,6 +5095,18 @@
    "shortName": "PayPal Holdings, Inc."
   }
  },
+ "QAT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "QAT",
+   "category": "Focused Region",
+   "industry": null,
+   "longName": "iShares MSCI Qatar ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "iShares MSCI Qatar ETF"
+  }
+ },
  "QQQ": {
   "err": null,
   "info": {
@@ -5065,6 +5201,18 @@
    "quoteType": "EQUITY",
    "sector": "Consumer Cyclical",
    "shortName": "The RealReal, Inc."
+  }
+ },
+ "REW": {
+  "err": null,
+  "info": {
+   "_symbol_used": "REW",
+   "category": "Trading--Inverse Equity",
+   "industry": null,
+   "longName": "ProShares UltraShort Technology",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "ProShares UltraShort Technology"
   }
  },
  "RH": {
@@ -5665,6 +5813,18 @@
    "quoteType": "EQUITY",
    "sector": "Communication Services",
    "shortName": "Sphere Entertainment Co."
+  }
+ },
+ "SPLV": {
+  "err": null,
+  "info": {
+   "_symbol_used": "SPLV",
+   "category": "Large Value",
+   "industry": null,
+   "longName": "Invesco S&P 500 Low Volatility ETF",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Invesco S&P 500 Low Volatility "
   }
  },
  "SPT": {
@@ -6459,6 +6619,18 @@
    "shortName": "Volvo, AB ser. B"
   }
  },
+ "VOOG": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VOOG",
+   "category": "Large Growth",
+   "industry": null,
+   "longName": "Vanguard S&P 500 Growth Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard S&P 500 Growth ETF"
+  }
+ },
  "VRNO": {
   "err": null,
   "info": {
@@ -6517,6 +6689,18 @@
    "quoteType": "ETF",
    "sector": null,
    "shortName": "Vanguard Total World Stock Inde"
+  }
+ },
+ "VTIP": {
+  "err": null,
+  "info": {
+   "_symbol_used": "VTIP",
+   "category": "Short-Term Inflation-Protected Bond",
+   "industry": null,
+   "longName": "Vanguard Short-Term Inflation-Protected Securities Index Fund ETF Shares",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Vanguard Short-Term Inflation-P"
   }
  },
  "VVV": {
@@ -6613,6 +6797,18 @@
    "quoteType": "EQUITY",
    "sector": "Technology",
    "shortName": "Workday, Inc."
+  }
+ },
+ "WEAT": {
+  "err": null,
+  "info": {
+   "_symbol_used": "WEAT",
+   "category": "Commodities Focused",
+   "industry": null,
+   "longName": "Teucrium Wheat Fund",
+   "quoteType": "ETF",
+   "sector": null,
+   "shortName": "Teucrium Wheat Fund ETV"
   }
  },
  "WFC": {
