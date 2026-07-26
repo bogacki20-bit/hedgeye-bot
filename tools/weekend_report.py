@@ -325,7 +325,8 @@ def format_asset_table(assets, *, sort_key: str = "1m") -> str:
     for a in rows:
         tr = {"bullish": "bull", "bearish": "bear"}.get((a.get("trend") or "").lower(), "neut")
         rp = f"{a['range_pos']:.2f}" if a.get("range_pos") is not None else "  —"
-        own = "📗" if a.get("held") else ""
+        # !mfr = shadow engine says this MFR range is beyond normal disagreement
+        own = ("!mfr " if a.get("mfr_flagged") else "") + ("📗" if a.get("held") else "")
         lh = a.get("lh_streak") or 0
         iv = f"{a['iv']:.2f}" if a.get("iv") is not None else "—"
         rv = f"{a['rv']:.2f}" if a.get("rv") is not None else "—"
@@ -463,6 +464,8 @@ def format_weekend_report(data: dict) -> str:
     L.append("  own   = 📗 you hold the name (from the reconciled book, see stamp below).")
     L.append("  1w/1m/3m = close-to-close % return over ~5/21/63 sessions. rp = live price position in ST range.")
     L.append("  iv/rv = MFR implied / realized vol. ivpd = iv premium(+)/discount(-) vs realized (options tell).")
+    L.append("  !mfr  = the shadow range engine disagrees with MFR's band beyond the empirical p95")
+    L.append("          tolerance (rp 0.46 / width 1.6x). ~8.6% of names trip this on a normal day.")
     L.append("  vol = volume overlay: ↓Nd = down on DECELERATING volume (selling exhausting, dip-buy);")
     L.append("        ↑ = down on HEAVY (non-decel) volume = distribution.")
     L.append("  flow  = ACCUM when sector breadth is net-bullish AND avg 1m return is up (mom ↑);")
@@ -537,7 +540,57 @@ def format_weekend_report(data: dict) -> str:
         L.append(fb.get("roro", ""))
         L.append("\n── DIVERSIFICATION ──")
         L.append(fb.get("diversification", ""))
+    mv = data.get("mfr_validation")
+    if mv:
+        L.append("\n── MFR VALIDATION (shadow engine) ──")
+        L.append("  " + mv)
     return "\n".join(L)
+
+
+def format_mfr_validation(v) -> str:
+    """'MFR VALIDATION: N flagged (worst: X, Y, Z)'. Pure.
+
+    v: {date, validated, flagged, worst:[{ticker, detail}], skipped_carry_fwd}
+    Weekend runs validate nothing (Sat/Sun/Mon repeat Friday's EOD), so say that
+    plainly rather than implying a clean bill of health.
+    """
+    if not v or not v.get("validated"):
+        n = (v or {}).get("skipped_carry_fwd") or 0
+        return (f"MFR VALIDATION: not run — {n} names were weekend carry-forward "
+                f"(Sat/Sun/Mon repeat Friday EOD)")
+    worst = ", ".join(w["ticker"] for w in (v.get("worst") or [])[:3]) or "none"
+    pct = 100.0 * v["flagged"] / v["validated"]
+    return (f"MFR VALIDATION [{v.get('date')}]: {v['flagged']} flagged "
+            f"of {v['validated']} ({pct:.1f}%, normal floor ~8.6%) "
+            f"(worst: {worst})")
+
+
+def _fetch_mfr_validation() -> dict:
+    """Latest shadow_validation results. Best-effort — never raises into the report."""
+    import db_pg
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT max(snapshot_date) FROM shadow_validation")
+            d = cur.fetchone()[0]
+            if not d:
+                return {}
+            cur.execute("SELECT count(*), count(*) FILTER (WHERE flagged) "
+                        "FROM shadow_validation WHERE snapshot_date = %s", (d,))
+            n, nf = cur.fetchone()
+            cur.execute("SELECT ticker, detail FROM shadow_validation "
+                        "WHERE snapshot_date = %s AND flagged "
+                        "ORDER BY GREATEST(COALESCE(rp_diff,0)/NULLIF(rp_tol,0), "
+                        "                  COALESCE(width_ratio,0)/NULLIF(width_tol,0)) DESC "
+                        "LIMIT 3", (d,))
+            worst = [{"ticker": t, "detail": det} for t, det in cur.fetchall()]
+            cur.execute("SELECT ticker FROM shadow_validation "
+                        "WHERE snapshot_date = %s AND flagged", (d,))
+            flagged = {r[0] for r in cur.fetchall()}
+        return {"date": str(d), "validated": n, "flagged": nf,
+                "worst": worst, "flagged_set": flagged}
+    except Exception as e:
+        log.warning("weekend: MFR validation fetch failed: %s", e)
+        return {}
 
 
 def select_rolling_over(rows, *, min_streak: int = 2) -> list:
@@ -950,6 +1003,11 @@ def build_weekend_report():
         regime["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
         pass
+    mfr_val = _fetch_mfr_validation()
+    flagged_set = mfr_val.get("flagged_set") or set()
+    for r in rows:                       # drives the !mfr tag in the asset table
+        r["mfr_flagged"] = r["ticker"] in flagged_set
+
     return format_weekend_report({
         "regime": regime, "stop_adding": stop_adding,
         "book_reconciled": book_reconciled, "dark_held": dark_held,
@@ -958,6 +1016,7 @@ def build_weekend_report():
         "rotation": rotation, "assets": rows, "rolling": rolling,
         "short_gate": short_gate, "puck": puck,
         "leaders": leaders, "book": book, "footer": _fetch_footer_blocks(),
+        "mfr_validation": format_mfr_validation(mfr_val),
     })
 
 

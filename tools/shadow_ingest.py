@@ -25,7 +25,9 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 from dataclasses import asdict
 from datetime import date
 
@@ -39,9 +41,42 @@ _CHUNK = 120
 _MIN_BARS = 60
 
 
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "shadow_params.json")
+
+
+def load_config() -> dict:
+    """Calibrated params + empirical validator tolerances from shadow_params.json.
+
+    Falls back to the shipped RangeParams defaults if the file is missing, but
+    logs loudly: the defaults are UNCALIBRATED priors and produce bands ~1.45x
+    wider than MFR's.
+    """
+    try:
+        with open(_CONFIG_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception as e:
+        log.warning("shadow: shadow_params.json unreadable (%s) - falling back to "
+                    "UNCALIBRATED defaults", e)
+        return {}
+
+
+def calibrated_params():
+    """RangeParams built from the config file."""
+    from shadow_range import RangeParams
+    cfg = load_config().get("range_params") or {}
+    return RangeParams(**cfg) if cfg else RangeParams()
+
+
+def validator_tolerances() -> tuple[float, float]:
+    """(rp_tol, width_ratio_tol) - empirical p95 values, not the fixed defaults."""
+    v = load_config().get("validator") or {}
+    return float(v.get("rp_tol", 0.25)), float(v.get("width_ratio_tol", 2.0))
+
+
 def _params_hash(params) -> str:
     """Short fingerprint of the RangeParams actually used, so a stored row can be
-    traced back to the parameter set that produced it (they are uncalibrated)."""
+    traced back to the parameter set that produced it."""
     import hashlib
     blob = "|".join(f"{k}={v}" for k, v in sorted(asdict(params).items()))
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
@@ -104,16 +139,26 @@ def fetch_ohlc_batch(tickers, period: str = _PERIOD, chunk: int = _CHUNK) -> dic
     return {t: by_ysym.get(y) for t, y in fwd.items()}
 
 
-def compute_for_universe(tickers, bars_by_ticker, params=None) -> list[dict]:
+def compute_for_universe(tickers, bars_by_ticker, params=None, as_of=None) -> list[dict]:
     """Run compute_range per name. Never raises — every ticker yields one row,
-    with status recording why the numbers are NULL when they are."""
-    from shadow_range import compute_range, RangeParams
-    p = params or RangeParams()
+    with status recording why the numbers are NULL when they are.
+
+    as_of: compute the band as it would have stood at that date (bars after it
+    are dropped). Used to backfill/validate a past session — the live ingest
+    runs on Sat/Sun/Mon carry Friday's MFR forward and are excluded from
+    validation, so demonstrating the validator needs a real midweek date.
+    """
+    from shadow_range import compute_range
+    p = params or calibrated_params()
     phash = _params_hash(p)
-    today = date.today()
+    today = as_of or date.today()
     rows = []
     for t in tickers:
         df = bars_by_ticker.get(t)
+        if df is not None and as_of is not None:
+            keep = [str(d.date() if hasattr(d, "date") else d) <= str(as_of)
+                    for d in df.index]
+            df = df.loc[keep]
         base = {"ticker": t, "snapshot_date": today, "params_hash": phash,
                 "shadow_price": None, "shadow_low": None, "shadow_high": None,
                 "shadow_rp": None, "shadow_hurst": None, "shadow_sigma": None,
@@ -170,17 +215,104 @@ def persist(rows) -> int:
     return n
 
 
-def run(limit: int | None = None, dry_run: bool = False) -> dict:
+def validate_against_mfr(snapshot_date=None) -> dict:
+    """Compare today's shadow bands against MFR and record divergence flags.
+
+    Excluded from validation (skipped, not recorded as passes):
+      * no MFR row for the same snapshot_date, or no usable shadow band
+      * WEEKEND CARRY-FORWARD — the ingest runs ~00:51 UTC, so Sat/Sun/Mon rows
+        repeat Friday's EOD. A repeated range is the calendar, not a bad feed.
+        Detected two ways: dow in (Sat,Sun,Mon), and range identical to the
+        ticker's previous MFR row (also catches holidays).
+    Tolerances are the empirical p95 values from shadow_params.json.
+    """
+    import db_pg
+    rp_tol, w_tol = validator_tolerances()
+    phash = _params_hash(calibrated_params())
+
+    sql = """
+        WITH m AS (
+          SELECT ticker, snapshot_date, price, range_low, range_high,
+                 to_char(snapshot_date,'Dy') AS dow,
+                 lag(range_low)  OVER (PARTITION BY ticker ORDER BY snapshot_date) plo,
+                 lag(range_high) OVER (PARTITION BY ticker ORDER BY snapshot_date) phi
+          FROM mfr_snapshots WHERE price > 0 AND range_low IS NOT NULL)
+        SELECT m.ticker, m.snapshot_date, m.price, m.range_low, m.range_high,
+               s.shadow_low, s.shadow_high, s.shadow_rp, m.dow,
+               (m.range_low = m.plo AND m.range_high = m.phi) AS carry_fwd
+        FROM m
+        JOIN shadow_snapshots s
+          ON s.ticker = m.ticker AND s.snapshot_date = m.snapshot_date
+        WHERE m.snapshot_date = %s AND s.status = 'ok'
+          AND m.range_high > m.range_low AND s.shadow_high > s.shadow_low
+    """
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT max(snapshot_date) FROM shadow_snapshots")
+        sd = snapshot_date or cur.fetchone()[0]
+        cur.execute(sql, (sd,))
+        rows = cur.fetchall()
+
+        out, skipped = [], 0
+        for (tk, d, px, ml, mh, sl, sh, srp, dow, carry) in rows:
+            if dow in ("Sat", "Sun", "Mon") or carry:
+                skipped += 1
+                continue
+            px, ml, mh = float(px), float(ml), float(mh)
+            sl, sh = float(sl), float(sh)
+            mfr_rp = (px - ml) / (mh - ml)
+            srp = float(srp)
+            rp_diff = abs(srp - mfr_rp)
+            mw, sw = (mh - ml) / px, (sh - sl) / px
+            ratio = max(mw / sw, sw / mw) if sw > 0 and mw > 0 else None
+
+            flags, detail = [], []
+            if rp_diff > rp_tol:
+                flags.append("rp_divergence")
+                detail.append(f"rp {mfr_rp:.2f} vs shadow {srp:.2f} (d {rp_diff:.2f} > {rp_tol})")
+            if ratio is not None and ratio > w_tol:
+                flags.append("width_divergence")
+                detail.append(f"width {mw:.1%} vs shadow {sw:.1%} ({ratio:.2f}x > {w_tol}x)")
+            if not (ml * 0.5 <= px <= mh * 1.5):
+                flags.append("price_outside")
+                detail.append("price far outside MFR range")
+            out.append((tk, d, bool(flags), flags or None, "; ".join(detail) or None,
+                        ml, mh, round(mfr_rp, 4), sl, sh, round(srp, 4),
+                        round(rp_diff, 4), round(ratio, 4) if ratio else None,
+                        rp_tol, w_tol, phash))
+
+        if out:
+            cur.execute("DELETE FROM shadow_validation WHERE snapshot_date = %s", (sd,))
+            cur.executemany(
+                "INSERT INTO shadow_validation (ticker, snapshot_date, flagged, flags, "
+                "detail, mfr_low, mfr_high, mfr_rp, shadow_low, shadow_high, shadow_rp, "
+                "rp_diff, width_ratio, rp_tol, width_tol, params_hash) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", out)
+            c.commit()
+    n_flag = sum(1 for r in out if r[2])
+    return {"date": str(sd), "validated": len(out), "flagged": n_flag,
+            "skipped_carry_fwd": skipped,
+            "flag_rate": round(n_flag / len(out), 4) if out else None,
+            "rp_tol": rp_tol, "width_tol": w_tol}
+
+
+def run(limit: int | None = None, dry_run: bool = False, as_of=None) -> dict:
     tickers = fetch_universe(limit)
     log.info("shadow: universe = %d tickers", len(tickers))
     bars = fetch_ohlc_batch(tickers)
-    rows = compute_for_universe(tickers, bars)
+    rows = compute_for_universe(tickers, bars, as_of=as_of)
     counts: dict = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     written = 0 if dry_run else persist(rows)
-    return {"universe": len(tickers), "rows": len(rows), "written": written,
-            "counts": counts, "dry_run": dry_run}
+    out = {"universe": len(tickers), "rows": len(rows), "written": written,
+           "counts": counts, "dry_run": dry_run}
+    if not dry_run:
+        try:
+            out["validation"] = validate_against_mfr(snapshot_date=as_of)
+        except Exception as e:                     # validation must never kill ingest
+            log.warning("shadow: validation step failed: %s", e)
+            out["validation"] = {"error": str(e)[:200]}
+    return out
 
 
 def compare_sample(n: int = 10) -> str:
