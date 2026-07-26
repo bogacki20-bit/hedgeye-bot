@@ -345,6 +345,7 @@ def _dispatch_message(token, chat_id, text):
     def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
     def _dpk():  from tools.daypack import handle_daypack_command;        return handle_daypack_command(text)
     def _kp():   from tools.keith_pattern import handle_keith_command;    return handle_keith_command(text)
+    def _wk():   from tools.weekend_report import handle_weekend_command; return handle_weekend_command(text)
 
     # report runs BEFORE screen: report owns exact sentinels (REPORT*, BOOK
     # FULL) while screen's orphan-modifier catcher claims loose words like
@@ -354,7 +355,7 @@ def _dispatch_message(token, chat_id, text):
                      ("quad", _quad), ("report", _rpt), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
-                     ("daypack", _dpk), ("keith", _kp)):
+                     ("daypack", _dpk), ("keith", _kp), ("weekend", _wk)):
         reply = run(name, fn)
         if reply is not None:
             _send_message(token, chat_id, reply)
