@@ -195,10 +195,27 @@ _NONEQ_CLASS = [
 ]
 
 
-def _coarse_sector(gics, subsector, bucket) -> str:
+# CME/ICE futures roots -> asset class (futures carry no GICS/subsector tag, so
+# keyword-matching the (usually null) subsector drops them into the catch-all).
+_FUTURES_CLASS = {
+    "CL": "Commodities", "HO": "Commodities", "RB": "Commodities", "NG": "Commodities",
+    "BZ": "Commodities", "GC": "Commodities", "SI": "Commodities", "HG": "Commodities",
+    "PL": "Commodities", "PA": "Commodities", "ZC": "Commodities", "ZS": "Commodities",
+    "ZW": "Commodities", "ZL": "Commodities", "KC": "Commodities", "CT": "Commodities",
+    "ZN": "Fixed Income", "ZB": "Fixed Income", "ZF": "Fixed Income", "ZT": "Fixed Income",
+    "ZQ": "Fixed Income", "GE": "Fixed Income", "UB": "Fixed Income",
+    "ES": "Equity-Index", "NQ": "Equity-Index", "YM": "Equity-Index", "RTY": "Equity-Index",
+    "6E": "Currency", "6B": "Currency", "6J": "Currency", "6C": "Currency", "6A": "Currency",
+    "6S": "Currency", "6N": "Currency", "DX": "Currency",
+}
+
+
+def _coarse_sector(ticker, gics, subsector, bucket) -> str:
     """GICS sector for equities; a coarse asset class for the non-GICS sleeve. Pure."""
     if gics:
         return gics
+    if ticker and ticker.upper().endswith("_F"):        # a futures contract
+        return _FUTURES_CLASS.get(ticker.upper()[:-2], "Commodities")
     s = (subsector or bucket or "").lower()
     for keys, cls in _NONEQ_CLASS:
         if any(k in s for k in keys):
@@ -438,7 +455,7 @@ def _fetch_universe_rows():
         for tk, gics, sub, bucket, rp, tr, mo, h, held in cur.fetchall():
             rows.append({
                 "ticker": tk,
-                "sector": _coarse_sector(gics, sub, bucket),
+                "sector": _coarse_sector(tk, gics, sub, bucket),
                 "trend": (tr or "").lower(),          # BULLISH -> bullish (aggregate lowercases too)
                 "momentum": mo,
                 "range_pos": float(rp) if rp is not None else None,
@@ -531,8 +548,10 @@ def _fetch_bars(tickers, lookback_days=75, chunk=120):
     for i in range(0, len(ysyms), chunk):
         part = ysyms[i:i + chunk]
         try:
+            # auto_adjust=True: splits/dividends adjusted across OHLC, so a split
+            # doesn't render as a fake ~2x return (the UTZ +96% smoke-test artifact).
             df = yf.download(part, period=period, interval="1d", group_by="ticker",
-                             auto_adjust=False, progress=False, threads=True)
+                             auto_adjust=True, progress=False, threads=True)
         except Exception as e:
             log.warning("weekend: yf.download chunk failed: %s", e)
             continue
