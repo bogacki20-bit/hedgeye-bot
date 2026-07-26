@@ -74,6 +74,47 @@ def validator_tolerances() -> tuple[float, float]:
     return float(v.get("rp_tol", 0.25)), float(v.get("width_ratio_tol", 2.0))
 
 
+def failover_enabled() -> bool:
+    """Kill switch. Default ON; set shadow_failover=false in shadow_params.json to
+    take every shadow range back out of the reports without a code change."""
+    return bool(load_config().get("shadow_failover", True))
+
+
+_FX_CODES = {"EUR", "GBP", "JPY", "CAD", "CHF", "MXN", "CNY", "USD", "AUD", "NZD"}
+_CRYPTO_BARE = {"BTC", "ETH", "SOL", "XRP", "AVAX", "RUNE", "TRX", "BITCOIN"}
+
+# Only these classes were calibrated (equity reference set). Everything else gets
+# the shadow numbers computed and stored, but marked class_uncalibrated so it is
+# excluded from BOTH validation flags and failover.
+CALIBRATED_CLASSES = ("equity", "etf")
+
+
+def asset_class(ticker: str, gics_sector=None) -> str:
+    """equity | etf | futures | crypto | fx. shadow_params.json was fit on
+    equities; per SHADOW_RANGE_INTEGRATION.md equity params do not transfer to
+    other asset classes, so the rest are gated out until separately calibrated."""
+    t = (ticker or "").upper()
+    if t.endswith("_F"):
+        return "futures"
+    if t in _CRYPTO_BARE or t.endswith("USD") or (gics_sector or "") == "Digital Assets":
+        return "crypto"
+    if t in _FX_CODES:
+        return "fx"
+    return "equity" if gics_sector else "etf"
+
+
+def fetch_classes() -> dict:
+    """{ticker: asset_class} for the whole universe."""
+    import db_pg
+    out = {}
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT DISTINCT ON (ticker) ticker, gics_sector FROM v_screener "
+                    "WHERE ticker IS NOT NULL")
+        for t, g in cur.fetchall():
+            out[t] = asset_class(t, g)
+    return out
+
+
 def _params_hash(params) -> str:
     """Short fingerprint of the RangeParams actually used, so a stored row can be
     traced back to the parameter set that produced it."""
@@ -139,7 +180,8 @@ def fetch_ohlc_batch(tickers, period: str = _PERIOD, chunk: int = _CHUNK) -> dic
     return {t: by_ysym.get(y) for t, y in fwd.items()}
 
 
-def compute_for_universe(tickers, bars_by_ticker, params=None, as_of=None) -> list[dict]:
+def compute_for_universe(tickers, bars_by_ticker, params=None, as_of=None,
+                         classes=None) -> list[dict]:
     """Run compute_range per name. Never raises — every ticker yields one row,
     with status recording why the numbers are NULL when they are.
 
@@ -183,7 +225,13 @@ def compute_for_universe(tickers, bars_by_ticker, params=None, as_of=None) -> li
             """NaN -> None so Postgres stores NULL, not NaN."""
             return None if x is None or x != x else float(x)
 
-        rows.append({**base, "bars": n, "status": "ok",
+        # CLASS GATE: compute and store the numbers for every class, but mark the
+        # uncalibrated ones so neither validation nor failover can use them.
+        klass = classes.get(t) if classes else "equity"
+        ok_status = "ok" if (klass is None or klass in CALIBRATED_CLASSES) \
+            else "class_uncalibrated"
+        rows.append({**base, "bars": n, "status": ok_status,
+                     "note": None if ok_status == "ok" else f"{klass}: equity-fit params",
                      "shadow_price": _f(s.price), "shadow_low": _f(s.low),
                      "shadow_high": _f(s.high), "shadow_rp": _f(s.rp),
                      "shadow_hurst": _f(s.hurst), "shadow_sigma": _f(s.sigma_daily),
@@ -235,11 +283,13 @@ def validate_against_mfr(snapshot_date=None) -> dict:
           SELECT ticker, snapshot_date, price, range_low, range_high,
                  to_char(snapshot_date,'Dy') AS dow,
                  lag(range_low)  OVER (PARTITION BY ticker ORDER BY snapshot_date) plo,
-                 lag(range_high) OVER (PARTITION BY ticker ORDER BY snapshot_date) phi
+                 lag(range_high) OVER (PARTITION BY ticker ORDER BY snapshot_date) phi,
+                 lag(price)      OVER (PARTITION BY ticker ORDER BY snapshot_date) ppx
           FROM mfr_snapshots WHERE price > 0 AND range_low IS NOT NULL)
         SELECT m.ticker, m.snapshot_date, m.price, m.range_low, m.range_high,
                s.shadow_low, s.shadow_high, s.shadow_rp, m.dow,
-               (m.range_low = m.plo AND m.range_high = m.phi) AS carry_fwd
+               (m.range_low = m.plo AND m.range_high = m.phi) AS band_frozen,
+               m.ppx, s.shadow_sigma
         FROM m
         JOIN shadow_snapshots s
           ON s.ticker = m.ticker AND s.snapshot_date = m.snapshot_date
@@ -252,9 +302,11 @@ def validate_against_mfr(snapshot_date=None) -> dict:
         cur.execute(sql, (sd,))
         rows = cur.fetchall()
 
-        out, skipped = [], 0
-        for (tk, d, px, ml, mh, sl, sh, srp, dow, carry) in rows:
-            if dow in ("Sat", "Sun", "Mon") or carry:
+        out, skipped, breaks = [], 0, 0
+        for (tk, d, px, ml, mh, sl, sh, srp, dow, frozen, ppx, sigma) in rows:
+            # Weekend window only: Sat/Sun/Mon repeat Friday EOD by construction.
+            # A frozen band MIDWEEK is NOT skipped — that is the stale_band case.
+            if dow in ("Sat", "Sun", "Mon"):
                 skipped += 1
                 continue
             px, ml, mh = float(px), float(ml), float(mh)
@@ -265,17 +317,38 @@ def validate_against_mfr(snapshot_date=None) -> dict:
             mw, sw = (mh - ml) / px, (sh - sl) / px
             ratio = max(mw / sw, sw / mw) if sw > 0 and mw > 0 else None
 
+            # --- BREAK vs STALE for an out-of-bounds MFR rp -------------------
+            # rp outside [0,1] has two causes and only one is a fault:
+            #   BREAK  band moved AND price gapped through it -> real "broken
+            #          above/below" signal. Keep MFR's range, print rp as-is.
+            #   STALE  band frozen while price drifted out -> unusable, fail over.
+            oob = not (0.0 <= mfr_rp <= 1.0)
+            ret = (px / float(ppx) - 1.0) if (ppx and float(ppx) > 0) else None
+            big_move = (ret is not None and sigma and
+                        abs(ret) > 2.5 * float(sigma))
+            is_break = bool(oob and (not frozen) and big_move)
+            is_stale_band = bool(oob and not is_break)
+
             flags, detail = [], []
-            if rp_diff > rp_tol:
+            # A break explains the rp gap, so do not also cry rp_divergence.
+            if rp_diff > rp_tol and not is_break:
                 flags.append("rp_divergence")
                 detail.append(f"rp {mfr_rp:.2f} vs shadow {srp:.2f} (d {rp_diff:.2f} > {rp_tol})")
-            if ratio is not None and ratio > w_tol:
+            if ratio is not None and ratio > w_tol and not is_break:
                 flags.append("width_divergence")
                 detail.append(f"width {mw:.1%} vs shadow {sw:.1%} ({ratio:.2f}x > {w_tol}x)")
-            if not (ml * 0.5 <= px <= mh * 1.5):
-                flags.append("price_outside")
-                detail.append("price far outside MFR range")
-            out.append((tk, d, bool(flags), flags or None, "; ".join(detail) or None,
+            if is_break:
+                breaks += 1
+                flags.append("range_break")
+                detail.append(f"BROKE {'above' if mfr_rp > 1 else 'below'} range "
+                              f"(rp {mfr_rp:.2f}, 1d {ret:+.1%} vs sigma {float(sigma):.3f}) "
+                              f"- band is fresh, MFR range kept")
+            if is_stale_band:
+                flags.append("stale_band")
+                detail.append(f"band frozen while price drifted out (rp {mfr_rp:.2f})")
+            # range_break is SIGNAL, not a fault - it must not set flagged.
+            faulty = [f for f in flags if f != "range_break"]
+            out.append((tk, d, bool(faulty), flags or None, "; ".join(detail) or None,
                         ml, mh, round(mfr_rp, 4), sl, sh, round(srp, 4),
                         round(rp_diff, 4), round(ratio, 4) if ratio else None,
                         rp_tol, w_tol, phash))
@@ -290,16 +363,80 @@ def validate_against_mfr(snapshot_date=None) -> dict:
             c.commit()
     n_flag = sum(1 for r in out if r[2])
     return {"date": str(sd), "validated": len(out), "flagged": n_flag,
-            "skipped_carry_fwd": skipped,
+            "skipped_weekend": skipped, "range_breaks": breaks,
             "flag_rate": round(n_flag / len(out), 4) if out else None,
             "rp_tol": rp_tol, "width_tol": w_tol}
+
+
+def shadow_failover_map(tickers=None) -> dict:
+    """{ticker: (low, high, rp, hurst)} for names that should publish the SHADOW
+    range instead of MFR's. Read-only; {} when the kill switch is off.
+
+    A name qualifies when BOTH:
+      * its shadow row is status='ok' — which already excludes the uncalibrated
+        classes (futures / crypto / fx), so failover is equity+ETF only; and
+      * MFR has no usable range for it, meaning any of:
+          - no MFR row at all (the dark names)
+          - the MFR row is stale (older than the freshest snapshot in the batch)
+          - the MFR range is validation-flagged on the latest validated session
+
+    NEVER touches hdg: Hedgeye's own levels live in hedgeye_risk_ranges
+    (buy_trade/sell_trade) and are consumed by decision_engine. This map only
+    substitutes for the MFR band in the display path, so the hierarchy stays
+    hdg > mfr > shadow.
+    """
+    import db_pg
+    if not failover_enabled():
+        return {}
+    sql = """
+        WITH latest_shadow AS (
+          SELECT DISTINCT ON (ticker) ticker, shadow_low, shadow_high, shadow_rp,
+                 shadow_hurst, snapshot_date
+          FROM shadow_snapshots WHERE status = 'ok'
+          ORDER BY ticker, snapshot_date DESC),
+        latest_mfr AS (
+          SELECT DISTINCT ON (ticker) ticker, snapshot_date, price, range_low, range_high
+          FROM mfr_snapshots ORDER BY ticker, snapshot_date DESC),
+        batch AS (SELECT max(snapshot_date) bmax FROM mfr_snapshots),
+        -- range_break is SIGNAL: the band is fresh and price gapped through it.
+        -- Those rows keep MFR's range and print rp out-of-bounds as-is.
+        flagged AS (
+          SELECT ticker FROM shadow_validation
+          WHERE flagged AND snapshot_date = (SELECT max(snapshot_date) FROM shadow_validation)
+            AND NOT ('range_break' = ANY(COALESCE(flags, ARRAY[]::text[]))))
+        SELECT s.ticker, s.shadow_low, s.shadow_high, s.shadow_rp, s.shadow_hurst
+        FROM latest_shadow s
+        LEFT JOIN latest_mfr m ON m.ticker = s.ticker
+        CROSS JOIN batch b
+        WHERE s.shadow_low IS NOT NULL AND s.shadow_high > s.shadow_low
+          AND (
+                m.ticker IS NULL                                   -- dark: no MFR row
+             OR m.range_low IS NULL OR m.range_high <= m.range_low -- unusable band
+             OR (b.bmax - m.snapshot_date) >= 2                    -- stale band
+             OR s.ticker IN (SELECT ticker FROM flagged)           -- validation-flagged
+          )
+    """
+    out = {}
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute(sql)
+            for t, lo, hi, rp, h in cur.fetchall():
+                if tickers is None or t in tickers:
+                    out[t] = (float(lo), float(hi),
+                              float(rp) if rp is not None else None,
+                              float(h) if h is not None else None)
+    except Exception as e:
+        log.warning("shadow: failover map unavailable (%s) - MFR values stand", e)
+        return {}
+    return out
 
 
 def run(limit: int | None = None, dry_run: bool = False, as_of=None) -> dict:
     tickers = fetch_universe(limit)
     log.info("shadow: universe = %d tickers", len(tickers))
     bars = fetch_ohlc_batch(tickers)
-    rows = compute_for_universe(tickers, bars, as_of=as_of)
+    classes = fetch_classes()
+    rows = compute_for_universe(tickers, bars, as_of=as_of, classes=classes)
     counts: dict = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1

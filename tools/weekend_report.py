@@ -555,14 +555,16 @@ def format_mfr_validation(v) -> str:
     plainly rather than implying a clean bill of health.
     """
     if not v or not v.get("validated"):
-        n = (v or {}).get("skipped_carry_fwd") or 0
+        n = (v or {}).get("skipped_weekend") or 0
         return (f"MFR VALIDATION: not run — {n} names were weekend carry-forward "
                 f"(Sat/Sun/Mon repeat Friday EOD)")
     worst = ", ".join(w["ticker"] for w in (v.get("worst") or [])[:3]) or "none"
     pct = 100.0 * v["flagged"] / v["validated"]
+    brk = v.get("range_breaks") or 0
+    brk_s = f" · {brk} range-break{'s' if brk != 1 else ''} (signal, MFR kept)" if brk else ""
     return (f"MFR VALIDATION [{v.get('date')}]: {v['flagged']} flagged "
             f"of {v['validated']} ({pct:.1f}%, normal floor ~8.6%) "
-            f"(worst: {worst})")
+            f"(worst: {worst}){brk_s} · futures/crypto/fx excluded (equity-fit params)")
 
 
 def _fetch_mfr_validation() -> dict:
@@ -586,7 +588,10 @@ def _fetch_mfr_validation() -> dict:
             cur.execute("SELECT ticker FROM shadow_validation "
                         "WHERE snapshot_date = %s AND flagged", (d,))
             flagged = {r[0] for r in cur.fetchall()}
-        return {"date": str(d), "validated": n, "flagged": nf,
+            cur.execute("SELECT count(*) FROM shadow_validation WHERE snapshot_date = %s "
+                        "AND 'range_break' = ANY(COALESCE(flags, ARRAY[]::text[]))", (d,))
+            breaks = cur.fetchone()[0]
+        return {"date": str(d), "validated": n, "flagged": nf, "range_breaks": breaks,
                 "worst": worst, "flagged_set": flagged}
     except Exception as e:
         log.warning("weekend: MFR validation fetch failed: %s", e)
