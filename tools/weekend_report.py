@@ -280,6 +280,32 @@ def aggregate_rotation(rows) -> list:
     return out
 
 
+def _volmark(vol) -> str:
+    """Volume overlay tag from _vol_for tuple (real_dip, price_down_3d, decel, streak).
+    '↓Nd' = down on DECELERATING volume (selling exhausting — dip-buy tell);
+    '↑'  = down on NON-decelerating (heavy) volume = distribution. Pure."""
+    if not vol:
+        return ""
+    rd, pd, de, sk = vol
+    if rd:
+        return f"↓{sk or 0}d"
+    if pd and not de:
+        return "↑"
+    return ""
+
+
+def _wow(s) -> str:
+    """Week-over-week sector rank change tag (spec #5): '5→1', '=', or '·new'."""
+    r, p = s.get("rank"), s.get("prev_rank")
+    if r is None:
+        return ""
+    if p is None:
+        return "·new"
+    if p == r:
+        return "="
+    return f"{p}→{r}"
+
+
 def _vstr(a) -> str:
     """Compact 'distance to TREND' cell, e.g. '2.1%s' (2.1% from support) / '4.0%r'."""
     p, edge = a.get("vs_trend"), a.get("trend_edge")
@@ -295,16 +321,28 @@ def format_asset_table(assets, *, sort_key: str = "1m") -> str:
     strongest trend on top, laggards at the bottom."""
     rows = sorted(assets, key=lambda a: (a.get(sort_key) is None, -(a.get(sort_key) or 0.0)))
     L = [f"{'ticker':<9}{'sector':<15}{'tr':>4} {'rp':>5} {'vsTR':>6} "
-         f"{'1w':>7} {'1m':>7} {'3m':>7} {'↓hi':>4} own"]
+         f"{'1w':>7} {'1m':>7} {'3m':>7} {'iv':>5} {'rv':>5} {'ivpd':>6} {'vol':>4} {'↓hi':>4} own"]
     for a in rows:
         tr = {"bullish": "bull", "bearish": "bear"}.get((a.get("trend") or "").lower(), "neut")
         rp = f"{a['range_pos']:.2f}" if a.get("range_pos") is not None else "  —"
         own = "📗" if a.get("held") else ""
         lh = a.get("lh_streak") or 0
+        iv = f"{a['iv']:.2f}" if a.get("iv") is not None else "—"
+        rv = f"{a['rv']:.2f}" if a.get("rv") is not None else "—"
+        ivpd = f"{a['ivpd']:+.2f}" if a.get("ivpd") is not None else "—"
+        vm = _volmark(a.get("vol"))
         L.append(f"{(a.get('ticker') or '')[:8]:<9}{(a.get('sector') or '—')[:14]:<15}{tr:>4} "
                  f"{rp:>5} {_vstr(a):>6} {_pct(a.get('1w')):>7} {_pct(a.get('1m')):>7} "
-                 f"{_pct(a.get('3m')):>7} {lh:>4} {own}")
+                 f"{_pct(a.get('3m')):>7} {iv:>5} {rv:>5} {ivpd:>6} {vm:>4} {lh:>4} {own}")
     return "\n".join(L)
+
+
+def _book_stamp(data) -> str:
+    """Provenance line for held-book blocks (STOP ADDING / YOUR BOOK): source +
+    last reconcile timestamp, so a stale position (e.g. a covered short still listed)
+    is attributable to book freshness, not the report."""
+    ts = data.get("book_reconciled")
+    return f"  book source: bot · last reconciled: {ts if ts else 'unknown'}"
 
 
 def format_stop_adding(items) -> str:
@@ -345,6 +383,48 @@ def format_changes(trend_flips, momo_flips, trend_soft: int = 0,
             f"MOMENTUM bull↔bear: {fmt(momo_flips, momo_soft)}")
 
 
+def select_short_gate(assets):
+    """SHORT GATE (spec #6a): trend=bear + high in range (rp>=0.80). Pure.
+    Distribution refinement (volume decel / lower highs) annotated where present."""
+    out = [a for a in assets if (a.get("trend") == "bearish")
+           and a.get("range_pos") is not None and a["range_pos"] >= 0.80]
+    out.sort(key=lambda a: -(a.get("range_pos") or 0))
+    return out
+
+
+def select_puck(assets, top_half_sectors):
+    """PUCK (spec #6a): own + bullish + low in range (rp<0.5) + in a top-half-flow
+    sector — a leader on sale you already hold. Pure."""
+    out = [a for a in assets if a.get("held") and a.get("trend") == "bullish"
+           and a.get("range_pos") is not None and a["range_pos"] < 0.5
+           and a.get("sector") in top_half_sectors]
+    out.sort(key=lambda a: a.get("range_pos") or 0)
+    return out
+
+
+def format_screens(short_gate, puck) -> str:
+    """Pre-computed screens. '0 qualifiers' is a valid, explicit output. Pure."""
+    L = ["═══ PRE-COMPUTED SCREENS ═══"]
+    L.append(f"SHORT GATE (trend=bear + rp≥0.80) — {len(short_gate)} qualifier(s):")
+    if short_gate:
+        for a in short_gate:
+            dist = f"  ↓hi{a['lh_streak']}" if (a.get("lh_streak") or 0) >= 3 else ""
+            vm = _volmark(a.get("vol"))
+            vtag = f"  vol={vm}(distribution)" if vm == "↑" else (f"  vol={vm}" if vm else "")
+            L.append(f"  {(a['ticker'] or '')[:8]:<8} rp {a['range_pos']:.2f}  "
+                     f"{(a.get('sector') or '')[:16]}{dist}{vtag}")
+    else:
+        L.append("  0 qualifiers")
+    L.append(f"PUCK (own + bull + rp<0.5 + top-half-flow sector) — {len(puck)} qualifier(s):")
+    if puck:
+        for a in puck:
+            L.append(f"  {(a['ticker'] or '')[:8]:<8} rp {a['range_pos']:.2f}  "
+                     f"{(a.get('sector') or '')[:16]} 📗")
+    else:
+        L.append("  0 qualifiers")
+    return "\n".join(L)
+
+
 def format_weekend_report(data: dict) -> str:
     """Assemble the full-universe report text (Telegram/attachment). Pure.
 
@@ -365,25 +445,44 @@ def format_weekend_report(data: dict) -> str:
     rolling = data.get("rolling", [])
     leaders = data.get("leaders", [])
     book = data.get("book", {})
+    stamp = _book_stamp(data)
     L.append(f"📅 WEEKEND ROTATION — {r.get('date','')}  "
              f"(full universe: {r.get('n_names','?')} names · {r.get('n_sectors','?')} sectors)")
-    L.append(f"Regime: {r.get('quad','?')} · VIX {r.get('vix','?')} ({r.get('vix_bucket','?')})")
+    L.append(f"QUAD: monthly={r.get('monthly_quad','?')} quarterly={r.get('quarterly_quad','?')} · "
+             f"VIX {r.get('vix','?')} ({r.get('vix_bucket','?')})")
     L.append(f"Breadth: {r.get('pct_bull','?')}% bull · {r.get('pct_bear','?')}% bear · "
              f"{r.get('pct_neut','?')}% neutral")
+    if r.get("generated_at"):
+        L.append(f"generated: {r.get('generated_at')} · prices: yfinance (adj) · signals: mfr_snapshots EOD")
+
+    # ── LEGEND (field definitions — the report is read by an AI desk) ──
+    L.append("\nLEGEND")
+    L.append("  vsTR  = % from price to the NEARER long-term TREND band edge. suffix s=support (LT low),")
+    L.append("          r=resistance (LT high). small vsTR = price sitting right on the TREND line.")
+    L.append("  ↓hi   = count of consecutive sessions making a LOWER daily high (distribution/rolling-over).")
+    L.append("  own   = 📗 you hold the name (from the reconciled book, see stamp below).")
+    L.append("  1w/1m/3m = close-to-close % return over ~5/21/63 sessions. rp = live price position in ST range.")
+    L.append("  iv/rv = MFR implied / realized vol. ivpd = iv premium(+)/discount(-) vs realized (options tell).")
+    L.append("  vol = volume overlay: ↓Nd = down on DECELERATING volume (selling exhausting, dip-buy);")
+    L.append("        ↑ = down on HEAVY (non-decel) volume = distribution.")
+    L.append("  flow  = ACCUM when sector breadth is net-bullish AND avg 1m return is up (mom ↑);")
+    L.append("          DISTRIB when net-bearish AND 1m down (mom ↓); else hold.")
 
     L.append("\n" + format_stop_adding(data.get("stop_adding", [])))
+    if stamp:
+        L.append(stamp)
 
     L.append("\n" + format_changes(data.get("trend_flips", []), data.get("momo_flips", []),
                                     data.get("trend_soft", 0), data.get("momo_soft", 0)))
 
-    L.append("\n═══ MONEY FLOWING  (sector · breadth · avg trailing return) ═══")
-    L.append(f"{'sector':<18}{'n':>3}{'net':>4} {'b/b':>7} {'rp':>5} {'1w':>7} {'1m':>7} {'3m':>7} mom flow")
+    L.append("\n═══ MONEY FLOWING  (sector · breadth · avg trailing return · WoW rank) ═══")
+    L.append(f"{'sector':<18}{'n':>3}{'net':>4} {'b/b':>7} {'rp':>5} {'1w':>7} {'1m':>7} {'3m':>7} mom {'flow':<8} wow")
     for s in rotation:
         bb = f"{s['bull']}/{s['bear']}"
         rp = f"{s['avg_rp']:.2f}" if s.get("avg_rp") is not None else "  —"
         L.append(f"{(s['sector'] or '—')[:18]:<18}{s['n']:>3}{s['net_trend']:>+4} {bb:>7} {rp:>5} "
                  f"{_pct(s.get('1w')):>7} {_pct(s.get('1m')):>7} {_pct(s.get('3m')):>7} "
-                 f"{s.get('mom_dir','→')}  {s['flow']}")
+                 f"{s.get('mom_dir','→')}  {s['flow']:<8} {_wow(s)}")
 
     L.append(f"\n═══ TRENDING RETURNS — every asset (sorted by 1-month) ═══")
     L.append(format_asset_table(assets, sort_key="1m"))
@@ -398,6 +497,9 @@ def format_weekend_report(data: dict) -> str:
     else:
         L.append("  none — nothing making a sustained lower-high sequence")
 
+    if data.get("short_gate") is not None or data.get("puck") is not None:
+        L.append("\n" + format_screens(data.get("short_gate", []), data.get("puck", [])))
+
     L.append(f"\n═══ TRENDING LEADERS — RS strong + Hurst>0.6 + rising ═══")
     if leaders:
         for d in leaders:
@@ -409,10 +511,32 @@ def format_weekend_report(data: dict) -> str:
         L.append("  none clearing the trend + momentum bar")
 
     L.append(f"\n═══ YOUR BOOK ({book.get('held_count','?')} held) vs the tape ═══")
+    if stamp:
+        L.append(stamp)
     wf = book.get("with_flow") or []
     ag = book.get("against") or []
     L.append("With the flow:   " + (", ".join(wf) if wf else "—"))
     L.append("Against / watch: " + (", ".join(ag) if ag else "—"))
+    dark = data.get("dark_held") or []
+    if dark:
+        L.append("⚫ dark (held, no live range — excluded from tables above): " + ", ".join(dark))
+
+    # ── BOOK STATE footer (spec #4): one Sunday file = full bot state ──
+    fb = data.get("footer") or {}
+    if fb:
+        L.append("\n═══ BOOK STATE — full bot state (no follow-up pull) ═══")
+        if stamp:
+            L.append(stamp)
+        L.append("\n── BOOK FULL  [tkr·acct·acct%·tgt%·src·fill%·bucket·pl%] ──")
+        L.append(fb.get("book_full", ""))
+        L.append("\n── CASH (per account) ──")
+        L.append(fb.get("cash", ""))
+        L.append("\n── BOOK RISK (60d, |corr|≥0.70) ──")
+        L.append(fb.get("book_risk", ""))
+        L.append("\n── RORO (risk-on/off · credit vs duration) ──")
+        L.append(fb.get("roro", ""))
+        L.append("\n── DIVERSIFICATION ──")
+        L.append(fb.get("diversification", ""))
     return "\n".join(L)
 
 
@@ -450,9 +574,9 @@ def _fetch_universe_rows():
     with db_pg.get_conn() as c, c.cursor() as cur:
         cur.execute(
             "SELECT ticker, gics_sector, subsector, hedgeye_bucket_0629, "
-            "range_pos, trend_dir, momentum_dir, hurst, held "
+            "range_pos, trend_dir, momentum_dir, hurst, iv, rv, ivpd, held "
             "FROM v_screener WHERE has_range = true")
-        for tk, gics, sub, bucket, rp, tr, mo, h, held in cur.fetchall():
+        for tk, gics, sub, bucket, rp, tr, mo, h, iv, rv, ivpd, held in cur.fetchall():
             rows.append({
                 "ticker": tk,
                 "sector": _coarse_sector(tk, gics, sub, bucket),
@@ -460,6 +584,9 @@ def _fetch_universe_rows():
                 "momentum": mo,
                 "range_pos": float(rp) if rp is not None else None,
                 "hurst": float(h) if h is not None else None,
+                "iv": float(iv) if iv is not None else None,        # implied vol (options)
+                "rv": float(rv) if rv is not None else None,        # realized vol
+                "ivpd": float(ivpd) if ivpd is not None else None,  # iv premium/discount
                 "held": bool(held),
             })
     return rows
@@ -569,10 +696,17 @@ def _fetch_bars(tickers, lookback_days=75, chunk=120):
 
 def _fetch_regime(rows):
     """{quad, vix, vix_bucket, n_names, n_sectors, pct_bull/bear/neut} from rows + quad + VIX."""
-    quad = "?"
+    monthly_q, quarterly_q = "?", "?"
     try:
-        from tools.doctrine import current_monthly_quad
-        quad = current_monthly_quad() or "?"
+        from tools.doctrine import current_monthly_quad, current_quarterly_quad
+        try:
+            monthly_q = current_monthly_quad() or "?"
+        except Exception:
+            pass
+        try:
+            quarterly_q = current_quarterly_quad() or "?"
+        except Exception:
+            pass
     except Exception as e:
         log.warning("weekend: quad read failed: %s", e)
     vix = None
@@ -587,11 +721,128 @@ def _fetch_regime(rows):
     nr = sum(1 for r in rows if r["trend"] == "bearish")
     tot = max(len(rows), 1)
     from datetime import date
-    return {"date": date.today().strftime("%a %b %d"), "quad": quad, "vix": vix,
+    return {"date": date.today().strftime("%a %b %d"),
+            "monthly_quad": monthly_q, "quarterly_quad": quarterly_q, "vix": vix,
             "vix_bucket": vix_bucket(vix), "n_names": len(rows),
             "n_sectors": len({r["sector"] for r in rows}),
             "pct_bull": round(100 * nb / tot), "pct_bear": round(100 * nr / tot),
             "pct_neut": round(100 * (tot - nb - nr) / tot)}
+
+
+def _fetch_book_meta(universe_tickers):
+    """(reconciled, dark_held): latest book_positions snapshot_date + held underlyings
+    that have NO live range (dark — in the book but absent from the ranged universe,
+    e.g. foreign listings like 2513.HK). Lets a stale hold be attributed to book age."""
+    import db_pg
+    reconciled, dark = None, []
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT max(snapshot_date) FROM book_positions")
+            row = cur.fetchone()
+            reconciled = row[0] if row else None
+            cur.execute(
+                "SELECT DISTINCT underlying FROM book_positions "
+                "WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions) "
+                "AND COALESCE(asset_class,'') <> 'cash' AND COALESCE(quantity,0) <> 0")
+            held_all = {r[0] for r in cur.fetchall() if r[0]}
+            dark = sorted(held_all - set(universe_tickers))
+    except Exception as e:
+        log.warning("weekend: book meta fetch failed: %s", e)
+    return reconciled, dark
+
+
+def _fetch_footer_blocks():
+    """Pre-rendered BOOK-STATE footer blocks (spec #4): one Sunday file = full bot
+    state, no follow-up pull. Each block is best-effort — a failed/absent snapshot
+    yields a short notice, never an exception. Reuses the daily-REPORT machinery."""
+    import db_pg
+    b = {}
+    # BOOK FULL — reuse the exact daily-REPORT builder
+    try:
+        from tools.book_direction import book_sides
+        from tools.position_targets import compute_fills
+        from tools.report import build_book_table
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            fills = compute_fills(cur, book_sides())
+        b["book_full"] = build_book_table(fills)
+    except Exception as e:
+        log.warning("weekend footer: BOOK FULL failed: %s", e)
+        b["book_full"] = f"BOOK FULL: unavailable ({e})"
+    # CASH — per account
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT account_name, sum(market_value) FROM book_positions "
+                        "WHERE snapshot_date=(SELECT max(snapshot_date) FROM book_positions) "
+                        "AND asset_class='cash' GROUP BY account_name ORDER BY account_name")
+            parts = [f"{acct}: ${(v or 0):,.0f}" for acct, v in cur.fetchall()]
+        b["cash"] = "  " + (" · ".join(parts) if parts else "no cash rows in book")
+    except Exception as e:
+        b["cash"] = f"CASH: unavailable ({e})"
+    # BOOK RISK — reuse correlation_matrix clusters/independent-bets block
+    try:
+        from tools.correlation_matrix import render_report_block as _riskblock
+        b["book_risk"] = "  " + _riskblock()
+    except Exception as e:
+        b["book_risk"] = f"BOOK RISK: unavailable ({e})"
+    # RORO — HYG/TLT and HYG/LQD (persisted as rs_snapshots rows, ticker=HYG)
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            out = []
+            for num, den in (("HYG", "TLT"), ("HYG", "LQD")):
+                cur.execute("SELECT rs_trend, rs_slope FROM rs_snapshots WHERE ticker=%s "
+                            "AND benchmark=%s ORDER BY snapshot_date DESC LIMIT 1", (num, den))
+                r = cur.fetchone()
+                if r:
+                    tr, sl = r
+                    d = "risk-on↑" if (sl or 0) > 0 else "risk-off↓" if (sl or 0) < 0 else "flat→"
+                    val = f"{float(tr)*100:+.1f}%" if tr is not None else "n/a"
+                    out.append(f"{num}/{den} {val} {d}")
+            b["roro"] = "  " + ("   ".join(out) if out else "no RORO snapshot (run tools.relative_strength)")
+    except Exception as e:
+        b["roro"] = f"RORO: unavailable ({e})"
+    # DIVERSIFICATION — 60d avg pairwise sector corr + regime
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT avg_pairwise_corr, regime FROM diversification_snapshots "
+                        "ORDER BY snapshot_date DESC LIMIT 1")
+            r = cur.fetchone()
+            if r and r[0] is not None:
+                b["diversification"] = f"  60d avg pairwise sector corr: {float(r[0]):.2f} ({r[1]})"
+            else:
+                b["diversification"] = "  no diversification snapshot"
+    except Exception as e:
+        b["diversification"] = f"DIVERSIFICATION: unavailable ({e})"
+    return b
+
+
+def _sector_rank_delta(rotation):
+    """Attach this-run rank + prior-weekend rank to each sector row (spec #5), then
+    persist this run's ranking to bot_state for next week. Best-effort; first run has
+    no prior so rows show '·new'."""
+    import db_pg
+    import json as _json
+    prior = {}
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT value FROM bot_state WHERE key='weekend_sector_rank'")
+            r = cur.fetchone()
+            if r and r[0]:
+                prior = _json.loads(r[0] if isinstance(r[0], str) else _json.dumps(r[0]))
+    except Exception as e:
+        log.warning("weekend: sector-rank read failed: %s", e)
+    for i, s in enumerate(rotation):
+        s["rank"] = i + 1
+        s["prev_rank"] = prior.get(s["sector"])
+    try:
+        current = {s["sector"]: s["rank"] for s in rotation}
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("INSERT INTO bot_state (key,value,updated_at) VALUES (%s,%s,NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                        ("weekend_sector_rank", _json.dumps(current)))
+            c.commit()
+    except Exception as e:
+        log.warning("weekend: sector-rank persist failed: %s", e)
+    return rotation
 
 
 def build_weekend_report():
@@ -599,6 +850,7 @@ def build_weekend_report():
     rows = _fetch_universe_rows()
     if not rows:
         return None
+    book_reconciled, dark_held = _fetch_book_meta({r["ticker"] for r in rows})
     rs = _fetch_rs_map()
     bars = _fetch_bars([r["ticker"] for r in rows])
     try:
@@ -618,7 +870,20 @@ def build_weekend_report():
         px, ll, lh = lt.get(r["ticker"], (None, None, None))
         r["vs_trend"], r["trend_edge"] = dist_to_trend(px, ll, lh)
 
-    rotation = aggregate_rotation(rows)
+    # volume overlay from volume_snapshots (same source SCREEN uses)
+    try:
+        from tools.screener import _vol_for
+        vol = _vol_for([r["ticker"] for r in rows])
+        for r in rows:
+            r["vol"] = vol.get(r["ticker"])
+    except Exception as e:
+        log.warning("weekend: volume overlay failed: %s", e)
+
+    rotation = _sector_rank_delta(aggregate_rotation(rows))
+    # pre-computed screens (spec #6a): SHORT GATE + PUCK (top-half-flow sectors)
+    top_half = {s["sector"] for s in rotation[:max(1, len(rotation) // 2)]}
+    short_gate = select_short_gate(rows)
+    puck = select_puck(rows, top_half)
     rolling = sorted([{"ticker": r["ticker"], "lh_streak": r["lh_streak"],
                        "range_pos": r["range_pos"], "rs_dir": _rs_dir(r.get("rs_slope")),
                        "held": r["held"]}
@@ -679,12 +944,20 @@ def build_weekend_report():
                            "momo_prev": p[1], "momo_now": n[1], "range_pos": r["range_pos"]})
     stop_adding = select_stop_adding(held_flips)
 
+    regime = _fetch_regime(rows)
+    try:
+        from datetime import datetime, timezone
+        regime["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        pass
     return format_weekend_report({
-        "regime": _fetch_regime(rows), "stop_adding": stop_adding,
+        "regime": regime, "stop_adding": stop_adding,
+        "book_reconciled": book_reconciled, "dark_held": dark_held,
         "trend_flips": t_hard, "momo_flips": m_hard,
         "trend_soft": t_soft, "momo_soft": m_soft,
         "rotation": rotation, "assets": rows, "rolling": rolling,
-        "leaders": leaders, "book": book,
+        "short_gate": short_gate, "puck": puck,
+        "leaders": leaders, "book": book, "footer": _fetch_footer_blocks(),
     })
 
 
