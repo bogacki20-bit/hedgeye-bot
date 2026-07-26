@@ -544,6 +544,10 @@ def format_weekend_report(data: dict) -> str:
     if mv:
         L.append("\n── MFR VALIDATION (shadow engine) ──")
         L.append("  " + mv)
+    sc = data.get("shadow_scorecard")
+    if sc:
+        L.append("")
+        L.append(sc)
     return "\n".join(L)
 
 
@@ -1022,7 +1026,21 @@ def build_weekend_report():
         "short_gate": short_gate, "puck": puck,
         "leaders": leaders, "book": book, "footer": _fetch_footer_blocks(),
         "mfr_validation": format_mfr_validation(mfr_val),
+        "shadow_scorecard": _shadow_scorecard_block(),
     })
+
+
+def _shadow_scorecard_block() -> str:
+    """SHADOW SCORECARD, persisted on each weekend run so the 2026-08-08 review
+    has a stored series. Best-effort — never raises into the report."""
+    try:
+        from tools.shadow_scorecard import build_scorecard, format_scorecard, persist
+        s = build_scorecard()
+        persist(s)
+        return format_scorecard(s)
+    except Exception as e:
+        log.warning("weekend: shadow scorecard unavailable: %s", e)
+        return ""
 
 
 def handle_weekend_command(text):
