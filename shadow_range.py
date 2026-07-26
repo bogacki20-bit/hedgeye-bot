@@ -307,7 +307,7 @@ class CalibResult:
     mae_low_pct: float      # mean abs error of low edge, % of price
     mae_high_pct: float     # mean abs error of high edge, % of price
     rp_mae: float           # mean abs error of rp vs reference rp
-    coverage: float         # % of reference closes inside the shadow range
+    coverage: float         # % of NEXT-day closes inside the shadow range
     n_obs: int
 
     def score(self) -> float:
@@ -332,6 +332,10 @@ def evaluate_params(price_data: dict[str, pd.DataFrame],
         hist = compute_range_history(df, ticker=tkr, params=params)
         if hist.empty:
             continue
+        # next-day close per date — for TRUE forward coverage of the shadow band
+        _dates = [str(d.date()) if hasattr(d, "date") else str(d) for d in df.index]
+        _closes = [float(x) for x in df["close"].tolist()]
+        next_close = {d: _closes[i + 1] for i, d in enumerate(_dates[:-1])}
         merged = grp.assign(date=grp["date"].astype(str)).merge(
             hist.reset_index(), on="date", how="inner", suffixes=("", "_shadow"))
         for _, r in merged.iterrows():
@@ -342,7 +346,13 @@ def evaluate_params(price_data: dict[str, pd.DataFrame],
             errs_hi.append(abs(r["high"] - r["ref_high"]) / px * 100)
             ref_rp = (px - r["ref_low"]) / (r["ref_high"] - r["ref_low"])
             errs_rp.append(abs(r["rp"] - ref_rp))
-            inside.append(r["ref_low"] <= px <= r["ref_high"])
+            # coverage = did the NEXT-day close land inside THIS shadow band?
+            # Previously this tested ref_low <= px <= ref_high — containment in
+            # the REFERENCE band, which does not depend on params at all and so
+            # reported an identical number for every combo in the grid.
+            nc = next_close.get(r["date"])
+            if nc is not None and nc == nc:
+                inside.append(bool(r["low"] <= nc <= r["high"]))
     n = len(errs_lo)
     if n == 0:
         return CalibResult(params, float("inf"), float("inf"), float("inf"), 0.0, 0)
