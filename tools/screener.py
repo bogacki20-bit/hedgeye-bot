@@ -706,6 +706,28 @@ def _fmt_row(r, corr, vol=None, ivpct=None) -> str:
 
 _RP_LIVE_MIN, _RP_LIVE_MAX = 0.2, 5.0
 
+# ── snapshot-age staleness (the RANGE, not the price) ───────────────────────
+# rp = live price ÷ MFR range. Yahoo keeps the PRICE fresh, but the RANGE comes
+# from mfr_snapshots and only refreshes when the MFR backlog runs. A fresh price
+# on a stale range = a confident-looking rp that's wrong (the USO 0.60 bug). So
+# a name whose snapshot lags the freshest one in the screen — or, if the whole
+# feed is dark, is simply too old — must FAIL LOUD (⚠STALE), never print a
+# number. Self-calibrating + weekend-safe: on Monday the freshest snapshot is
+# Friday for everyone, so nothing lags.
+_SNAP_STALE_LAG_DAYS = 1     # snapshot lagging the freshest in the screen by >= this = stale
+_SNAP_FEED_MAX_AGE   = 4     # if the freshest snapshot itself is older than this (days), whole feed is stale
+
+
+def _snap_staleness(sd, batch_max_sd, today):
+    """(is_stale, age_days) for one row's snapshot_date. Pure. No snapshot at
+    all = stale. Otherwise stale if the whole feed is old OR this name lags the
+    freshest snapshot in the batch."""
+    if sd is None:
+        return (True, None)
+    feed_stale = (batch_max_sd is None) or ((today - batch_max_sd).days > _SNAP_FEED_MAX_AGE)
+    lag = (batch_max_sd - sd).days if batch_max_sd else 0
+    return (bool(feed_stale or lag >= _SNAP_STALE_LAG_DAYS), (today - sd).days)
+
 
 def _st_ranges(tickers):
     tickers = [t for t in {t for t in tickers if t}]
@@ -728,8 +750,25 @@ def _st_ranges(tickers):
 
 
 def _refresh_range_pos_live(rows):
+    import datetime as _dt
+    # 1) Range fetch — ALWAYS runs (its own guard) so the staleness flag is set
+    #    even when the live-price feed is down.
     try:
         rng = _st_ranges([r["ticker"] for r in rows])
+    except Exception as e:
+        log.warning("SCREEN: range fetch failed (%s)", e)
+        rng = {}
+    # snapshot-age staleness of the RANGE — fail loud on old bands (the USO fix)
+    sds = [sd for (_lo, _hi, _px, sd, _fa) in rng.values() if sd]
+    batch_max_sd = max(sds) if sds else None
+    today = _dt.date.today()
+    for r in rows:
+        sd = rng.get(r["ticker"], (None, None, None, None, None))[3]
+        r["_snap_stale"], r["_snap_age_days"] = _snap_staleness(sd, batch_max_sd, today)
+
+    # 2) Live price fetch (Yahoo). If unavailable, fall back to EOD — but the
+    #    range-staleness flag above still stands.
+    try:
         from price_monitor import HEDGEYE_TO_YFINANCE, fetch_prices
         symmap = {r["ticker"]: (HEDGEYE_TO_YFINANCE.get(r["ticker"]) or r["ticker"]) for r in rows}
         live = fetch_prices(sorted({s for s in symmap.values() if s}))
@@ -756,6 +795,11 @@ def _refresh_range_pos_live(rows):
 
 
 def _rp_str(r) -> str:
+    # FAIL LOUD: a stale range (old snapshot) never prints a clean number — the
+    # live price would be mapped onto a band that has moved (the USO 0.60 bug).
+    if r.get("_snap_stale"):
+        age = r.get("_snap_age_days")
+        return f"⚠STALE({age}d)" if age is not None else "⚠STALE(no-snap)"
     if r.get("range_pos") is None:
         return "n/a"
     s = f"{float(r['range_pos']):.2f}"
@@ -921,6 +965,12 @@ def run_screen_q(q: dict) -> str:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
         lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
         lines += [_fmt_row(r, corr, vol, ivpct) for r in result]
+        _stale = [r for r in result if r.get("_snap_stale")]
+        if _stale:
+            names = " ".join(sorted(r["ticker"] for r in _stale))
+            lines.append(f"⚠STALE = MFR range snapshot is old (days shown) — rp is SUPPRESSED, "
+                         f"NOT a number. Do NOT trade off it; the range moved. "
+                         f"{len(_stale)} name(s): {names}")
         if any(r.get("divergence") for r in result):
             lines.append("⚡ = MFR trade vs momentum divergence (momentum-exhaustion fade setup).")
         if any(r.get("_thesis") for r in result):
