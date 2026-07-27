@@ -1,4 +1,12 @@
-# relative_strength_launcher.ps1 — Task Scheduler entrypoint for
+﻿# --- AUTO-SYNC: keep this clone on origin/master before doing any work. -------
+# The runner clone only advanced on a manual `git pull`, so every deploy left the
+# scheduled analytics + shadow ingest running stale code. sync_master.ps1 is
+# idempotent (a no-change run is just a cheap fetch), always exits 0, and only
+# bounces the command-bridge when the SHA actually moved. Run in a SEPARATE
+# process so its `exit 0` and Set-Location cannot leak into this launcher.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Projects\hedgeye-bot\sync_master.ps1"
+# -----------------------------------------------------------------------------
+# relative_strength_launcher.ps1 â€” Task Scheduler entrypoint for
 # HedgeyeBotRelativeStrength. Wraps `python -m tools.relative_strength` so
 # stdout+stderr land in <repo>\logs\relative_strength_YYYY-MM-DD.log.
 #
@@ -8,8 +16,8 @@
 # additions:
 #   1. $repo derives from $PSScriptRoot (the folder this script lives in),
 #      so it works whether the repo is C:\Projects\hedgeye-bot or elsewhere
-#      — no hardcoded path to drift.
-#   2. PYTHONUTF8 / PYTHONIOENCODING are forced so the 🟢/🔴 grid emojis
+#      â€” no hardcoded path to drift.
+#   2. PYTHONUTF8 / PYTHONIOENCODING are forced so the ðŸŸ¢/ðŸ”´ grid emojis
 #      don't trip the Windows cp1252 console (UnicodeEncodeError). Railway's
 #      Linux runtime never needs this; the local scheduled run does.
 
@@ -54,19 +62,19 @@ Set-Location $repo
     Out-File -FilePath $logFile -Append -Encoding utf8
 $rsExit = $LASTEXITCODE
 
-# Volume signal (decelerating-dip trigger) — same daily run, right after RS.
+# Volume signal (decelerating-dip trigger) â€” same daily run, right after RS.
 & $python -m tools.volume_signal *>&1 |
     ForEach-Object { $_.ToString() } |
     Out-File -FilePath $logFile -Append -Encoding utf8
 $volExit = $LASTEXITCODE
 
-# RS pairwise matrix (sectors + QQQ + IWM) — same daily run, after volume.
+# RS pairwise matrix (sectors + QQQ + IWM) â€” same daily run, after volume.
 & $python -m tools.rs_matrix *>&1 |
     ForEach-Object { $_.ToString() } |
     Out-File -FilePath $logFile -Append -Encoding utf8
 $rsMatrixExit = $LASTEXITCODE
 
-# Full correlation matrix + book risk-cluster read — same daily run, after rs_matrix.
+# Full correlation matrix + book risk-cluster read â€” same daily run, after rs_matrix.
 & $python -m tools.correlation_matrix *>&1 |
     ForEach-Object { $_.ToString() } |
     Out-File -FilePath $logFile -Append -Encoding utf8

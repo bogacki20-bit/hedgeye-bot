@@ -1,4 +1,12 @@
-# warm_monitored_launcher.ps1 — Task Scheduler entrypoint for HedgeyeBotWarmMonitored.
+﻿# --- AUTO-SYNC: keep this clone on origin/master before doing any work. -------
+# The runner clone only advanced on a manual `git pull`, so every deploy left the
+# scheduled analytics + shadow ingest running stale code. sync_master.ps1 is
+# idempotent (a no-change run is just a cheap fetch), always exits 0, and only
+# bounces the command-bridge when the SHA actually moved. Run in a SEPARATE
+# process so its `exit 0` and Set-Location cannot leak into this launcher.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Projects\hedgeye-bot\sync_master.ps1"
+# -----------------------------------------------------------------------------
+# warm_monitored_launcher.ps1 â€” Task Scheduler entrypoint for HedgeyeBotWarmMonitored.
 # Wraps tools.warm_all_monitored so stdout+stderr land in
 # C:\Projects\hedgeye-bot\logs\warm_monitored_YYYY-MM-DD.log.
 #

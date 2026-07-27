@@ -1,4 +1,12 @@
-# scanner_launcher.ps1 — Task Scheduler entrypoint for HedgeyeBotProactiveScanner.
+﻿# --- AUTO-SYNC: keep this clone on origin/master before doing any work. -------
+# The runner clone only advanced on a manual `git pull`, so every deploy left the
+# scheduled analytics + shadow ingest running stale code. sync_master.ps1 is
+# idempotent (a no-change run is just a cheap fetch), always exits 0, and only
+# bounces the command-bridge when the SHA actually moved. Run in a SEPARATE
+# process so its `exit 0` and Set-Location cannot leak into this launcher.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Projects\hedgeye-bot\sync_master.ps1"
+# -----------------------------------------------------------------------------
+# scanner_launcher.ps1 â€” Task Scheduler entrypoint for HedgeyeBotProactiveScanner.
 # Wraps proactive_scanner.py so stdout+stderr land in C:\Projects\hedgeye-bot\logs\scanner_YYYY-MM-DD.log.
 # Without this wrapper the Task Scheduler runs pythonw.exe with stdout discarded.
 #
@@ -36,10 +44,10 @@ $python  = 'C:\Users\bogac\AppData\Local\Programs\Python\Python312\python.exe'
 $script  = Join-Path $repo 'proactive_scanner.py'
 $mfrCli  = Join-Path $repo 'mfr_client.py'
 
-# Cycle cadence — sleep N seconds between cycles. Default 900 (15 min).
+# Cycle cadence â€” sleep N seconds between cycles. Default 900 (15 min).
 $cycleSeconds = if ($env:SCAN_CYCLE_SECONDS) { [int]$env:SCAN_CYCLE_SECONDS } else { 900 }
 
-# MFR-watchlist sync — once per UTC day. Picks up new tickers the operator
+# MFR-watchlist sync â€” once per UTC day. Picks up new tickers the operator
 # added via the MFR UI (the canonical fan-out source). Guard via marker file
 # so the daily refresh fires once per calendar date, idempotent across
 # launcher restarts.
@@ -59,7 +67,7 @@ while ($true) {
     Add-Content -Path $logFile -Value ""
     Add-Content -Path $logFile -Value "==== scanner cycle $start (pid=$PID) ===="
 
-    # MFR-watchlist sync — runs once per UTC day. The marker file holds the
+    # MFR-watchlist sync â€” runs once per UTC day. The marker file holds the
     # last sync date (YYYY-MM-DD). When the day has rolled, pull the operator's
     # full MFR watchlist via /v2/asset and refresh every ticker. Idempotent.
     $todayUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
