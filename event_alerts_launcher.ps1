@@ -1,4 +1,12 @@
-# event_alerts_launcher.ps1 — env-loader wrapper for tools.event_driven_alerts.
+﻿# --- AUTO-SYNC: keep this clone on origin/master before doing any work. -------
+# The runner clone only advanced on a manual `git pull`, so every deploy left the
+# scheduled analytics + shadow ingest running stale code. sync_master.ps1 is
+# idempotent (a no-change run is just a cheap fetch), always exits 0, and only
+# bounces the command-bridge when the SHA actually moved. Run in a SEPARATE
+# process so its `exit 0` and Set-Location cannot leak into this launcher.
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Projects\hedgeye-bot\sync_master.ps1"
+# -----------------------------------------------------------------------------
+# event_alerts_launcher.ps1 â€” env-loader wrapper for tools.event_driven_alerts.
 # Invoked by Scheduled Task HedgeyeBotEventAlerts daily at 09:30 ET.
 $ErrorActionPreference = 'Continue'
 $repo   = 'C:\Projects\hedgeye-bot'
@@ -33,7 +41,7 @@ Set-Location $repo
 #
 # Known Task-Scheduler-level quirk on this machine (2026-05-26
 # investigation): the task reports LastTaskResult=1 regardless of the
-# launcher's actual exit code — verified by swapping in a trivial
+# launcher's actual exit code â€” verified by swapping in a trivial
 # `exit 0` sentinel script that also reported 1. The underlying python
 # DOES execute under the scheduler (log file is appended each fire,
 # alerts_fired rows persist, Telegram messages send). The exit-1
