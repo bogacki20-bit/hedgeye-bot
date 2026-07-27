@@ -1,12 +1,4 @@
-﻿# --- AUTO-SYNC: keep this clone on origin/master before doing any work. -------
-# The runner clone only advanced on a manual `git pull`, so every deploy left the
-# scheduled analytics + shadow ingest running stale code. sync_master.ps1 is
-# idempotent (a no-change run is just a cheap fetch), always exits 0, and only
-# bounces the command-bridge when the SHA actually moved. Run in a SEPARATE
-# process so its `exit 0` and Set-Location cannot leak into this launcher.
-& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Projects\hedgeye-bot\sync_master.ps1"
-# -----------------------------------------------------------------------------
-# scanner_launcher.ps1 â€” Task Scheduler entrypoint for HedgeyeBotProactiveScanner.
+﻿# scanner_launcher.ps1 â€” Task Scheduler entrypoint for HedgeyeBotProactiveScanner.
 # Wraps proactive_scanner.py so stdout+stderr land in C:\Projects\hedgeye-bot\logs\scanner_YYYY-MM-DD.log.
 # Without this wrapper the Task Scheduler runs pythonw.exe with stdout discarded.
 #
@@ -60,6 +52,17 @@ Add-Content -Path $logFile -Value "==== scanner_launcher boot $bootStart (pid=$P
 
 # Inner loop: scan, sleep, repeat. Task Scheduler is now supervisor only.
 while ($true) {
+    # --- AUTO-SYNC: first thing in the cycle, BEFORE any Python child spawns. ---
+    # This launcher runs an inner loop, so a single Task Scheduler invocation drives
+    # many cycles — a top-of-FILE sync would only fire once at boot and the scanner
+    # would run stale code until the task restarted. Placing it here means a
+    # `git reset --hard` lands strictly BETWEEN cycles, while no fan-out / shadow
+    # ingest / scanner child is mid-flight; the next cycle's children then load the
+    # new code. Separate process so sync_master's `exit 0` and Set-Location cannot
+    # leak into this loop. A no-change cycle costs one git fetch.
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Projects\hedgeye-bot\sync_master.ps1"
+    # ---------------------------------------------------------------------------
+
     # Refresh daily log file path each iteration so date-rollover lands cleanly.
     $date    = Get-Date -Format 'yyyy-MM-dd'
     $logFile = Join-Path $logDir "scanner_$date.log"
