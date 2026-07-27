@@ -98,13 +98,22 @@ while ($true) {
         # hedgeye_risk_ranges. Non-fatal by design: a shadow failure must not stop
         # the scanner, and the MFR marker above is already set either way.
         Add-Content -Path $logFile -Value "---- shadow_ingest: starting ($todayUtc UTC) ----"
+        # `python -m tools.shadow_ingest` resolves the `tools` package from the
+        # CURRENT DIRECTORY. This launcher addresses everything by absolute path
+        # and never cd's to the repo, so the first live run died with
+        # "ModuleNotFoundError: No module named 'tools'". Push-Location makes the
+        # -m invocation behave as it does when run by hand from the repo root;
+        # Pop-Location restores the caller's directory afterwards.
+        Push-Location $repo
         & $python -m tools.shadow_ingest *>&1 |
             ForEach-Object { $_.ToString() } |
             Out-File -FilePath $logFile -Append -Encoding utf8
-        if ($LASTEXITCODE -eq 0) {
+        $shadowRc = $LASTEXITCODE
+        Pop-Location
+        if ($shadowRc -eq 0) {
             Add-Content -Path $logFile -Value "---- shadow_ingest: complete ----"
         } else {
-            Add-Content -Path $logFile -Value "---- shadow_ingest: FAILED rc=$LASTEXITCODE (non-fatal; MFR data unaffected) ----"
+            Add-Content -Path $logFile -Value "---- shadow_ingest: FAILED rc=$shadowRc (non-fatal; MFR data unaffected) ----"
         }
     }
 
