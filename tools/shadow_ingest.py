@@ -29,7 +29,7 @@ import json
 import logging
 import os
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime, timezone
 
 log = logging.getLogger(__name__)
 
@@ -193,7 +193,12 @@ def compute_for_universe(tickers, bars_by_ticker, params=None, as_of=None,
     from shadow_range import compute_range
     p = params or calibrated_params()
     phash = _params_hash(p)
-    today = as_of or date.today()
+    # UTC, matching mfr_client.fetch_and_save. shadow_snapshots is keyed
+    # (ticker, snapshot_date) and is compared session-for-session against
+    # mfr_snapshots, so a local stamp made after 20:00 EDT wrote shadow rows
+    # under YESTERDAY's date while the fan-out wrote MFR under today's —
+    # silently overwriting the prior session instead of banking a new one.
+    today = as_of or datetime.now(timezone.utc).date()
     rows = []
     for t in tickers:
         df = bars_by_ticker.get(t)

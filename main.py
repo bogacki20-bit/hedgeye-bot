@@ -1,5 +1,5 @@
-"""
-Hedgeye Bot — Main Entry Point.
+﻿"""
+Hedgeye Bot â€” Main Entry Point.
 
 Boot order:
   1. Verify required env vars are present.
@@ -18,7 +18,7 @@ from telegram_handler import start_telegram_listener
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s â€” %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 log = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     else:
         log.info("Risk Range parser disabled (PARSER_ENABLED=false).")
 
-    # Live price monitor — polls yfinance, fires Telegram on range-edge events.
+    # Live price monitor â€” polls yfinance, fires Telegram on range-edge events.
     # Same daemon pattern. Toggle via MONITOR_ENABLED=false on Railway if alerts get noisy.
     if os.getenv("MONITOR_ENABLED", "true").lower() in ("true", "1", "yes"):
         from price_monitor import run_monitor_loop
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     else:
         log.info("Price monitor disabled (MONITOR_ENABLED=false).")
 
-    # Book alerts (queue 5, 2026-07-11) — dip/rip retreat + trend-flip on the
+    # Book alerts (queue 5, 2026-07-11) â€” dip/rip retreat + trend-flip on the
     # operator's ACTUAL holdings. Market hours only (ET), every 15 min.
     # Exempt from the 20/80 universe filter by design. BOOK_ALERTS_ENABLED=0
     # to disable; BOOK_DIP_DELTA tunes the retreat threshold.
@@ -191,7 +191,7 @@ if __name__ == "__main__":
         log.info("Book alerts thread started (dip/rip delta=%s).",
                  os.getenv("BOOK_DIP_DELTA", "0.25"))
 
-    # MFR watchlist sync — once per UTC day, refresh every ticker in the
+    # MFR watchlist sync â€” once per UTC day, refresh every ticker in the
     # operator's MFR account (canonical fan-out source). Catches new tickers
     # added through the MFR UI without any code change. Toggle off via
     # MFR_WATCHLIST_SYNC=false. Tracks last-sync UTC date in bot_state so
@@ -231,15 +231,15 @@ if __name__ == "__main__":
                                 conn.commit()
                         except Exception as e:
                             log.warning("bot_state write for mfr_watchlist failed: %s", e)
-                        log.info("mfr_watchlist_sync: done — %s", summary)
+                        log.info("mfr_watchlist_sync: done â€” %s", summary)
                         # Vol-regime layer (queue item 1, 2026-07-11): classify
-                        # the vol complex off the fresh snapshots — one frozen
+                        # the vol complex off the fresh snapshots â€” one frozen
                         # fact row per index per day. Guarded; loud in the log.
                         try:
                             from tools.vol_regime import write_for_date, regime_line
-                            from datetime import date as _date
-                            vs = write_for_date(_date.today())
-                            log.info("vol_regime: %s — %s", vs, regime_line())
+                            from datetime import datetime as _dtm, timezone as _tz
+                            vs = write_for_date(_dtm.now(_tz.utc).date())   # UTC: one row per index per day
+                            log.info("vol_regime: %s â€” %s", vs, regime_line())
                         except Exception as e:
                             log.warning("vol_regime nightly write failed: %s", e)
                         # EOD REPORT row (queue 4): stored snapshots ARE the
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     else:
         log.info("MFR watchlist sync disabled (MFR_WATCHLIST_SYNC=false).")
 
-    # Friday SS-roster anchor prompt + stale re-ping (PROMPT ONLY — writes no roster).
+    # Friday SS-roster anchor prompt + stale re-ping (PROMPT ONLY â€” writes no roster).
     # Toggle off via SS_ANCHOR_PROMPT=false.
     if os.getenv("SS_ANCHOR_PROMPT", "true").lower() in ("true", "1", "yes"):
         def _ss_anchor_prompt_loop():
@@ -312,7 +312,7 @@ if __name__ == "__main__":
     else:
         log.info("SS anchor prompt disabled (SS_ANCHOR_PROMPT=false).")
 
-    # MFR enrollment helpers (READ-ONLY — tell me what to activate in MFR; no write token):
+    # MFR enrollment helpers (READ-ONLY â€” tell me what to activate in MFR; no write token):
     #   nightly to-add (go-forward adds, ~8pm ET) + weekly backlog sweep (full catch-up,
     #   Sun ~7pm ET, once/ISO-week, persisted-flag). Source-agnostic (enrollment_sources.REGISTRY).
     #   Toggles: MFR_TOADD_ENABLED / MFR_BACKLOG_ENABLED. (On-demand "MFR BACKLOG" via Telegram.)
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     else:
         log.info("MFR enroll disabled (MFR_TOADD_ENABLED & MFR_BACKLOG_ENABLED both false).")
 
-    # Quad early-warning (Stage 1, READ-ONLY + Telegram only — never writes the
+    # Quad early-warning (Stage 1, READ-ONLY + Telegram only â€” never writes the
     # quad). The daily Macro Show / Early Look tone front-runs the official
     # monthly/quarterly flip by ~a week; when the thematic quad runs different
     # from the official stored quad for >= 3 consecutive note-days, send ONE
@@ -369,7 +369,7 @@ if __name__ == "__main__":
         log.info("Quad early-warning disabled (QUAD_EARLYWARN_ENABLED=false).")
 
     # Morning quad-staleness ping (~6:00am ET). If the quad hasn't been confirmed in
-    # QUAD_CONFIRM_MAX_AGE_DAYS (default 1), Telegram a reminder — reply OK to
+    # QUAD_CONFIRM_MAX_AGE_DAYS (default 1), Telegram a reminder â€” reply OK to
     # confirm (stamps last-confirmed; does NOT change the quad) or QUAD: to change.
     # Never infers/auto-sets the quad. Toggle: QUAD_CONFIRM_ENABLED.
     if os.getenv("QUAD_CONFIRM_ENABLED", "true").lower() in ("true", "1", "yes"):
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     else:
         log.info("Quad morning-ping disabled (QUAD_CONFIRM_ENABLED=false).")
 
-    # Monday-evening operator-duties ping (~6:00pm ET). Reminder only — assembles
+    # Monday-evening operator-duties ping (~6:00pm ET). Reminder only â€” assembles
     # from live table state; every action routes through the existing gated commands
     # (SS:, QUAD:, PM loader CONFIRM, book ingest). Toggle: OPERATOR_PING_ENABLED.
     if os.getenv("OPERATOR_PING_ENABLED", "true").lower() in ("true", "1", "yes"):
@@ -417,7 +417,7 @@ if __name__ == "__main__":
         log.info("Operator-ping disabled (OPERATOR_PING_ENABLED=false).")
 
     # Wrapper flip-watch (~7am ET daily). Alerts when a HELD wrapper ETF's underlying
-    # trend flips (inverted for the wrapper) — e.g. META flips BEARISH so METD's
+    # trend flips (inverted for the wrapper) â€” e.g. META flips BEARISH so METD's
     # short-META thesis confirms. Additive; reads wrapper_links + the underlying trend.
     if os.getenv("WRAPPER_FLIP_ENABLED", "true").lower() in ("true", "1", "yes"):
         def _wrapper_flip_loop():
@@ -439,7 +439,7 @@ if __name__ == "__main__":
     else:
         log.info("Wrapper flip-watch disabled (WRAPPER_FLIP_ENABLED=false).")
 
-    # HTTP API — serves /api/scrape_ingest (+ /api/tape_report compat alias) so
+    # HTTP API â€” serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via
     # API_ENABLED=false. Requires a public domain on the Railway service +
@@ -476,5 +476,5 @@ if __name__ == "__main__":
     else:
         log.info("API server disabled (API_ENABLED=false).")
 
-    log.info("Hedgeye bot running — email parser → Postgres lake.")
+    log.info("Hedgeye bot running â€” email parser â†’ Postgres lake.")
     run_email_loop()

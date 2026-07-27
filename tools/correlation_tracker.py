@@ -1,8 +1,8 @@
-"""Correlation tracking + regime-shift detector.
+﻿"""Correlation tracking + regime-shift detector.
 
 NOTE: Task 12's detailed spec was truncated in the build prompt (slide
 images overwrote the text after "migrations/011_"). This is
-reconstructed from the title and the codebase conventions — review
+reconstructed from the title and the codebase conventions â€” review
 before relying on the thresholds.
 
 For a fixed set of classic macro pairs it computes the Pearson
@@ -37,7 +37,7 @@ _PAIRS = [
     ("XLK", "XLU"),   # risk-on vs risk-off rotation
 ]
 _WINDOWS = (20, 60)
-_MAGNITUDE_THRESHOLD = 0.40   # |Δcorr| over the 20d window to flag
+_MAGNITUDE_THRESHOLD = 0.40   # |Î”corr| over the 20d window to flag
 
 
 def _returns(closes: list[float]) -> list[float]:
@@ -102,7 +102,7 @@ def run(dry_run: bool = False) -> int:
         print(f"ERROR: db_pg unavailable: {e}", file=sys.stderr)
         return 2
 
-    today = dt.date.today()
+    today = dt.datetime.now(dt.timezone.utc).date()   # UTC: session-dated row
     price_cache: dict[str, list[float]] = {}
 
     def closes(t: str) -> list[float]:
@@ -197,7 +197,7 @@ def run(dry_run: bool = False) -> int:
         return 3
 
     if shifts:
-        msg = "📊 CORRELATION REGIME SHIFT\n" + "\n".join(f"- {s}" for s in shifts)
+        msg = "ðŸ“Š CORRELATION REGIME SHIFT\n" + "\n".join(f"- {s}" for s in shifts)
         print(msg)
         try:
             from notifier import send_telegram

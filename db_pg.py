@@ -18,7 +18,7 @@ import os
 import json
 import logging
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.extras
@@ -529,7 +529,11 @@ def risk_range_age(signal_date, as_of=None):
     if signal_date is None:
         return (None, False)
     if as_of is None:
-        as_of = date.today()
+        # UTC: signal_date comes from hedgeye_emails_raw.received_at, which is
+        # timestamptz, so received_at.date() is already a UTC calendar date.
+        # A local as_of would compare a UTC date against a local one and
+        # understate age by a day during the evening.
+        as_of = datetime.now(timezone.utc).date()
     age = trading_days_between(signal_date, as_of)
     return (age, age > rr_max_age_tdays())
 
@@ -579,7 +583,7 @@ def get_active_risk_ranges(as_of: date | None = None):
     today), each staleness-gated (stale rows keep their identity but have blank
     buy_trade/sell_trade/trend + stale_* breadcrumbs)."""
     if as_of is None:
-        as_of = date.today()
+        as_of = datetime.now(timezone.utc).date()   # match signal_date's UTC basis
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(
