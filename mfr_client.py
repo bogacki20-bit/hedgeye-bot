@@ -26,7 +26,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -464,7 +464,13 @@ def fetch_and_save(ticker: str, snapshot_date: date | None = None) -> dict | Non
     if not payload:
         return None
     if snapshot_date is None:
-        snapshot_date = date.today()
+        # UTC, not local. The fan-out reaches this same default from two
+        # processes in different timezones — main.py on Railway (UTC) and
+        # scanner_launcher.ps1 on the Windows box (EDT) — so a local stamp
+        # split one logical batch across two snapshot_dates whenever a run
+        # happened after 20:00 EDT. mfr_snapshots is keyed (ticker,
+        # snapshot_date), so that wrote duplicate rows for the same data.
+        snapshot_date = datetime.now(timezone.utc).date()
     flat = _flatten_for_save(payload)
 
     try:
