@@ -1,18 +1,18 @@
-"""
+﻿"""
 Risk Range Signals Parser.
 
 Reads unparsed emails from hedgeye_emails_raw, identifies Risk Range Signals
 emails by subject, extracts:
-  1. Per-ticker Risk Range rows → hedgeye_risk_ranges
-  2. TREND CHANGE blocks → hedgeye_signal_changes (change_type='trend_change')
-  3. #OUTBUCKET removals → hedgeye_signal_changes (change_type='out_bucket')
+  1. Per-ticker Risk Range rows â†’ hedgeye_risk_ranges
+  2. TREND CHANGE blocks â†’ hedgeye_signal_changes (change_type='trend_change')
+  3. #OUTBUCKET removals â†’ hedgeye_signal_changes (change_type='out_bucket')
 
 Sets classified_as = 'risk_range' (or 'risk_range_parse_failed') and parsed_at
-on the raw email row when done. Idempotent — safe to re-run; existing
+on the raw email row when done. Idempotent â€” safe to re-run; existing
 hedgeye_risk_ranges PKs are updated in place.
 
 Email format (verified against 2026-05-05 fixture):
-  Header section: "RISK RANGE™ SIGNALS", date stamp, "How to use ...".
+  Header section: "RISK RANGEâ„¢ SIGNALS", date stamp, "How to use ...".
   TREND CHANGE section: "TICKER changed from OLD to NEW" lines.
   Main table: rows of
       TICKER (TREND)
@@ -40,7 +40,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 from bs4 import BeautifulSoup
@@ -54,7 +54,7 @@ PARSER_INTERVAL    = int(os.getenv("PARSER_INTERVAL", "900"))     # 15 min
 PARSER_BATCH_SIZE  = int(os.getenv("PARSER_BATCH_SIZE", "100"))
 
 
-# ─────────────────────────── Email type detection ───────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Email type detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 RISK_RANGE_SUBJECT_PATTERNS = [
     re.compile(r"risk\s*range", re.IGNORECASE),
@@ -69,11 +69,11 @@ def is_risk_range_email(subject: str | None) -> bool:
     return any(p.search(subject) for p in RISK_RANGE_SUBJECT_PATTERNS)
 
 
-# ─────────────────────────── Patterns ───────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # Ticker tokens: uppercase letters/digits with optional . or / or - inside.
 # Covers: SPX, BRK.B, EUR/USD, UST30Y, BITCOIN.
-# Length 1-9 to be safe — Hedgeye uses up to 7 chars (BITCOIN, EUR/USD).
+# Length 1-9 to be safe â€” Hedgeye uses up to 7 chars (BITCOIN, EUR/USD).
 TICKER_TOKEN = r"[A-Z][A-Z0-9]{0,2}(?:[A-Z0-9./\-][A-Z0-9]{0,4})?"
 
 # A single number cell: digits with optional commas, optional decimal w/ 0-4 places.
@@ -112,7 +112,7 @@ OUTBUCKET_RE = re.compile(
 )
 
 
-# ─────────────────────────── Body extraction ───────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Body extraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def extract_text_from_html(html: str) -> str:
     """
@@ -271,7 +271,7 @@ def extract_outbucket(text: str, message_id: str,
     """
     Extract #OUTBUCKET entries.
 
-    Each entry has its own removal date in parens — that becomes the
+    Each entry has its own removal date in parens â€” that becomes the
     signal_date for the change row (NOT the email's date), so the change
     history is preserved correctly even across re-parses.
     """
@@ -296,7 +296,7 @@ def _valid_range(low: float, high: float) -> bool:
     return low > 0 and high > 0 and low < high
 
 
-# ─────────────────────────── Per-email parser ───────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Per-email parser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def parse_risk_range_email(raw_row: dict) -> tuple[list[dict], list[dict]]:
     """
@@ -315,9 +315,14 @@ def parse_risk_range_email(raw_row: dict) -> tuple[list[dict], list[dict]]:
     elif isinstance(received_at, date):
         signal_date = received_at
     else:
-        signal_date = date.today()
+        # UTC: the primary path above uses received_at.date(), and
+        # hedgeye_emails_raw.received_at is timestamptz, so that is a UTC
+        # calendar date. Keep this fallback on the same basis — both stamp
+        # hedgeye_risk_ranges.signal_date, which the staleness gate compares
+        # against a now-UTC as_of.
+        signal_date = datetime.now(timezone.utc).date()
 
-    # Try HTML table walk first — most robust if email is a real <table>.
+    # Try HTML table walk first â€” most robust if email is a real <table>.
     range_rows = extract_via_html_tables(body_html, message_id, signal_date)
     if not range_rows:
         # Fallback: regex against extracted/plain text
@@ -335,7 +340,7 @@ def parse_risk_range_email(raw_row: dict) -> tuple[list[dict], list[dict]]:
     return range_rows, change_rows
 
 
-# ─────────────────────────── Cycle / loop ───────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Cycle / loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
     """
@@ -346,7 +351,7 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
     those). Failed parses are classified as 'risk_range_parse_failed' so they
     don't get retried.
     """
-    import db_pg  # lazy — only needed when running against the live lake
+    import db_pg  # lazy â€” only needed when running against the live lake
     import psycopg2.extras
 
     summary = {
@@ -397,7 +402,7 @@ def run_parser_cycle(batch_size: int = PARSER_BATCH_SIZE) -> dict:
 
         if not range_rows and not change_rows:
             log.warning(f"  [{message_id}] subject matched but no rows extracted "
-                        f"— marking parse_failed for inspection")
+                        f"â€” marking parse_failed for inspection")
             db_pg.mark_email_classified(message_id, "risk_range_parse_failed")
             summary["emails_failed"] += 1
             continue
@@ -543,7 +548,7 @@ def process_one(message_id: str, *, fan_out: bool = True) -> dict:
     if change_rows:
         out["signal_changes_parsed"] = db_pg.save_signal_changes(change_rows)
 
-    # Inventory + (optional) lockstep refresh — mirrors run_parser_cycle's tail.
+    # Inventory + (optional) lockstep refresh â€” mirrors run_parser_cycle's tail.
     try:
         import ticker_inventory
         tickers_in_email: set[str] = set()
@@ -605,7 +610,7 @@ def process_one(message_id: str, *, fan_out: bool = True) -> dict:
 
 def run_parser_loop(interval: int = PARSER_INTERVAL):
     """Forever loop. Runs a parser cycle every `interval` seconds."""
-    log.info(f"Starting Risk Range parser loop — interval={interval}s, "
+    log.info(f"Starting Risk Range parser loop â€” interval={interval}s, "
              f"batch={PARSER_BATCH_SIZE}")
     while True:
         try:
@@ -617,7 +622,7 @@ def run_parser_loop(interval: int = PARSER_INTERVAL):
         time.sleep(interval)
 
 
-# ─────────────────────────── Standalone test ───────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Standalone test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _smoke_test_fixture(path: str) -> int:
     """
@@ -643,7 +648,7 @@ def _smoke_test_fixture(path: str) -> int:
 
     print(f"\n--- TREND CHANGE rows ({len(changes)}) ---")
     for r in changes:
-        print(f"  {r['ticker']:8} {r['prev_state']} → {r['new_state']}")
+        print(f"  {r['ticker']:8} {r['prev_state']} â†’ {r['new_state']}")
 
     print(f"\n--- OUTBUCKET rows ({len(outbck)}) ---")
     for r in outbck:
@@ -657,7 +662,7 @@ def _smoke_test_fixture(path: str) -> int:
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        format="%(asctime)s [%(levelname)s] %(name)s â€” %(message)s",
     )
 
     parser = argparse.ArgumentParser()

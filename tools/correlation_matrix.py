@@ -1,4 +1,4 @@
-"""Full correlation matrix + book risk-cluster read.
+﻿"""Full correlation matrix + book risk-cluster read.
 Layer 1: full-universe pairwise return correlation over 30/60/90d, upserted daily
 to correlation_matrix (latest snapshot only, not appended). Layer 2: among HELD
 positions, names with |corr|>=0.70 group into risk clusters; each cluster = one
@@ -93,8 +93,8 @@ def render_report_block():
         if not pairs: return f"BOOK RISK: {len(held)} positions (no correlation snapshot yet)"
         clusters, n_bets = book_clusters(pairs, held)
         multi = [c for c in clusters if len(c) > 1][:4]
-        cl_s = " · ".join("+".join(c) for c in multi) if multi else "none"
-        return f"BOOK RISK ({CLUSTER_WINDOW}d): {len(held)} positions ≈ {n_bets} independent bets · clusters: {cl_s}"
+        cl_s = " Â· ".join("+".join(c) for c in multi) if multi else "none"
+        return f"BOOK RISK ({CLUSTER_WINDOW}d): {len(held)} positions â‰ˆ {n_bets} independent bets Â· clusters: {cl_s}"
     except Exception as e:
         log.warning("book-risk render failed: %s", e); return f"BOOK RISK: unavailable ({e})"
 
@@ -108,7 +108,7 @@ def _persist(payload, snapshot_date):
         for w in WINDOWS:
             if p.get(w) is not None: rows.append((p["a"], p["b"], w, p[w], p["n"], snapshot_date))
     if not rows: print("no correlation rows", file=sys.stderr); return 0
-    # ON CONFLICT upserts make this idempotent — a retried persist can't dupe.
+    # ON CONFLICT upserts make this idempotent â€” a retried persist can't dupe.
     def _do():
         from psycopg2.extras import execute_values
         with db_pg.get_conn() as conn, conn.cursor() as cur:
@@ -124,14 +124,14 @@ def _persist(payload, snapshot_date):
         print(f"ERROR: persistence failed: {e}", file=sys.stderr); return 3
 
 def run(dry_run=False):
-    today = dt.date.today(); payload = _compute()
+    today = dt.datetime.now(dt.timezone.utc).date()   # UTC: session-dated row; payload = _compute()
     if not payload["pairs"]: print("ERROR: no pairs computed", file=sys.stderr); return 4
     print(f"computed {len(payload['pairs'])} pairs over {len(payload['tickers'])} names, windows {WINDOWS}")
     held = _held_names()
     if held:
         clusters, n_bets = book_clusters(payload["pairs"], held)
         multi = [c for c in clusters if len(c) > 1]
-        print(f"BOOK: {len(held)} positions ~ {n_bets} bets; clusters: {' · '.join('+'.join(c) for c in multi[:6]) or 'none'}")
+        print(f"BOOK: {len(held)} positions ~ {n_bets} bets; clusters: {' Â· '.join('+'.join(c) for c in multi[:6]) or 'none'}")
     if dry_run: print("[dry-run] no persistence."); return 0
     return _persist(payload, today)
 
