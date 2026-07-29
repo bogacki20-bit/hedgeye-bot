@@ -873,13 +873,24 @@ def run_screen_q(q: dict) -> str:
     # shown per row and mismatches carry a ⚠️ thesis flag instead of relabeling a
     # long as a "short". Source∩book composites keep source semantics unchanged.
     book_mode = bool(q["held"] and not src)
+    # sigstr membership is already sided (Keith's long/short), so the TREND gate
+    # must NOT be re-applied on top of it — that gate WAS the shorts bug.
+    sigstr_trend_exempt = (src == "sigstr")
     try:
         # Base universe: source= (whole source, incl. names not in ticker_tags/book)
         # > my book (book holdings) > default (tagged roster, bucket-filtered). Direction
         # is enforced by the mandatory TREND gate; bucket filtering only applies to the
         # tagged universe (default / posmon). posmon == the default tagged universe.
         if src and src != "posmon":
-            slice_ = _fetch_source_slice(_reg_members(src), q["sector"])
+            if src == "sigstr":
+                # SIDE-AWARE: Keith's Signal Longs/Shorts carries an explicit
+                # side, so membership itself answers the direction — see
+                # sigstr_trend_exempt below for why the TREND gate is skipped.
+                from tools.source_registry import sigstr_side
+                members = sigstr_side(q["direction"])
+            else:
+                members = _reg_members(src)
+            slice_ = _fetch_source_slice(members, q["sector"])
             if q["held"]:                        # source ∩ book (composable)
                 slice_ = [r for r in slice_ if r["held"]]
         elif q["held"]:
@@ -957,6 +968,12 @@ def run_screen_q(q: dict) -> str:
             r["_thesis"] = ((raw == "long" and td == "BEARISH") or
                             (raw == "short" and td == "BULLISH"))
         after_trend = ranged
+    elif sigstr_trend_exempt:
+        # Keith's list IS the directional call. Re-applying trend_dir=='BEARISH'
+        # on top was the bug: it silently dropped Keith's shorts whose COALESCEd
+        # trend had not yet turned (and admitted unrelated bearish names). Side
+        # comes from the source; the ranges still screen the names below.
+        after_trend = ranged
     else:
         after_trend = [r for r in ranged if (r["trend_dir"] or "") == req_trend]
     if q["near"] == "bottom":
@@ -1001,6 +1018,9 @@ def run_screen_q(q: dict) -> str:
     if book_mode:
         head = (f"🔎 SCREEN — {' · '.join(filt)}  (side = POSITION side; "
                 f"TREND shown per row, ⚠️ = trend against position)")
+    elif sigstr_trend_exempt:
+        head = (f"🔎 SCREEN — {' · '.join(filt)}  (side from Keith's Signal "
+                f"Longs/Shorts; no TREND gate — the list IS the call)")
     else:
         head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
 
@@ -1039,7 +1059,10 @@ def run_screen_q(q: dict) -> str:
             (f"{base_lbl}: {pre_side_n}" if book_mode else f"{base_lbl}: {len(slice_)}"),
             (f"→ {side_lbl}:         {len(slice_)}" if book_mode else None),
             f"→ has MFR range:           {len(ranged)}",
-            (None if book_mode else f"→ TREND={req_trend} (Rule-1): {len(after_trend)}"),
+            (None if book_mode else
+             (f"→ side={q['direction'][:-1]} (Keith's list): {len(after_trend)}"
+              if sigstr_trend_exempt
+              else f"→ TREND={req_trend} (Rule-1): {len(after_trend)}")),
             f"→ {near_lbl}:              {len(after_near)}",
             (f"→ momentum_ok:             {len(after_mom)}" if q["momentum"] else None),
             (f"→ {q['cloud']}-cloud:            {len(after_cloud)}" if q["cloud"] else None),
@@ -1051,7 +1074,8 @@ def run_screen_q(q: dict) -> str:
                       ("has-range", len(ranged))]
         else:
             stages = [(base_lbl, len(slice_)), ("has-range", len(ranged)),
-                      (f"TREND={req_trend}", len(after_trend))]
+                      ((f"side={q['direction'][:-1]}" if sigstr_trend_exempt
+                        else f"TREND={req_trend}"), len(after_trend))]
         if q["near"]:     stages.append((near_lbl, len(after_near)))
         if q["momentum"]: stages.append(("momentum_ok", len(after_mom)))
         if q["cloud"]:    stages.append((f"{q['cloud']}-cloud", len(after_cloud)))
@@ -1065,7 +1089,9 @@ def run_screen_q(q: dict) -> str:
     # ⛔ gated-by-TREND — matched the tier but failed Rule-1. Full list on "show
     # gated"; otherwise a one-line breadcrumb so nothing disappears silently.
     # Book mode: TREND never gates a held row — mismatches are ⚠️-flagged inline.
-    gated = [] if book_mode else sorted(
+    # sigstr is trend-exempt, so nothing was gated — reporting a gated count
+    # here would contradict the rows actually returned.
+    gated = [] if (book_mode or sigstr_trend_exempt) else sorted(
         [r for r in ranged if (r["trend_dir"] or "") != req_trend],
         key=lambda r: (r["range_pos"] is None,
                        float(r["range_pos"]) if r["range_pos"] is not None else 0),

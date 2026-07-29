@@ -51,8 +51,42 @@ def _keiths() -> set:
     return _members("SELECT DISTINCT ticker FROM hedgeye_keiths_signals "
                     "WHERE signal_date = (SELECT max(signal_date) FROM hedgeye_keiths_signals)")
 
+def sigstr_side(direction: str | None = None) -> set:
+    """Signal Strength membership, SIDE-AWARE, from Keith's Signal Longs/Shorts.
+
+    Delegates to tools.active_slice.source_breakdown(), which already selects
+    `side` from hedgeye_keiths_signals at MAX(signal_date) behind the 14-day
+    staleness gate. ONE source of truth — do not hand-write that query here or
+    the two copies drift.
+
+    direction: 'shorts' -> side=short, 'longs' -> side=long, None -> both.
+
+    Replaces the old ss_roster_current read, which had NO side column: every
+    membership row looked identical, so a `shorts` screen fell through to the
+    bucket + trend_dir='BEARISH' gate and returned whatever happened to be
+    bearish (JBS, a staple) instead of Keith's shorts. ss_roster_current is fed
+    by the "Signal Strength Stocks" email — a different product from Keith's
+    sided list, which arrives weekly from Hedgeye Financials Sector Pro.
+    """
+    try:
+        from tools.active_slice import source_breakdown
+        bd = source_breakdown() or {}
+    except Exception as e:
+        log.warning("sigstr: active_slice unavailable (%s)", e)
+        return set()
+    longs = {str(t).upper() for t in (bd.get("signal_strength_long") or [])}
+    shorts = {str(t).upper() for t in (bd.get("signal_strength_short") or [])}
+    d = (direction or "").lower()
+    if d.startswith("short"):
+        return shorts
+    if d.startswith("long"):
+        return longs
+    return longs | shorts
+
+
 def _sigstr() -> set:
-    return _members("SELECT ticker FROM ss_roster_current")
+    # Undirected callers (source listing, freshness probe) get both sides.
+    return sigstr_side(None)
 
 def _posmon() -> set:
     return _members("SELECT ticker FROM ticker_tags WHERE hedgeye_bucket_0629 IS NOT NULL")
