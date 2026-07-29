@@ -83,6 +83,25 @@ _DIR_BUCKETS = {
     "shorts": (["active_short", "top_idea_short", "short_bench"], "BEARISH"),
 }
 
+
+def _spans_overlap(span, spans) -> bool:
+    """Does (start, end) overlap any already-consumed span?"""
+    a, b = span
+    return any(a < e and s < b for s, e in spans)
+
+
+def _sided_keiths(src, direction) -> bool:
+    """Does this (source, direction) resolve to Keith's SIDED financials list?
+
+    'financials signal strength' -> always (both sides are sided there).
+    'signal strength'            -> SHORTS only; its LONGS stay on the broad
+                                    ss_roster_current roster, which is the
+                                    ~68-name product and keeps the TREND gate.
+    """
+    if src == "finsigstr":
+        return True
+    return src == "sigstr" and (direction or "").startswith("short")
+
 # In-memory pending SCREEN query per chat_id. No DB writes (the listener is a single
 # long-running thread, so a module dict persists across messages within the process).
 _PENDING: dict = {}
@@ -148,11 +167,17 @@ def parse_query(text: str) -> dict:
         q["everything"] = True
         consumed.append(m.span())
 
+    # Sector must not re-match text the SOURCE lens already claimed: in
+    # "financials signal strength longs" the word financials IS the source name,
+    # not a sector filter. Without this, that query set sector=Financials too and
+    # silently dropped Keith's non-financials-sector longs (COMP is Real Estate,
+    # EXPN is Industrials) from a list that is financials-by-construction.
     for pat, canon in _SECTORS:
-        m = re.search(pat, s)
-        if m:
+        hit = next((m for m in re.finditer(pat, s)
+                    if not _spans_overlap(m.span(), consumed)), None)
+        if hit:
             q["sector"] = canon
-            consumed.append(m.span())
+            consumed.append(hit.span())
             break
     m = re.search(r"\bshorts?\b", s)
     if m:
@@ -873,19 +898,24 @@ def run_screen_q(q: dict) -> str:
     # shown per row and mismatches carry a ⚠️ thesis flag instead of relabeling a
     # long as a "short". Source∩book composites keep source semantics unchanged.
     book_mode = bool(q["held"] and not src)
-    # sigstr membership is already sided (Keith's long/short), so the TREND gate
-    # must NOT be re-applied on top of it — that gate WAS the shorts bug.
-    sigstr_trend_exempt = (src == "sigstr")
+    # Membership from Keith's sided list already answers the direction, so the
+    # TREND gate must NOT be re-applied on top of it — that gate WAS the shorts
+    # bug. The BROAD roster (signal strength longs) keeps its mandatory gate.
+    sigstr_trend_exempt = _sided_keiths(src, q["direction"])
     try:
         # Base universe: source= (whole source, incl. names not in ticker_tags/book)
         # > my book (book holdings) > default (tagged roster, bucket-filtered). Direction
         # is enforced by the mandatory TREND gate; bucket filtering only applies to the
         # tagged universe (default / posmon). posmon == the default tagged universe.
         if src and src != "posmon":
-            if src == "sigstr":
-                # SIDE-AWARE: Keith's Signal Longs/Shorts carries an explicit
-                # side, so membership itself answers the direction — see
-                # sigstr_trend_exempt below for why the TREND gate is skipped.
+            # SIGNAL-STRENGTH ROUTING — four cases, two different products:
+            #   signal strength longs             -> BROAD ss_roster_current, TREND gate ON
+            #   signal strength shorts            -> Keith's side=short, no gate
+            #   financials signal strength longs  -> Keith's side=long,  no gate
+            #   financials signal strength shorts -> Keith's side=short, no gate
+            # The broad roster is side-less, so only its LONGS reading is
+            # meaningful; its shorts direction routes to Keith's sided list.
+            if _sided_keiths(src, q["direction"]):
                 from tools.source_registry import sigstr_side
                 members = sigstr_side(q["direction"])
             else:

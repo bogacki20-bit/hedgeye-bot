@@ -85,7 +85,19 @@ def sigstr_side(direction: str | None = None) -> set:
 
 
 def _sigstr() -> set:
-    # Undirected callers (source listing, freshness probe) get both sides.
+    """BROAD Signal Strength — the ~68-name 'Signal Strength Stocks' roster.
+
+    Deliberately NOT Keith's list. These are two different Hedgeye products:
+    this one is the daily broad Add/Remove roster (side-less by nature), while
+    Keith's Signal Longs/Shorts is a financials-sector product with an explicit
+    side. Only the SHORTS direction routes to Keith's — see sigstr_side and the
+    routing table in screener.run_screen_q.
+    """
+    return _members("SELECT ticker FROM ss_roster_current")
+
+
+def _finsigstr() -> set:
+    """Financials Signal Strength — both sides of Keith's list, for listings."""
     return sigstr_side(None)
 
 def _posmon() -> set:
@@ -156,6 +168,14 @@ REGISTRY = [
     Source("sigstr",  "Signal Strength",     _sigstr,
            ["signal strength", "sigstr", "ss", "strength"],
            "SELECT max(added_on) FROM ss_roster_current"),
+    # Distinct product from the broad roster above: Keith's Signal Longs/Shorts,
+    # weekly from Hedgeye Financials Sector Pro, financials-only, explicitly
+    # sided. Aliases are longer than "signal strength" and _source_phrase_list()
+    # sorts by descending length, so these match first.
+    Source("finsigstr", "Financials Signal Strength", _finsigstr,
+           ["financials signal strength", "financial signal strength",
+            "financials sigstr", "fin signal strength", "financials ss"],
+           "SELECT max(signal_date) FROM hedgeye_keiths_signals"),
     Source("posmon",  "Position Monitor",    _posmon,
            ["position monitor", "posmon", "pm", "buckets"],
            None),   # static 06-29 seed, no live feed
