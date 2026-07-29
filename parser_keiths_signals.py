@@ -57,6 +57,59 @@ def upsert_rows(rows, signal_date, feed_id, mid) -> dict:
     return {"written": w, "failed": f}
 
 
+def sync_to_corpus(message_id, subject, received_at, body, rows) -> bool:
+    """Mirror the Keith's Signal email into corpus_documents.
+
+    Previously this parser wrote ONLY the structured rows to
+    hedgeye_keiths_signals, so active_slice / SCREEN saw the sides but the RAG
+    layer and decision_engine._get_corpus_snippets saw nothing — a "why is AXP a
+    short this week" lookup returned no narrative at all. parser_research_notes
+    and parser_portfolio_solutions both mirror their publications; this one did
+    not.
+
+    Uses db_pg._insert_corpus_document, the shared writer. captured_dt is the
+    email's received_at, so source_ref is that timestamp and a re-parse of the
+    same email UPDATEs in place rather than duplicating.
+    """
+    import db_pg
+    if received_at is None:
+        log.warning("keiths corpus: no received_at for %s; skipping", message_id)
+        return False
+    longs = sorted({r["ticker"] for r in rows
+                    if "long" in (r.get("side") or "").lower()})
+    shorts = sorted({r["ticker"] for r in rows
+                     if "short" in (r.get("side") or "").lower()})
+    md = {
+        "product":        "Keith's Signal Longs/Shorts",
+        "classification": CLASSIFIED,
+        "message_id":     message_id,
+        "subject":        subject,
+        "signal_date":    str(received_at.date()),
+        "longs":          longs,
+        "shorts":         shorts,
+        "n_long":         len(longs),
+        "n_short":        len(shorts),
+    }
+    try:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            inserted = db_pg._insert_corpus_document(
+                cur,
+                source="keiths_signals",
+                captured_dt=received_at,
+                title=subject or "Keith's Signal Longs/Shorts",
+                raw_text=body,
+                metadata=md,
+                document_type="keiths_signals_email",
+            )
+            conn.commit()
+        return bool(inserted)
+    except Exception as e:
+        # Never fail the parse over the corpus mirror — the structured rows
+        # (which SCREEN and active_slice depend on) are already committed.
+        log.warning("keiths_signals corpus sync failed: %s", e)
+        return False
+
+
 def _stamp(mid, c=CLASSIFIED):
     import db_pg
     try:
@@ -106,6 +159,7 @@ def process_email(message_id: str, *, dry_run=False, fan_out=False) -> dict:
         return summ
     summ["upsert"] = upsert_rows(rows, sd, prc.feed_item_id(body), message_id)
     summ["noted_in_inventory"] = _note(rows, message_id)
+    summ["corpus"] = sync_to_corpus(message_id, subject, received_at, body, rows)
     _stamp(message_id)
     return summ
 
