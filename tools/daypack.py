@@ -30,6 +30,24 @@ DOC_CAP = 40_000          # per-doc chars included in the pack
 OMIT_OVER = 150_000       # bigger than this -> omit with a loud note
 LOOKBACK_HOURS = 24
 
+# Kinds the operator sends to the LLM himself, so bundling the full text here
+# only burns pack space (2026-07-29: Tier One Alpha). Still ingested and
+# deep-parsed on upload — t1a_daily keeps building.
+EXCLUDED_DOC_KINDS = ("tier1alpha",)
+
+
+def drop_excluded(rows, excluded=EXCLUDED_DOC_KINDS):
+    """Pure: (kept_rows, {kind: n_dropped}). `rows` are doc_uploads tuples
+    shaped (id, file_name, kind, note_date, char_count, content_text)."""
+    kept, dropped = [], {}
+    for r in rows:
+        kind = r[2]
+        if kind in excluded:
+            dropped[kind] = dropped.get(kind, 0) + 1
+        else:
+            kept.append(r)
+    return kept, dropped
+
 
 def _hdr(title: str) -> str:
     return f"\n{'=' * 8} {title} {'=' * 8}\n"
@@ -74,6 +92,12 @@ def build_daypack() -> str:
         skipped = [f"{r[2]}·id{r[0]}" for r in rows
                    if latest_of[r[2]][0] != r[0]]
         rows = [latest_of[k] for k in sorted(latest_of)]
+        rows, dropped_kinds = drop_excluded(rows)
+        for k, n in sorted(dropped_kinds.items()):
+            parts.append(_hdr("UPLOADED DOCS")
+                         + f"{k} excluded by operator setting "
+                           f"({n} doc{'s' if n > 1 else ''} in window) — send "
+                           f"it to the LLM directly.")
         if skipped:
             parts.append(_hdr("UPLOADED DOCS")
                          + f"older duplicates skipped (latest-per-kind "

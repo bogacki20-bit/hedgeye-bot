@@ -44,8 +44,14 @@ _KIND_PATTERNS = [
     # (kind, filename regex, content regex) — first hit wins, top-down
     # Broker CSVs FIRST: they overwrite the real book, so they must out-rank any
     # note/report pattern. Content regexes match the Fidelity export header row.
-    ("fidelity_positions", r"portfolio_positions.*\.csv", r"account (number|name).*symbol"),
-    ("fidelity_actions",   r"accounts_history.*\.csv",    r"run date.*action.*symbol"),
+    ("fidelity_positions", r"portfolio[_\s-]*positions.*\.csv",
+     r"account\s*(number|name).*symbol"),
+    # 'Accounts_History*.csv' (all accounts) AND 'History_for_Account_*.csv'
+    # (one account) — the second form used to miss the filename regex and get
+    # rescued only by content, which cost it its account number.
+    ("fidelity_actions",
+     r"accounts[_\s-]*history.*\.csv|history[_\s-]*for[_\s-]*account.*\.csv",
+     r"run\s*date.*action.*symbol"),
     ("founders_note_am",
      rf"founders?_?\s*note.*{_AM}|{_AM}.*founders?",
      rf"founder'?s\s+note.*{_AM}|{_AM}[\s\w]*founder'?s\s+note"),
@@ -470,7 +476,8 @@ def handle_doc_buffer(text):
     return f"📋 {n} chunks…" if n % _ACK_EVERY == 0 else ""
 
 
-def _handle_fidelity_upload(kind: str, file_name: str, data: bytes) -> str:
+def _handle_fidelity_upload(kind: str, file_name: str, data: bytes,
+                            caption: str = "") -> str:
     """Broker CSV is the source of truth: write it to a temp file (keeping the
     ORIGINAL filename so the importer can read the snapshot date), overwrite the
     book (positions) or actions_log (actions), and return a diff reply. Wrapped
@@ -485,9 +492,13 @@ def _handle_fidelity_upload(kind: str, file_name: str, data: bytes) -> str:
         tmp = os.path.join(tmpdir, os.path.basename(file_name))
         with open(tmp, "wb") as f:
             f.write(data)
+        # Operator escape hatch: caption the file FORCE to bypass the
+        # stale-date / truncation refusals (the bot can't know you really did
+        # liquidate). Nothing else in the caption matters here.
+        force = "FORCE" in (caption or "").upper()
         if kind == "fidelity_positions":
             import ingest_fidelity
-            res = ingest_fidelity.ingest(tmp)
+            res = ingest_fidelity.ingest(tmp, force=force)
             rec = ingest_fidelity.reconcile_book(res["snapshot_date"])
 
             def _fmt(xs, cap=12):
@@ -497,24 +508,65 @@ def _handle_fidelity_upload(kind: str, file_name: str, data: bytes) -> str:
                                               if len(xs) > cap else "")
             anom = res.get("anomalies") or []
             anom_s = f" · ⚠{len(anom)} parse anomalies" if anom else ""
-            return (f"📒 Book synced to broker ({res['snapshot_date']}). "
+            # The snapshot is REPLACED, so say so out loud with the row counts
+            # — 'synced' with no numbers was what hid the stale-book bug.
+            repl = res.get("deleted") or 0
+            accts = res.get("accounts") or []
+            repl_s = (f" (replaced {repl} prior rows at this date)"
+                      if repl else "")
+            acct_s = (f" · accounts in file: {', '.join(accts)}"
+                      if accts else "")
+            return (f"📒 Book REPLACED from broker ({res['snapshot_date']})"
+                    f"{repl_s}{acct_s}{' · ⚠FORCED' if force else ''} — this "
+                    f"snapshot is now what every report reads. "
                     f"+{len(rec['added'])} (broker holds, bot was missing): "
                     f"{_fmt(rec['added'])} · "
                     f"−{len(rec['removed'])} (bot had, broker closed): "
                     f"{_fmt(rec['removed'])} · {rec['unchanged']} unchanged · "
                     f"{res['rows']} positions written{anom_s}")
-        # fidelity_actions
+        # fidelity_actions — three writes, each reported separately so a
+        # partial failure is visible: actions_log (ML corpus + reconcile),
+        # book_activity (fills history), outcomes_log (round-trip P&L).
         from tools import import_fidelity_trades
         res = import_fidelity_trades.ingest(tmp)
-        errs = res.get("errors") or []
+        errs = list(res.get("errors") or [])
+        parts = [f"🧾 Actions: {res.get('rows_inserted', 0)} new, "
+                 f"{res.get('rows_dup_skipped', 0)} dup, "
+                 f"{res.get('rows_non_trade_skipped', 0)} non-trade, of "
+                 f"{res.get('rows_seen', 0)} seen"]
+        try:
+            import ingest_fidelity
+            act = ingest_fidelity.ingest_activity(tmp)
+            parts.append(f"book_activity +{act['rows']} "
+                         f"({act['dropped_spending']} spending dropped)")
+        except SystemExit as e:
+            errs.append(f"book_activity refused: {e}")
+        except Exception as e:
+            log.exception("book_activity ingest failed")
+            errs.append(f"book_activity FAILED: {e}")
+        try:
+            # Full FIFO recompute — lot matching needs the whole history, and
+            # outcomes_log is ON CONFLICT DO NOTHING, so re-running is free.
+            from tools import compute_outcomes
+            rc = compute_outcomes.run()
+            parts.append("P&L outcomes recomputed"
+                         if rc == 0 else f"⚠ outcomes recompute rc={rc}")
+        except Exception as e:
+            log.exception("compute_outcomes failed")
+            errs.append(f"outcomes FAILED: {e}")
         err_s = f" · ⚠{'; '.join(errs)}" if errs else ""
-        return (f"🧾 Actions synced to broker: {res.get('rows_inserted', 0)} "
-                f"inserted, {res.get('rows_dup_skipped', 0)} dup-skipped, "
-                f"{res.get('rows_non_trade_skipped', 0)} non-trade, of "
-                f"{res.get('rows_seen', 0)} seen{err_s}")
+        return " · ".join(parts) + err_s
     except SystemExit as e:
         return f"🛑 {file_name}: broker ingest refused — {e}"
     except Exception as e:
+        try:
+            from ingest_fidelity import StaleUploadError
+        except Exception:
+            StaleUploadError = ()
+        if StaleUploadError and isinstance(e, StaleUploadError):
+            return (f"🛑 {file_name}: NOT written — {e}\n"
+                    f"(nothing changed; the book still reads the newer "
+                    f"snapshot)")
         log.exception("fidelity ingest failed for %s", file_name)
         return f"🛑 {file_name}: broker ingest FAILED — {e}"
     finally:
@@ -549,7 +601,8 @@ def handle_telegram_document(token: str, document: dict,
     # Broker CSVs overwrite the REAL book — route to the importer. The
     # doc_uploads row above stays as the audit trail; the book write is the point.
     if kind in ("fidelity_positions", "fidelity_actions"):
-        return f"{_handle_fidelity_upload(kind, file_name, data)}\n[id {row_id}]"
+        return (f"{_handle_fidelity_upload(kind, file_name, data, caption)}"
+                f"\n[id {row_id}]")
     preview = re.sub(r"\s+", " ", (text or "")[:PREVIEW_CHARS]).strip()
     reply = summary_reply(kind, note_date, len(text or ""), file_name,
                           note=note, preview=preview)

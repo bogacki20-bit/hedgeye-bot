@@ -79,14 +79,28 @@ def ingest(csv_path: str | Path) -> dict:
         lines = f.readlines()
     header_idx = None
     for i, line in enumerate(lines):
-        if line.lstrip().startswith("Run Date"):
+        # Casing- and quote-tolerant (2026-07-29): Fidelity re-cased its
+        # exports in July and this importer never got the fix ingest_fidelity
+        # got, so a re-cased file parsed to 0 trades and reported success.
+        if line.lstrip().lstrip('"﻿').lower().startswith("run date"):
             header_idx = i
             break
     if header_idx is None:
-        summary["errors"].append("could not find 'Run Date' header row")
+        summary["errors"].append("could not find a 'Run Date' header row "
+                                 "(any casing) — is this Accounts_History?")
         return summary
 
-    reader = csv.DictReader(lines[header_idx:])
+    from ingest_fidelity import ACCT_IN_NAME_RE, canon_header
+    fieldnames = [canon_header(h) for h in next(csv.reader([lines[header_idx]]))]
+    reader = csv.DictReader(lines[header_idx + 1:], fieldnames=fieldnames)
+    # Per-account exports carry no 'Account Number' column; recover it from the
+    # filename so rows don't land blank and collapse under the dedupe key.
+    _m = ACCT_IN_NAME_RE.search(p.name)
+    acct_fallback = _m.group(1) if _m else ""
+    if "Account Number" not in fieldnames and not acct_fallback:
+        summary["errors"].append("no 'Account Number' column and none in the "
+                                 "filename — rows would store blank-account")
+        return summary
     _quad_cache: dict = {}   # run_date -> (monthly, quarterly). One lookup per
     #                          distinct date on the EXISTING connection — the
     #                          old per-row db_pg.get_conn() re-dialed Railway
@@ -105,7 +119,8 @@ def ingest(csv_path: str | Path) -> dict:
                     continue
                 run_date = _date(row.get("Run Date"))
                 settle_date = _date(row.get("Settlement Date"))
-                acct = (row.get("Account Number") or "").strip().strip('"')
+                acct = ((row.get("Account Number") or "").strip().strip('"')
+                        or acct_fallback)
                 # Quad regime stamping (2026-05-28): look up the regime
                 # effective on the trade's run_date so historical CSV
                 # ingests retroactively land in the right Quad slice.

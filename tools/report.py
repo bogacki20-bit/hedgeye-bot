@@ -213,6 +213,56 @@ def candidates_line(rows, cap=12) -> str:
     return "CANDIDATES: " + " ".join(parts) + more + f"  {rule}"
 
 
+def fmt_fills(rows, latest, today, cap=14) -> str:
+    """Pure: today's executed fills from actions_log.
+
+    rows: [(symbol, action_raw, qty, price)] for `today` only.
+    latest: max(run_date) present in actions_log (date | None) — printed when
+    there are no fills today, so a book the operator forgot to sync reads as
+    STALE rather than as a quiet 'nothing happened'.
+
+    Aggregated per (symbol, side) with a size-weighted average price. Buys are
+    +, sells are −; a same-day round trip prints both legs."""
+    if not rows:
+        if latest is None:
+            return ("FILLS: none today · actions_log EMPTY (send "
+                    "Accounts_History.csv — no trade history at all)")
+        age = (today - latest).days
+        stale = (f" · ⚠{age}d stale — send Accounts_History.csv"
+                 if age >= 1 else "")
+        return f"FILLS: none today · actions_log latest {latest}{stale}"
+    agg: dict = {}
+    for sym, action, qty, price in rows:
+        a = (action or "").upper()
+        side = "+" if "BOUGHT" in a else ("-" if "SOLD" in a else "?")
+        q = abs(float(qty)) if qty is not None else 0.0
+        c = agg.setdefault((sym or "?", side), [0.0, 0.0, 0])
+        c[0] += q
+        if price is not None:
+            c[1] += q * float(price)
+        c[2] += 1
+    parts = []
+    for (sym, side), (q, notional, n) in sorted(agg.items()):
+        px = (notional / q) if q else None
+        parts.append(f"{side}{q:g} {sym}"
+                     + (f"@{px:,.2f}" if px else "")
+                     + (f"×{n}" if n > 1 else ""))
+    more = f" +{len(parts) - cap} more" if len(parts) > cap else ""
+    return (f"FILLS today ({len(rows)}): " + " · ".join(parts[:cap]) + more)
+
+
+def fills_line(cur) -> str:
+    today = date.today()
+    cur.execute("""SELECT COALESCE(normalized_symbol, raw_symbol), action,
+                          qty, price
+                   FROM actions_log WHERE run_date = %s ORDER BY id""",
+                (today,))
+    rows = cur.fetchall()
+    cur.execute("SELECT max(run_date) FROM actions_log")
+    r = cur.fetchone()
+    return fmt_fills(rows, r[0] if r else None, today)
+
+
 def _money(v) -> str:
     return f"${v:,.0f}"
 
@@ -534,15 +584,18 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         except Exception as e:
             lines.append(f"CANDIDATES: unavailable ({e})")
 
-        # ── T1A regime facts (parsed from the day's Tier One Alpha upload;
-        #    rides into DAYPACK via this line — operator spec 7/12) ──
+        # ── T1A removed from the report body 2026-07-29 (operator): Tier One
+        #    Alpha goes straight to the LLM as its own upload. tools/t1a_parse
+        #    still runs on ingest and t1a_daily keeps building — it just
+        #    doesn't spend report space. Same for the DAYPACK doc bundle.
+
+        # ── FILLS: what actually got executed today (actions_log). Added
+        #    2026-07-29 — the actions CSV used to write a table no report
+        #    read, so uploading it changed nothing visible. ──
         try:
-            from tools.t1a_parse import latest_line
-            t1a = latest_line()
-            lines.append(t1a if t1a else
-                         "T1A: n/a (no Tier One Alpha upload parsed yet)")
+            lines.append(fills_line(cur))
         except Exception as e:
-            lines.append(f"T1A: unavailable ({e})")
+            lines.append(f"FILLS: unavailable ({e})")
 
         # ── P4 alert contents ──
         try:
