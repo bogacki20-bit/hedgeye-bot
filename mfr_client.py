@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -42,6 +43,90 @@ MFR_BACKOFF = (1, 3, 7)           # seconds between attempts
 MFR_REQUEST_SPACING = float(os.environ.get("MFR_REQUEST_SPACING_SEC", "0.34"))  # ~3 req/s
 FANOUT_MIN_PCT = 0.95             # squawk if a watchlist fan-out covers less than this
 FANOUT_PCT_KEY = "mfr_fanout_last_pct"
+
+# ── watchlist-read observability (2026-07-30) ───────────────────────────────
+# list_watchlist() returns [] on auth error / timeout / changed response shape and
+# says so only in a log line nobody reads. On 2026-07-20 that produced the bogus
+# "456 backlog" — 439 of those names were already activated; the diff subtracted an
+# EMPTY watchlist. These keys make every read leave a trace, so an empty answer can
+# be told apart from a genuinely empty account.
+WL_COUNT_KEY  = "mfr_watchlist_last_count"     # names returned by the last read
+WL_OK_AT_KEY  = "mfr_watchlist_last_ok_at"     # ISO ts of the last NON-empty read
+WL_ERR_KEY    = "mfr_watchlist_last_error"     # "" when the last read was clean
+WL_ALERT_KEY  = "mfr_watchlist_alert_at"       # Telegram squawk throttle
+WL_ALERT_THROTTLE_MIN = 180
+
+
+def _bs_write(pairs: dict) -> None:
+    """Best-effort bot_state writes. Never raises into a caller."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            for k, v in pairs.items():
+                cur.execute(
+                    "INSERT INTO bot_state (key, value, updated_at) "
+                    "VALUES (%s, %s, NOW()) ON CONFLICT (key) DO UPDATE SET "
+                    "value=EXCLUDED.value, updated_at=NOW()", (k, str(v)))
+            conn.commit()
+    except Exception as e:
+        log.warning("bot_state write failed (%s): %s", ",".join(pairs), e)
+
+
+def _bs_read(key):
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM bot_state WHERE key=%s", (key,))
+            r = cur.fetchone()
+        return r[0] if r and r[0] else None
+    except Exception:
+        return None
+
+
+def _record_watchlist_read(count: int, err: str | None, status=None) -> None:
+    """Persist the outcome of one list_watchlist() call and squawk (throttled) when a
+    read that used to work comes back empty. A silent [] is what made the 7/20 backlog
+    lie; this makes it audible."""
+    now = datetime.now(timezone.utc).isoformat()
+    pairs = {WL_COUNT_KEY: count, WL_ERR_KEY: err or ""}
+    if count > 0:
+        pairs[WL_OK_AT_KEY] = now
+    _bs_write(pairs)
+    if count > 0:
+        return
+    last_ok = _bs_read(WL_OK_AT_KEY)
+    if not last_ok:
+        return                       # never had a good read — nothing to compare to
+    last_alert = _bs_read(WL_ALERT_KEY)
+    if last_alert:
+        try:
+            age = (datetime.now(timezone.utc)
+                   - datetime.fromisoformat(last_alert)).total_seconds() / 60.0
+            if age < WL_ALERT_THROTTLE_MIN:
+                return
+        except Exception:
+            pass
+    # notifier sends parse_mode=Markdown and swallows the HTTP error. A raw dict
+    # repr sliced mid-structure carries unbalanced _ * ` [ ] and gets rejected 400
+    # — which would mute the shape-change alarm in exactly the case it exists for.
+    safe_err = re.sub(r"[_*`\[\]]", " ", (err or "none"))[:300]
+    try:
+        from notifier import send_telegram
+        sent = send_telegram(
+            "MFR watchlist",
+            f"⚠️ MFR watchlist read returned 0 names "
+            f"(status={status}, err={safe_err}). Last good read: "
+            f"{last_ok[:19]}. Enrollment backlog + nightly fan-out are "
+            f"BLOCKED until this clears — a 0-length watchlist makes "
+            f"every name look un-enrolled (the 7/20 '456' failure).",
+            priority=2)
+    except Exception as e:
+        log.warning("watchlist squawk failed: %s", e)
+        sent = False
+    # Stamp the throttle only on a SUCCESSFUL send — otherwise a failed alert
+    # silences the next 3 hours of real ones.
+    if sent is not False:
+        _bs_write({WL_ALERT_KEY: now})
 
 
 def _http_get_json(url, *, timeout=MFR_TIMEOUT, retries=MFR_MAX_RETRIES):
@@ -95,25 +180,46 @@ def list_watchlist() -> list[str]:
     token = _resolve_token()
     if not token:
         log.warning("MFR_API_TOKEN not set; cannot list watchlist")
+        _record_watchlist_read(0, "MFR_API_TOKEN not set")
         return []
     url = f"{MFR_BASE}?token={token}"
     # Retries transient timeouts — one 20s blip used to no-op the ENTIRE fan-out.
     status, data, err = _http_get_json(url)
     if data is None:
         log.warning("MFR watchlist fetch failed (status=%s): %s", status, err)
+        _record_watchlist_read(0, f"fetch failed: {err}", status)
         return []
     items = data.get("data") if isinstance(data, dict) else data
     if not isinstance(items, list):
-        log.warning("MFR watchlist unexpected shape: %s", str(data)[:200])
+        shape = f"unexpected shape: {str(data)[:200]}"
+        log.warning("MFR watchlist %s", shape)
+        _record_watchlist_read(0, shape, status)
         return []
     out: set[str] = set()
+    skipped = 0
     for it in items:
         if not isinstance(it, dict):
+            skipped += 1
             continue
         p = it.get("payload") or {}
         t = p.get("ticker")
         if t and isinstance(t, str):
             out.add(t.strip().upper())
+        else:
+            skipped += 1
+    # A 200 with rows but no parseable tickers is a SHAPE CHANGE, not an empty
+    # account — the single most likely cause of the 7/20 failure. Say so.
+    note = None
+    if items and not out:
+        note = (f"200 OK with {len(items)} rows but ZERO parseable tickers "
+                f"— payload.ticker shape changed? first row: {str(items[0])[:160]}")
+        log.error("MFR watchlist %s", note)
+    elif skipped:
+        log.warning("MFR watchlist: %d/%d rows had no payload.ticker",
+                    skipped, len(items))
+    log.info("MFR watchlist read: %d tickers (status=%s, rows=%d)",
+             len(out), status, len(items))
+    _record_watchlist_read(len(out), note, status)
     return sorted(out)
 
 

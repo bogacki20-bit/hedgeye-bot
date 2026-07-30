@@ -152,10 +152,30 @@ stage that hit 0.
   *(handler: `tools/source_registry.py`)*
 
 ### `MFR BACKLOG`
-- **Syntax:** `MFR BACKLOG` (also `/mfrbacklog`)
-- Roster names not yet active in MFR (what to paste into MFR → Activate
-  Assets). Read-only — the bot **never writes to MFR** (read API only,
-  enroll-never-remove). *(handler: `tools/enrollment.py`)*
+- **Syntax:** `MFR BACKLOG` · `MFR BACKLOG WHY` · `MFR BACKLOG FORCE`
+  (also `/mfrbacklog`; options combine, whitespace and casing are forgiving)
+- Roster names not yet active in MFR. The plain form prints an `origin:` count
+  summary followed by the **complete** list — that list is the paste target for
+  MFR → Activate Assets, and it is never truncated.
+- `WHY` — the same backlog grouped by the exact feed combination that put each
+  name there (`[posmon] 433: …`, `[book+posmon] 12: …`). Explanatory only:
+  names are capped per group, so **don't paste from this view**. Use it when a
+  ticker you don't recognise shows up — usually `posmon`, the frozen 6/29
+  Position Monitor seed, which is Hedgeye's whole Long/Short List.
+- `FORCE` — bypass the watchlist guard below, and rebase it.
+- **Watchlist guard (2026-07-30):** the backlog is a subtraction — universe
+  minus what's active in MFR. If `list_watchlist()` returns 0 names, or the
+  count collapses below 60% of its high-water mark, the command **refuses and
+  says why** instead of listing hundreds of already-enrolled names. That
+  failure shipped a bogus 456-name list on 2026-07-20 (439 already active).
+  The same guard blocks the nightly to-add and weekly sweep, which send one
+  throttled alert per day rather than a bogus list. If you genuinely pruned
+  your MFR watchlist, `MFR BACKLOG FORCE` accepts the new size and unblocks the
+  scheduled jobs too. Diagnostic state: `bot_state.mfr_watchlist_last_count` /
+  `_last_error` / `_last_ok_at` / `mfr_watchlist_last_good_count`.
+- Read-only apart from that guard's high-water bookkeeping — the bot **never
+  writes to MFR** (read API only, enroll-never-remove).
+  *(handler: `tools/enrollment.py`)*
 
 ### `WRAP` / `WRAP LIST`
 - Lists unmapped wrapper proposals (see write form below). Read-only.
