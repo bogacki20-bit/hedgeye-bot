@@ -320,6 +320,26 @@ def test_dark_footer_is_bounded():
     assert "_cap(" in footer, "footer rides every MFR command — it must be capped"
 
 
+def test_list_call_gets_its_own_timeout():
+    """2026-08-01 measurement: the LIST response is 3.95 MB / 622 assets, vs a few
+    KB per ticker. Sharing MFR_TIMEOUT=20s is what made it fail intermittently,
+    and an empty read reads as an empty account."""
+    import mfr_client
+    assert mfr_client.MFR_LIST_TIMEOUT >= 60, mfr_client.MFR_LIST_TIMEOUT
+    assert mfr_client.MFR_LIST_TIMEOUT > mfr_client.MFR_TIMEOUT
+    src = _src("mfr_client.py")
+    assert "_http_get_json(url, timeout=MFR_LIST_TIMEOUT)" in src
+
+
+def test_empty_watchlist_reports_zero_coverage_before_bailing():
+    """The early return skipped _report_fanout_completeness, so a failed fan-out
+    left the previous 1.000 in bot_state and the health metric read green."""
+    src = _src("mfr_client.py")
+    body = src.split("def refresh_watchlist")[1].split("fanout = sorted")[0]
+    assert "_report_fanout_completeness(0, 0, [])" in body
+    assert body.index("_report_fanout_completeness") < body.index("return {")
+
+
 def test_watchlist_reads_are_recorded():
     src = _src("mfr_client.py")
     assert src.count("_record_watchlist_read(") >= 5, \

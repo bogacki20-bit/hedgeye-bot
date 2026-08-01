@@ -35,6 +35,13 @@ log = logging.getLogger(__name__)
 MFR_BASE = "https://myfractalrange.com/v2/asset"
 MFR_USER_AGENT = "Mozilla/5.0 (HedgeyeBot/1.0)"  # MFR returns 403 to default urllib UA
 MFR_TIMEOUT = 20
+# The LIST call (GET /v2/asset, no ticker path) returns EVERY activated asset with
+# its full payload — measured 3.95 MB / 622 assets on 2026-08-01. A per-ticker call
+# is a few KB. Sharing the 20s per-ticker budget is what made the watchlist read
+# fail intermittently, and an empty read is indistinguishable from an empty account:
+# the backlog then flags the entire universe as un-enrolled (7/20: 456 names, 439
+# already active; 7/30: 472). Give the big call its own budget.
+MFR_LIST_TIMEOUT = float(os.environ.get("MFR_LIST_TIMEOUT_SEC", "120"))
 MFR_MAX_RETRIES = 3               # retry transient failures (timeout / 5xx) this many times
 MFR_BACKOFF = (1, 3, 7)           # seconds between attempts
 # Inter-request spacing for BULK sweeps. Single probes never fail; the ~119/569 nightly
@@ -184,7 +191,7 @@ def list_watchlist() -> list[str]:
         return []
     url = f"{MFR_BASE}?token={token}"
     # Retries transient timeouts — one 20s blip used to no-op the ENTIRE fan-out.
-    status, data, err = _http_get_json(url)
+    status, data, err = _http_get_json(url, timeout=MFR_LIST_TIMEOUT)
     if data is None:
         log.warning("MFR watchlist fetch failed (status=%s): %s", status, err)
         _record_watchlist_read(0, f"fetch failed: {err}", status)
@@ -261,8 +268,13 @@ def refresh_watchlist() -> dict:
     watchlist = list_watchlist()
     log.info("mfr_fanout: pulled %d tickers from MFR watchlist", len(watchlist))
     if not watchlist:
+        # Report 0% BEFORE returning. This used to bail without touching
+        # mfr_fanout_last_pct, so a failed fan-out left yesterday's 1.000 in
+        # bot_state — the health metric read green through the outage.
+        log.error("mfr_fanout: watchlist read returned NOTHING — fan-out skipped")
+        _report_fanout_completeness(0, 0, [])
         return {"tickers": 0, "ok": 0, "skip": 0, "fail": 0, "failed": [],
-                "source": "mfr_watchlist"}
+                "source": "mfr_watchlist", "watchlist_empty": True}
     fanout = sorted(set(watchlist) | set(_CRYPTO_FORCE_FANOUT))
     summary = refresh_for_tickers(fanout)
     # Re-sweep: one more paced pass over names that still failed — catches tickers MFR
