@@ -45,24 +45,79 @@ def _fetch(sql, params=None):
         return cur.fetchall()
 
 
-def classify(tickers, has_range, quoted, held) -> dict:
-    """Pure. {ticker: verdict}. Three independent pieces of evidence; a name is
-    only JUNK when every one of them says it does not exist as a tradeable
-    symbol. 'quote-only' and 'range-only' are deliberately NOT junk — one
-    missing source is a coverage gap, not proof of nonexistence."""
+# Hedgeye tables that carry VALUES — publishing a number or a side for a ticker
+# is an act of coverage. A bare uppercase token appearing in prose is not.
+STRONG_SQL = [
+    ("risk_range",  "SELECT DISTINCT ticker FROM hedgeye_risk_ranges "
+                    "WHERE ticker = ANY(%s) AND buy_trade IS NOT NULL "
+                    "AND sell_trade IS NOT NULL"),
+    ("etf_pro",     "SELECT DISTINCT ticker FROM hedgeye_etf_pro_ranges "
+                    "WHERE ticker = ANY(%s) AND range_low IS NOT NULL "
+                    "AND range_high IS NOT NULL"),
+    ("keiths",      "SELECT DISTINCT ticker FROM hedgeye_keiths_signals "
+                    "WHERE ticker = ANY(%s) AND side IN ('long','short')"),
+    ("posmon_seed", "SELECT DISTINCT ticker FROM ticker_tags "
+                    "WHERE ticker = ANY(%s) AND hedgeye_bucket_0629 IS NOT NULL"),
+    ("posmon_live", "SELECT DISTINCT ticker FROM bucket_history "
+                    "WHERE ticker = ANY(%s) AND bucket IS NOT NULL"),
+    ("ideas",       "SELECT DISTINCT ticker FROM hedgeye_investing_ideas "
+                    "WHERE ticker = ANY(%s) AND rank IS NOT NULL"),
+    ("portsol",     "SELECT DISTINCT ticker FROM hedgeye_portfolio_solutions "
+                    "WHERE ticker = ANY(%s) AND rank IS NOT NULL"),
+]
+# Membership-only tables: ticker + flags, no values. This is the output of the
+# unfiltered regex, so weak-only support is the fingerprint of a scraped word.
+WEAK_SQL = [
+    ("sigstr", "SELECT DISTINCT ticker FROM hedgeye_signal_strength "
+               "WHERE ticker = ANY(%s)"),
+    ("ss_roster", "SELECT DISTINCT ticker FROM ss_roster_history "
+                  "WHERE ticker = ANY(%s)"),
+]
+
+
+def gather_evidence(cands) -> dict:
+    """{ticker: {"strong": [src], "weak": [src]}}. One query per source. A source
+    that errors is skipped LOUDLY — silently missing evidence would convict a
+    name Hedgeye does cover."""
+    ev = {t: {"strong": [], "weak": []} for t in cands}
+    for kind, specs in (("strong", STRONG_SQL), ("weak", WEAK_SQL)):
+        for label, sql in specs:
+            try:
+                for r in _fetch(sql, (list(cands),)):
+                    if r[0] and r[0].upper() in ev:
+                        ev[r[0].upper()][kind].append(label)
+            except Exception as e:
+                print(f"  ⚠️  evidence source {label} unavailable ({e}) — names "
+                      f"relying on it may be misjudged.")
+    return ev
+
+
+def classify(tickers, evidence, quoted, held) -> dict:
+    """Pure. {ticker: (verdict, detail)}.
+
+    COVERAGE decides membership — did Hedgeye publish DATA for this name. The
+    quote is used only to split a real ticker Hedgeye never covered from a word
+    that isn't a ticker at all. Both can leave the universe; only the second is
+    evidence of a parser bug."""
     out = {}
     for t in tickers:
-        r, q, h = t in has_range, t in quoted, t in held
-        if h:
-            out[t] = "HELD — real, you own it"
-        elif r and q:
-            out[t] = "real (range + quote)"
-        elif q:
-            out[t] = "real (quote, no MFR range = enrollment gap)"
-        elif r:
-            out[t] = "range but no quote — check the symbol mapping"
+        ev = evidence.get(t) or {"strong": [], "weak": []}
+        strong = sorted(set(ev.get("strong") or []))
+        weak = sorted(set(ev.get("weak") or []))
+        if strong:
+            out[t] = ("COVERED", "Hedgeye data: " + ",".join(strong))
+        elif t in held:
+            out[t] = ("HELD", "you own it — keep regardless of coverage")
+        elif weak and t in quoted:
+            out[t] = ("TOKEN-ONLY", "real ticker, Hedgeye never published data "
+                                    "for it — from " + ",".join(weak))
+        elif weak:
+            out[t] = ("JUNK", "not a ticker, no Hedgeye data — scraped by "
+                              + ",".join(weak))
+        elif t in quoted:
+            out[t] = ("TOKEN-ONLY", "real ticker, no Hedgeye data, no feed claims it")
         else:
-            out[t] = "JUNK — no range, no quote, not held"
+            out[t] = ("JUNK", "no Hedgeye data, no quote, not held")
     return out
 
 
@@ -114,11 +169,8 @@ def main() -> int:
         print("nothing to test.")
         return 0
 
-    has_range, held = set(), set()
+    held = set()
     try:
-        has_range = {r[0].upper() for r in _fetch(
-            "SELECT DISTINCT ticker FROM mfr_snapshots WHERE ticker = ANY(%s)",
-            (cands,)) if r[0]}
         held = {r[0].upper() for r in _fetch(
             "SELECT DISTINCT underlying FROM book_positions WHERE snapshot_date = "
             "(SELECT max(snapshot_date) FROM book_positions) "
@@ -140,24 +192,31 @@ def main() -> int:
               f"judged junk —\n      every verdict below would be a guess. Stopping.")
         return 2
 
-    verdicts = classify(cands, has_range, quoted, held)
-    junk = sorted(t for t, v in verdicts.items() if v.startswith("JUNK"))
-    odd = sorted(t for t, v in verdicts.items() if v.startswith("range but"))
+    verdicts = classify(cands, gather_evidence(cands), quoted, held)
+    junk = sorted(t for t, (v, _) in verdicts.items() if v == "JUNK")
+    token_only = sorted(t for t, (v, _) in verdicts.items() if v == "TOKEN-ONLY")
 
-    print(f"\n{'ticker':<12}{'verdict':<46}origin")
+    print(f"\n{'ticker':<10}{'verdict':<12}{'detail':<58}origin")
     for t in cands:
-        print(f"{t:<12}{verdicts[t]:<46}{','.join(sorted(origin.get(t, ())))}")
+        v, d = verdicts[t]
+        print(f"{t:<10}{v:<12}{d[:56]:<58}{','.join(sorted(origin.get(t, ())))}")
 
-    if odd:
-        print(f"\n⚠️  RANGE BUT NO QUOTE ({len(odd)}) — MFR knows them, the price "
-              f"feed doesn't.\n   Symbol-mapping problem, NOT junk. Do not delete:")
-        print("   " + " ".join(odd))
+    if token_only:
+        print(f"\n❓ TOKEN-ONLY ({len(token_only)}) — real tradeable tickers, but "
+              f"Hedgeye never\n   published a range, side, bucket or rank for them. "
+              f"They entered the universe\n   through a membership-only feed, which "
+              f"is what the unfiltered regex writes to.\n   These are the ones a "
+              f"stopword list gets WRONG in both directions — your call:")
+        for t in token_only:
+            print(f"     {t:<10} {verdicts[t][1]}")
 
+    if not junk and not token_only:
+        print("\n✅ Every candidate is covered by real Hedgeye data.")
+        return 0
     if not junk:
-        print("\n✅ No junk found — every candidate resolves somewhere.")
         return 0
 
-    print(f"\n🗑  JUNK ({len(junk)}) — no MFR range, no quote, not held.")
+    print(f"\n🗑  JUNK ({len(junk)}) — no Hedgeye data, no quote, not held.")
     print("   Which feed introduced each (this is where the parser needs fixing):")
     by_feed: dict = {}
     for t in junk:

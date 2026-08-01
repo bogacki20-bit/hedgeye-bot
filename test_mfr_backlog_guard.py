@@ -361,51 +361,71 @@ def _classify():
     return m.classify
 
 
-def test_junk_needs_all_three_negatives():
-    c = _classify()
-    v = c(["BEEN"], has_range=set(), quoted=set(), held=set())
-    assert v["BEEN"].startswith("JUNK")
-    # any single piece of evidence rescues it
-    assert not c(["BEEN"], {"BEEN"}, set(), set())["BEEN"].startswith("JUNK")
-    assert not c(["BEEN"], set(), {"BEEN"}, set())["BEEN"].startswith("JUNK")
-    assert not c(["BEEN"], set(), set(), {"BEEN"})["BEEN"].startswith("JUNK")
+def _E(strong=None, weak=None):
+    return {"strong": strong or [], "weak": weak or []}
 
 
-def test_real_tickers_that_look_like_words_survive():
-    """HAS is Hasbro, JUST is the Goldman Sachs JUST US Large Cap ETF. Both are
-    in corpus_rag._TICKER_STOPWORDS, so reusing that list to clean the universe
-    would delete two real Hedgeye names. Evidence must override spelling."""
+def test_hedgeye_data_decides_membership_not_spelling():
     c = _classify()
-    v = c(["HAS", "JUST"], has_range=set(), quoted={"HAS", "JUST"}, held=set())
-    assert not v["HAS"].startswith("JUNK"), v["HAS"]
-    assert not v["JUST"].startswith("JUNK"), v["JUST"]
+    ev = {"RTX": _E(strong=["risk_range"]), "BEEN": _E(weak=["sigstr"])}
+    v = c(["RTX", "BEEN"], ev, quoted={"RTX"}, held=set())
+    assert v["RTX"][0] == "COVERED"
+    assert v["BEEN"][0] == "JUNK"
+
+
+def test_real_tickers_that_look_like_words_are_surfaced_not_deleted():
+    """HAS is Hasbro, JUST is the Goldman Sachs JUST US Large Cap ETF. Both sit
+    in corpus_rag._TICKER_STOPWORDS, so a stopword clean-up deletes two real
+    names. With no Hedgeye data they are TOKEN-ONLY — flagged for the operator,
+    never auto-condemned."""
+    c = _classify()
+    ev = {"HAS": _E(weak=["sigstr"]), "JUST": _E(weak=["sigstr"])}
+    v = c(["HAS", "JUST"], ev, quoted={"HAS", "JUST"}, held=set())
+    for t in ("HAS", "JUST"):
+        assert v[t][0] == "TOKEN-ONLY", v[t]
+        assert v[t][0] != "JUNK"
+
+
+def test_weak_membership_alone_never_proves_coverage():
+    """hedgeye_signal_strength carries ticker + flags and no values — it is the
+    output of the unfiltered regex, so it cannot vouch for a name."""
+    c = _classify()
+    v = c(["X"], {"X": _E(weak=["sigstr", "ss_roster"])}, quoted=set(), held=set())
+    assert v["X"][0] == "JUNK"
+
+
+def test_held_names_survive_with_no_coverage_at_all():
+    c = _classify()
+    v = c(["BBRE"], {"BBRE": _E()}, quoted={"BBRE"}, held={"BBRE"})
+    assert v["BBRE"][0] == "HELD"
+
+
+def test_any_single_strong_source_is_enough():
+    c = _classify()
+    for src in ("risk_range", "etf_pro", "keiths", "posmon_seed", "posmon_live",
+                "ideas", "portsol"):
+        v = c(["Z"], {"Z": _E(strong=[src])}, quoted=set(), held=set())
+        assert v["Z"][0] == "COVERED", (src, v["Z"])
 
 
 def test_no_wordlist_is_used_to_decide_membership():
     src = _src("_junk_sweep.py")
-    body = src.split("def classify")[1].split("def main")[0]
+    body = src.split("def classify")[1].split("if __name__")[0]
     for banned in ("STOPWORD", "_TICKER_STOPWORDS", "WORDS ="):
         assert banned not in body, f"classify() must not consult {banned}"
 
 
 def test_the_2026_08_01_backlog_splits_correctly():
-    """The real 20-name backlog: 4 junk, HAS/JUST real, BBRE/CERY held."""
     c = _classify()
-    cands = ["BEEN", "FROM", "LIST", "SIGNAL", "HAS", "JUST", "MEME", "PTF",
-             "RTX", "BBRE", "CERY"]
-    v = c(cands, has_range={"RTX", "MEME"},
-          quoted={"HAS", "JUST", "MEME", "PTF", "RTX", "BBRE", "CERY"},
-          held={"BBRE", "CERY"})
-    junk = sorted(t for t, x in v.items() if x.startswith("JUNK"))
-    assert junk == ["BEEN", "FROM", "LIST", "SIGNAL"], junk
-
-
-def test_range_without_quote_is_flagged_but_not_deleted():
-    c = _classify()
-    v = c(["BITCOIN"], has_range={"BITCOIN"}, quoted=set(), held=set())
-    assert "not junk" not in v["BITCOIN"]
-    assert not v["BITCOIN"].startswith("JUNK")
-    assert "symbol" in v["BITCOIN"] or "mapping" in v["BITCOIN"], v["BITCOIN"]
+    ev = {t: _E(weak=["sigstr"]) for t in ("BEEN", "FROM", "LIST", "SIGNAL",
+                                           "HAS", "JUST")}
+    ev["RTX"] = _E(strong=["risk_range"])
+    ev["BBRE"] = _E()
+    v = c(list(ev), ev, quoted={"HAS", "JUST", "RTX", "BBRE"}, held={"BBRE"})
+    assert sorted(t for t, (x, _) in v.items() if x == "JUNK") == \
+        ["BEEN", "FROM", "LIST", "SIGNAL"]
+    assert sorted(t for t, (x, _) in v.items() if x == "TOKEN-ONLY") == \
+        ["HAS", "JUST"]
 
 
 def test_sweep_refuses_to_judge_without_a_price_feed():
