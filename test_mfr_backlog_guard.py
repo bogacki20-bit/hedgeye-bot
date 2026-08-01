@@ -361,8 +361,8 @@ def _classify():
     return m.classify
 
 
-def _E(strong=None, weak=None):
-    return {"strong": strong or [], "weak": weak or []}
+def _E(strong=None, weak=None, ocr=None):
+    return {"strong": strong or [], "ocr": ocr or [], "weak": weak or []}
 
 
 def test_hedgeye_data_decides_membership_not_spelling():
@@ -433,6 +433,40 @@ def test_sweep_refuses_to_judge_without_a_price_feed():
     src = _src("_junk_sweep.py")
     assert "cannot judge" in src or "would be a guess" in src
     assert "return 2" in src.split("price feed unavailable")[1][:200]
+
+
+
+def test_pm_bucket_alone_does_not_prove_coverage():
+    """Position Monitor buckets come from OCR of a PDF. pm_parse's own comment
+    records that sector headers (GLL, RETAIL, ENERGY) match its ticker pattern,
+    and posmon is ~435 of the universe — so an unconditional bucket would
+    launder every OCR artifact into COVERED."""
+    c = _classify()
+    v = c(["ZZTOP"], {"ZZTOP": _E(ocr=["posmon_seed"])}, quoted=set(), held=set())
+    assert v["ZZTOP"][0] == "PM-ARTIFACT", v["ZZTOP"]
+
+
+def test_pm_bucket_plus_corroboration_is_coverage():
+    """The PM is a single-stock / ETF list — every real entry quotes."""
+    c = _classify()
+    ev = {"JBS": _E(ocr=["posmon_seed"])}
+    assert c(["JBS"], ev, quoted={"JBS"}, held=set())["JBS"][0] == "COVERED"
+    assert c(["JBS"], ev, quoted=set(), held={"JBS"})["JBS"][0] == "COVERED"
+
+
+def test_pm_header_words_are_named_as_artifacts():
+    c = _classify()
+    for w in ("RETAIL", "ENERGY", "GLL", "LONGS", "BENCH"):
+        v = c([w], {w: _E(ocr=["posmon_seed"])}, quoted=set(), held=set())
+        assert v[w][0] == "PM-ARTIFACT", (w, v[w])
+        assert "header word" in v[w][1], v[w]
+
+
+def test_a_values_feed_still_outranks_everything():
+    c = _classify()
+    v = c(["AAPL"], {"AAPL": _E(strong=["risk_range"], ocr=["posmon_seed"])},
+          quoted=set(), held=set())
+    assert v["AAPL"][0] == "COVERED" and "risk_range" in v["AAPL"][1]
 
 
 if __name__ == "__main__":

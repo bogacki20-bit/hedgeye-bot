@@ -56,15 +56,37 @@ STRONG_SQL = [
                     "AND range_high IS NOT NULL"),
     ("keiths",      "SELECT DISTINCT ticker FROM hedgeye_keiths_signals "
                     "WHERE ticker = ANY(%s) AND side IN ('long','short')"),
-    ("posmon_seed", "SELECT DISTINCT ticker FROM ticker_tags "
-                    "WHERE ticker = ANY(%s) AND hedgeye_bucket_0629 IS NOT NULL"),
-    ("posmon_live", "SELECT DISTINCT ticker FROM bucket_history "
-                    "WHERE ticker = ANY(%s) AND bucket IS NOT NULL"),
     ("ideas",       "SELECT DISTINCT ticker FROM hedgeye_investing_ideas "
                     "WHERE ticker = ANY(%s) AND rank IS NOT NULL"),
     ("portsol",     "SELECT DISTINCT ticker FROM hedgeye_portfolio_solutions "
                     "WHERE ticker = ANY(%s) AND rank IS NOT NULL"),
 ]
+
+# Position Monitor buckets are a VALUE, but an OCR-DERIVED one: tools/pm_parse
+# reads a PDF, and its own comment records that sector headers collide with the
+# ticker pattern ("GLL, RETAIL, ENERGY on the 7/6 PDF"). The guard for that only
+# fires when the sector line is followed IMMEDIATELY by a bucket header; any
+# other layout mints a bucketed pseudo-ticker. posmon is also the largest feed
+# (~435 of the universe), so treating its bucket as unconditional proof would
+# launder every OCR artifact into "COVERED".
+#
+# So a bucket counts only when something independent agrees: a values feed, a
+# price quote, or the book. The PM is a single-stock/ETF list — every real entry
+# on it quotes.
+OCR_SQL = [
+    ("posmon_seed", "SELECT DISTINCT ticker FROM ticker_tags "
+                    "WHERE ticker = ANY(%s) AND hedgeye_bucket_0629 IS NOT NULL"),
+    ("posmon_live", "SELECT DISTINCT ticker FROM bucket_history "
+                    "WHERE ticker = ANY(%s) AND bucket IS NOT NULL"),
+]
+
+# pm_parse's own vocabulary — a "ticker" equal to one of these is a header the
+# parser mis-read, not a security.
+PM_VOCAB = {"ACTIVE", "LONGS", "SHORTS", "TOP", "IDEA", "BENCH", "LONG", "SHORT",
+            "RETAIL", "ENERGY", "GLL", "MACRO", "TECH", "FINANCIALS", "HEALTH",
+            "CARE", "CONSUMER", "INDUSTRIALS", "UTILITIES", "MATERIALS",
+            "STAPLES", "DISCRETIONARY", "COMM", "REITS", "SECTOR", "MONITOR",
+            "POSITION", "HEDGEYE"}
 # Membership-only tables: ticker + flags, no values. This is the output of the
 # unfiltered regex, so weak-only support is the fingerprint of a scraped word.
 WEAK_SQL = [
@@ -79,8 +101,9 @@ def gather_evidence(cands) -> dict:
     """{ticker: {"strong": [src], "weak": [src]}}. One query per source. A source
     that errors is skipped LOUDLY — silently missing evidence would convict a
     name Hedgeye does cover."""
-    ev = {t: {"strong": [], "weak": []} for t in cands}
-    for kind, specs in (("strong", STRONG_SQL), ("weak", WEAK_SQL)):
+    ev = {t: {"strong": [], "ocr": [], "weak": []} for t in cands}
+    for kind, specs in (("strong", STRONG_SQL), ("ocr", OCR_SQL),
+                        ("weak", WEAK_SQL)):
         for label, sql in specs:
             try:
                 for r in _fetch(sql, (list(cands),)):
@@ -101,11 +124,24 @@ def classify(tickers, evidence, quoted, held) -> dict:
     evidence of a parser bug."""
     out = {}
     for t in tickers:
-        ev = evidence.get(t) or {"strong": [], "weak": []}
+        ev = evidence.get(t) or {}
         strong = sorted(set(ev.get("strong") or []))
+        ocr = sorted(set(ev.get("ocr") or []))
         weak = sorted(set(ev.get("weak") or []))
         if strong:
-            out[t] = ("COVERED", "Hedgeye data: " + ",".join(strong))
+            out[t] = ("COVERED", "Hedgeye data: " + ",".join(strong)
+                      + (" (+" + ",".join(ocr) + ")" if ocr else ""))
+        elif ocr and (t in quoted or t in held):
+            # bucket corroborated by an independent source
+            out[t] = ("COVERED", "Position Monitor bucket (" + ",".join(ocr)
+                      + "), corroborated by " + ("book" if t in held else "quote"))
+        elif ocr and t.upper() in PM_VOCAB:
+            out[t] = ("PM-ARTIFACT", "bucketed by pm_parse but it is a PM header "
+                                     "word — sector/bucket line read as a ticker")
+        elif ocr:
+            out[t] = ("PM-ARTIFACT", "bucketed by " + ",".join(ocr)
+                      + " but nothing else knows it — no quote, no values, "
+                        "not held. Likely an OCR mis-read.")
         elif t in held:
             out[t] = ("HELD", "you own it — keep regardless of coverage")
         elif weak and t in quoted:
@@ -195,6 +231,7 @@ def main() -> int:
     verdicts = classify(cands, gather_evidence(cands), quoted, held)
     junk = sorted(t for t, (v, _) in verdicts.items() if v == "JUNK")
     token_only = sorted(t for t, (v, _) in verdicts.items() if v == "TOKEN-ONLY")
+    pm_art = sorted(t for t, (v, _) in verdicts.items() if v == "PM-ARTIFACT")
 
     print(f"\n{'ticker':<10}{'verdict':<12}{'detail':<58}origin")
     for t in cands:
@@ -210,7 +247,17 @@ def main() -> int:
         for t in token_only:
             print(f"     {t:<10} {verdicts[t][1]}")
 
-    if not junk and not token_only:
+    if pm_art:
+        print(f"\n📄 PM-ARTIFACT ({len(pm_art)}) — carry a Position Monitor bucket "
+              f"but nothing\n   independent knows them. The PM is a single-stock "
+              f"/ ETF list, so every real\n   entry quotes. A bucket alone proves "
+              f"only that pm_parse assigned one — and its\n   own comment records "
+              f"that sector headers (GLL, RETAIL, ENERGY) match the ticker\n   "
+              f"pattern. Check these against the PDF before dismissing:")
+        for t in pm_art:
+            print(f"     {t:<10} {verdicts[t][1]}")
+
+    if not junk and not token_only and not pm_art:
         print("\n✅ Every candidate is covered by real Hedgeye data.")
         return 0
     if not junk:
