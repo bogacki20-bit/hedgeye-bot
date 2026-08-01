@@ -108,21 +108,60 @@ COLLAPSE_FLOOR = 0.6        # refuse below 60% of the high-water count
 BLOCKED_NOTIFY_KEY = "mfr_enroll_blocked_notified_on"   # one refusal ping per day
 
 
-def watchlist_verdict(count, last_good, floor=COLLAPSE_FLOOR) -> tuple:
-    """Pure. (ok, reason). count = names the watchlist read returned; last_good =
-    the previous believable count (0 when unknown). Empty is always a refusal; a
-    sharp collapse is a refusal; a gradual decline is fine (the operator is
-    allowed to remove assets)."""
+def watchlist_verdict(count, last_good, floor=COLLAPSE_FLOOR, served=0) -> tuple:
+    """Pure. (ok, reason).
+
+    count     — names the watchlist read just returned
+    last_good — previous believable count (0 when unknown)
+    served    — DISTINCT tickers MFR has actually served ranges for recently
+
+    Three checks, cheapest first. `served` is the important one: it needs no
+    stored history, so it works on the very first run after a deploy — which is
+    exactly when a stored baseline is 0 and would rubber-stamp a bad read.
+
+    It is also self-evidently sound. MFR cannot serve daily ranges for a ticker
+    that isn't activated in the account. So if the range feed is delivering ~560
+    distinct names while the LIST call claims 88, the list call is wrong — no
+    history, no operator confirmation, no ambiguity. That is precisely the
+    2026-07-30 reading: 472 'un-enrolled' names while only 2 names in the whole
+    book lacked a range row."""
     if not count:
         return False, ("the MFR watchlist read returned 0 names. That is an API "
                        "failure (auth / timeout / changed response shape), not an "
                        "empty account — every name would look un-enrolled. This is "
                        "exactly the 2026-07-20 '456 backlog' failure.")
+    if served and count < served * floor:
+        return False, (f"the MFR watchlist read returned {count} names, but MFR has "
+                       f"served ranges for {served} distinct tickers in the last "
+                       f"{SERVED_WINDOW_DAYS} days. It cannot serve a range for a "
+                       f"ticker that is not activated, so the LIST call is returning "
+                       f"a partial result (pagination? truncation?) — the backlog "
+                       f"would flag ~{max(0, served - count)} already-active names.")
     if last_good and count < last_good * floor:
         return False, (f"the MFR watchlist collapsed to {count} names from a "
                        f"last-known-good {last_good} (under {floor:.0%}). A partial "
                        f"read would flag hundreds of already-activated names.")
     return True, ""
+
+
+SERVED_WINDOW_DAYS = 7
+
+
+def served_ticker_count(days=SERVED_WINDOW_DAYS) -> int:
+    """DISTINCT tickers MFR actually returned range data for recently. A lower
+    bound on the true activated set, derived from the range feed rather than from
+    the list endpoint — so it stays honest when the list endpoint doesn't.
+    Returns 0 (guard disabled) if the query fails; never raises."""
+    import db_pg
+    try:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(DISTINCT ticker) FROM mfr_snapshots "
+                        "WHERE snapshot_date >= CURRENT_DATE - %s", (days,))
+            r = cur.fetchone()
+        return int(r[0]) if r and r[0] else 0
+    except Exception as e:
+        log.warning("served-ticker cross-check unavailable: %s", e)
+        return 0
 
 
 def active_watchlist(force=False) -> set:
@@ -146,7 +185,7 @@ def active_watchlist(force=False) -> set:
         high_water = int(raw) if raw else 0
     except (TypeError, ValueError):
         high_water = 0
-    ok, reason = watchlist_verdict(n, high_water)
+    ok, reason = watchlist_verdict(n, high_water, served=served_ticker_count())
     if not ok:
         if not force:
             raise WatchlistUnavailable(reason)

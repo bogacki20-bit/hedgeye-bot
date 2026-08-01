@@ -158,6 +158,30 @@ def test_weekly_sweep_does_not_stamp_the_week_when_blocked():
         "the refusal path must not mark the week as swept"
 
 
+def test_served_crosscheck_catches_a_collapse_with_no_stored_history():
+    """The 2026-07-30 reading, and the case a stored baseline CANNOT catch: first
+    run after a deploy, high_water=0, watchlist returns a partial 88 while MFR is
+    serving ranges for 560. Backlog printed 472 'un-enrolled' names while the dark
+    footer said only 2 names lacked a range row — both cannot be true."""
+    ok, why = watchlist_verdict(88, 0, served=560)
+    assert ok is False, "a partial read must be caught without any history"
+    assert "cannot serve a range" in why and "88" in why and "560" in why, why
+    # a healthy read against the same evidence passes
+    assert watchlist_verdict(560, 0, served=560)[0] is True
+    assert watchlist_verdict(540, 0, served=560)[0] is True
+
+
+def test_served_crosscheck_is_optional_and_fails_open():
+    """mfr_snapshots unavailable -> served=0 -> the check simply doesn't fire."""
+    assert watchlist_verdict(88, 0, served=0)[0] is True
+    assert watchlist_verdict(0, 0, served=0)[0] is False   # empty still refused
+
+
+def test_served_never_blocks_a_legitimately_larger_watchlist():
+    """Activated-but-not-yet-fanned-out names mean count > served routinely."""
+    assert watchlist_verdict(600, 560, served=540)[0] is True
+
+
 def test_high_water_baseline_cannot_walk_itself_down():
     """The ratchet bug: 560→340 passes, then 340→205 passes, then 205→123 —
     three degraded reads and a 130-name watchlist is 'believable'. With a
