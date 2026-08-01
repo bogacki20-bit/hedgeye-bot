@@ -51,15 +51,46 @@ def _strip_html(html: str) -> str:
 # Section headers end with the next blank line or any non-ticker character (paren,
 # bracket, asterisk). Use a permissive lookahead so we capture multi-line ticker
 # lists regardless of what follows.
+#
+# 2026-08-01 — the whole regex used to carry re.I, which meant the capture class
+# [A-Z0-9,\s] ALSO matched lowercase. The "ticker list" therefore ran on past the
+# end of the list into the following sentence, stopping only at punctuation, and
+# TICKER_RE then harvested every short uppercase word out of the prose:
+#
+#   "Added: AAPL NVDA coverage HAS BEEN expanded and the LIST is ..."
+#     -> ['AAPL', 'NVDA', 'HAS', 'BEEN', 'LIST']
+#
+# Those land in hedgeye_signal_strength, which `sigstr` reads into
+# full_universe() — so a scraped word reaches the enrollment backlog, SCREEN,
+# CONC and CANDIDATES as though a Hedgeye feed had nominated it. HAS (Hasbro) and
+# JUST (a real GS ETF) made it all the way to a "paste into MFR" instruction.
+#
+# The old STOPWORDS below is the previous patch for this same bug — four words
+# named individually. A word list cannot work here: HAS and JUST are real
+# tickers. Case-sensitivity is the actual fix, so it is applied at the source.
+#
+# (?i:...) puts IGNORECASE on the LABEL only — "Added:", "ADDED:", "added:" all
+# match — while the ticker capture stays strictly uppercase.
+#
+# The stop set includes [a-z]: the list ENDS at the first lowercase letter. That
+# is what bounds it to the ticker list without discarding it — dropping the real
+# adds along with the prose would trade a loud bug for a silent one.
 ADDED_RE   = re.compile(
-    r"\bAdded\s*:\s*([A-Z0-9,\s]+?)(?=\bRemoved|\bRANK|\bPlease|[\(\[\*]|\Z)",
-    re.I | re.S,
+    r"\b(?i:added)\s*:\s*([A-Z0-9,\s]+?)"
+    r"(?=(?i:removed)|(?i:rank)|(?i:please)|[a-z\(\[\*]|\Z)",
+    re.S,
 )
 REMOVED_RE = re.compile(
-    r"\bRemoved\s*:\s*([A-Z0-9,\s]+?)(?=\bAdded|\bRANK|\bPlease|[\(\[\*]|\Z)",
-    re.I | re.S,
+    r"\b(?i:removed)\s*:\s*([A-Z0-9,\s]+?)"
+    r"(?=(?i:added)|(?i:rank)|(?i:please)|[a-z\(\[\*]|\Z)",
+    re.S,
 )
 TICKER_RE  = re.compile(r"\b([A-Z]{1,5})\b")
+# Kept as a backstop for ALL-CAPS prose, which case-sensitivity cannot catch.
+# Deliberately contains no real ticker: HAS, JUST, CAN, ALL, ONE, NEW are all
+# listed securities. Never add a word here without checking it doesn't trade.
+STOPWORDS = {"RANK", "PLEASE", "AND", "THE", "ADDED", "REMOVED", "SIGNAL",
+             "STRENGTH", "STOCKS", "TOTAL", "NAME", "NAMES", "LONG", "SHORT"}
 
 
 def parse_body(html_body: str) -> dict:
@@ -70,14 +101,14 @@ def parse_body(html_body: str) -> dict:
     if am:
         for tm in TICKER_RE.finditer(am.group(1)):
             tk = tm.group(1)
-            if tk not in {"RANK", "PLEASE", "AND", "THE"}:
+            if tk not in STOPWORDS:
                 out["added"].append(tk)
 
     rm = REMOVED_RE.search(text)
     if rm:
         for tm in TICKER_RE.finditer(rm.group(1)):
             tk = tm.group(1)
-            if tk not in {"RANK", "PLEASE", "AND", "THE"}:
+            if tk not in STOPWORDS:
                 out["removed"].append(tk)
 
     # Dedup preserving order
