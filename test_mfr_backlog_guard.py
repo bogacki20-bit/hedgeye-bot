@@ -348,6 +348,73 @@ def test_watchlist_reads_are_recorded():
         "a 200-with-rows-but-no-tickers shape change must be called out"
 
 
+
+# ───────────────────── junk sweep: evidence, not a word list ────────────────
+
+def _classify():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "js", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "_junk_sweep.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.classify
+
+
+def test_junk_needs_all_three_negatives():
+    c = _classify()
+    v = c(["BEEN"], has_range=set(), quoted=set(), held=set())
+    assert v["BEEN"].startswith("JUNK")
+    # any single piece of evidence rescues it
+    assert not c(["BEEN"], {"BEEN"}, set(), set())["BEEN"].startswith("JUNK")
+    assert not c(["BEEN"], set(), {"BEEN"}, set())["BEEN"].startswith("JUNK")
+    assert not c(["BEEN"], set(), set(), {"BEEN"})["BEEN"].startswith("JUNK")
+
+
+def test_real_tickers_that_look_like_words_survive():
+    """HAS is Hasbro, JUST is the Goldman Sachs JUST US Large Cap ETF. Both are
+    in corpus_rag._TICKER_STOPWORDS, so reusing that list to clean the universe
+    would delete two real Hedgeye names. Evidence must override spelling."""
+    c = _classify()
+    v = c(["HAS", "JUST"], has_range=set(), quoted={"HAS", "JUST"}, held=set())
+    assert not v["HAS"].startswith("JUNK"), v["HAS"]
+    assert not v["JUST"].startswith("JUNK"), v["JUST"]
+
+
+def test_no_wordlist_is_used_to_decide_membership():
+    src = _src("_junk_sweep.py")
+    body = src.split("def classify")[1].split("def main")[0]
+    for banned in ("STOPWORD", "_TICKER_STOPWORDS", "WORDS ="):
+        assert banned not in body, f"classify() must not consult {banned}"
+
+
+def test_the_2026_08_01_backlog_splits_correctly():
+    """The real 20-name backlog: 4 junk, HAS/JUST real, BBRE/CERY held."""
+    c = _classify()
+    cands = ["BEEN", "FROM", "LIST", "SIGNAL", "HAS", "JUST", "MEME", "PTF",
+             "RTX", "BBRE", "CERY"]
+    v = c(cands, has_range={"RTX", "MEME"},
+          quoted={"HAS", "JUST", "MEME", "PTF", "RTX", "BBRE", "CERY"},
+          held={"BBRE", "CERY"})
+    junk = sorted(t for t, x in v.items() if x.startswith("JUNK"))
+    assert junk == ["BEEN", "FROM", "LIST", "SIGNAL"], junk
+
+
+def test_range_without_quote_is_flagged_but_not_deleted():
+    c = _classify()
+    v = c(["BITCOIN"], has_range={"BITCOIN"}, quoted=set(), held=set())
+    assert "not junk" not in v["BITCOIN"]
+    assert not v["BITCOIN"].startswith("JUNK")
+    assert "symbol" in v["BITCOIN"] or "mapping" in v["BITCOIN"], v["BITCOIN"]
+
+
+def test_sweep_refuses_to_judge_without_a_price_feed():
+    """No quotes means no evidence — every verdict would be a guess."""
+    src = _src("_junk_sweep.py")
+    assert "cannot judge" in src or "would be a guess" in src
+    assert "return 2" in src.split("price feed unavailable")[1][:200]
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0
