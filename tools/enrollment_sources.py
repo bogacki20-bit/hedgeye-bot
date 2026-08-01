@@ -32,6 +32,25 @@ KNOWN_UNCOVERABLE = {
     "SETH",                         # ProShares UltraShort Ether — crypto ETFs absent
                                     #   from MFR equities; ETHUSD covers the trend
                                     #   via the wrapper link
+    # ── Scraped words, not selections (2026-08-01) ──────────────────────────
+    # parser_signal_strength.py:62 is TICKER_RE = re.compile(r"\b([A-Z]{1,5})\b")
+    # run over email text with no filter, so prose and headers become tickers.
+    # These reached the live backlog on 2026-08-01 and would have been pasted
+    # into MFR -> Activate Assets by an operator following the instruction at the
+    # bottom of the message.
+    #
+    # THIS IS A BAND-AID. The cure is scoping that regex to the Add/Remove
+    # section. Until then each new email can mint fresh ones.
+    "BEEN", "FROM", "LIST", "SIGNAL",   # not tickers at all
+    # HAS (Hasbro) and JUST (Goldman Sachs JUST US Large Cap Equity ETF) ARE
+    # real tradeable tickers — which is exactly why they are the dangerous case:
+    # every existence check passes them. Operator confirmed 2026-08-01 that
+    # neither appears in any Hedgeye research he follows. They are here because
+    # the regex matched the words "has" and "just" in a sentence. Nothing
+    # selected them, so they do not belong in full_universe() — where they would
+    # otherwise reach SCREEN, CONC and CANDIDATES as if a feed had surfaced them.
+    # Remove from this set if either is ever deliberately chosen.
+    "HAS", "JUST",
 }
 
 # Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.
