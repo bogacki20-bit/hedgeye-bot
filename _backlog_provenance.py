@@ -1,46 +1,101 @@
 #!/usr/bin/env python3
-"""_backlog_provenance.py — WHERE does every MFR-backlog ticker come from?
+"""_backlog_provenance.py — what do we have on the Hedgeye side, what's really
+active in MFR, and where did every backlogged ticker come from?
 
-READ-ONLY. Writes nothing, calls no MFR write endpoint. Run it anywhere the bot's
-DB is reachable (laptop uses DATABASE_PUBLIC_URL):
+READ-ONLY. Writes nothing, calls no MFR write endpoint.
 
-    python _backlog_provenance.py                # full attribution
-    python _backlog_provenance.py --only posmon  # just one source's contribution
-    python _backlog_provenance.py --csv out.csv  # same data as a spreadsheet
+    # everything Hedgeye-side, per feed, to a spreadsheet
+    python _backlog_provenance.py --dump-universe universe.csv
 
-Why this exists (2026-07-30): `MFR BACKLOG` prints a flat list plus per-source
-COUNTS — never which ticker came from which feed — so unfamiliar names look like
-they appeared from nowhere. The backlog is
-    full_universe()  −  MFR active watchlist  −  KNOWN_UNCOVERABLE  −  PARKED_FOR_SOURCE
-and `full_universe()` is the union of NINE feeds (tools/source_registry.REGISTRY).
-This script inverts that union so every backlogged ticker names its origin.
+    # the TRUE backlog, using the MFR website CSV export as the activated set
+    python _backlog_provenance.py --mfr-csv "~/Downloads/mfr_export.csv" --csv backlog.csv
 
-The usual answer for "I've never heard of this ticker": `posmon` — the FROZEN
-2026-06-29 Hedgeye Position Monitor seed in ticker_tags.hedgeye_bucket_0629.
-It is the whole Long/Short List, not names you trade, and it has no live feed.
-`keiths` / `finsigstr` (Financials Sector Pro) is the other big one.
+    # attribution using the API (only trustworthy when the API agrees with the CSV)
+    python _backlog_provenance.py
+    python _backlog_provenance.py --only posmon
+
+WHY --mfr-csv EXISTS (2026-07-30). `MFR BACKLOG` returned 472 names including
+AAPL NVDA TSLA META AMZN GOOGL, while the dark footer in the same message said
+only 2 names in the whole book lacked an MFR range row. Both cannot be true: MFR
+cannot serve a daily range for a ticker that is not activated. The LIST endpoint
+(`GET /v2/asset`) is returning a partial slice — the same class of failure as
+2026-07-20, when it returned nothing at all and 439 of 456 "missing" names were
+already activated. The CSV you can export from the MFR website is ground truth
+and does not go through that endpoint. When you pass it, this script uses it AND
+reports how far the API disagrees — which is the diagnosis.
+
+The backlog itself is:
+    full_universe()  −  active  −  KNOWN_UNCOVERABLE  −  PARKED_FOR_SOURCE
+where full_universe() is the union of NINE feeds (tools/source_registry.REGISTRY).
+
+The usual answer to "I've never heard of this ticker": `posmon` — the FROZEN
+2026-06-29 Position Monitor seed in ticker_tags.hedgeye_bucket_0629. That is
+Hedgeye's whole Long/Short List, not names you trade, and it has no live feed.
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# What each feed IS, in one line — printed next to the counts so the origin of a
-# surprising name is self-explaining.
 WHAT_IT_IS = {
     "etfpro":    "ETF Pro Plus weekly ranges — latest week_of",
     "portsol":   "Portfolio Solutions re-rank — latest snapshot",
     "ideas":     "Investing Ideas / Top Stock Picks — latest snapshot",
     "keiths":    "Keith's Signal Longs/Shorts — latest signal_date",
-    "sigstr":    "Signal Strength Stocks (broad ~68-name roster, side-less)",
+    "sigstr":    "Signal Strength Stocks (broad roster, side-less)",
     "finsigstr": "Financials Signal Strength = Keith's list, both sides",
-    "posmon":    "FROZEN 6/29 Position Monitor seed — the whole Long/Short List, NO live feed",
+    "posmon":    "FROZEN 6/29 Position Monitor seed — whole Long/Short List, NO live feed",
     "book":      "your Fidelity book — latest snapshot, non-cash, qty<>0",
     "btcquant":  "BTC Quant — crypto names with a trend sentiment",
 }
+
+_TKR = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+_HDR_HINT = re.compile(r"^(ticker|tickers|tkr|symbol|symbols|sym|asset|assets|name|instrument)$", re.I)
+
+
+def read_mfr_csv(path: str) -> set:
+    """Tickers out of the MFR website export. Column is found by header name
+    first, then by VOTING on ticker-shaped cells — never by assuming a position,
+    because the export format isn't pinned anywhere."""
+    p = os.path.expanduser(path)
+    with open(p, encoding="utf-8-sig", newline="") as f:
+        rows = [r for r in csv.reader(f) if any((c or "").strip() for c in r)]
+    if not rows:
+        sys.exit(f"LOUD FAIL: {p} is empty.")
+    # The export carries a title/blank preamble on some vintages, so look for the
+    # header row anywhere near the top rather than assuming row 0.
+    col, start = None, 1
+    for ri, row in enumerate(rows[:10]):
+        for i, cell in enumerate(row):
+            if _HDR_HINT.match((cell or "").strip()):
+                col, start = i, ri + 1
+                break
+        if col is not None:
+            break
+    if col is None:
+        votes: dict = {}
+        for r in rows[:300]:
+            for i, cell in enumerate(r):
+                if _TKR.match((cell or "").strip().upper()):
+                    votes[i] = votes.get(i, 0) + 1
+        if not votes:
+            sys.exit(f"LOUD FAIL: no ticker-shaped column found in {p}. "
+                     f"First row: {rows[0][:8]}")
+        col = max(votes, key=votes.get)
+        start = 0
+        print(f"  (no ticker header — voted column {col} by cell shape)")
+    out = {(r[col] or "").strip().upper() for r in rows[start:] if len(r) > col}
+    # _TKR happily matches a header cell like 'SYM' — drop those explicitly so a
+    # voted column can't smuggle its own header in as a ticker.
+    out = {t for t in out if _TKR.match(t) and not _HDR_HINT.match(t)}
+    if not out:
+        sys.exit(f"LOUD FAIL: column {col} of {p} held no ticker-shaped values.")
+    return out
 
 
 def _fetch(sql, params=None):
@@ -50,40 +105,83 @@ def _fetch(sql, params=None):
         return cur.fetchall()
 
 
+def _wrap(tickers, indent="    ", width=76):
+    line = indent
+    for t in sorted(tickers):
+        if len(line) + len(t) + 1 > width:
+            print(line)
+            line = indent
+        line += t + " "
+    if line.strip():
+        print(line)
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--only", help="restrict the detail table to one source tag "
-                                   "(etfpro portsol ideas keiths sigstr finsigstr "
-                                   "posmon book btcquant)")
-    ap.add_argument("--csv", help="also write the per-ticker table to this CSV")
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--mfr-csv", help="MFR website export = GROUND TRUTH for what "
+                                      "is activated. Bypasses the LIST endpoint.")
+    ap.add_argument("--only", help="restrict the detail table to one source tag")
+    ap.add_argument("--csv", help="write the per-ticker backlog table here")
+    ap.add_argument("--dump-universe", help="write EVERY Hedgeye-side name with "
+                                            "per-feed membership here")
     args = ap.parse_args()
 
     from tools.source_registry import REGISTRY, full_universe
-    from tools.enrollment import _mfr_active
     from tools.enrollment_sources import KNOWN_UNCOVERABLE, PARKED_FOR_SOURCE
 
     fu = full_universe()
     universe, per_source = fu["universe"], fu["per_source"]
-    active = _mfr_active()
-    excluded = set(KNOWN_UNCOVERABLE) | set(PARKED_FOR_SOURCE)
-    backlog = sorted((universe - active) - excluded)
-
-    # invert the union: ticker -> [source tags that contain it]
     origin: dict = {}
     for tag, members in per_source.items():
         for t in members:
-            origin.setdefault(t, []).append(tag)
+            origin.setdefault(t, set()).add(tag)
+
+    # ── the activated set ────────────────────────────────────────────────────
+    api = None
+    try:
+        from tools.enrollment import _mfr_active
+        api = _mfr_active()
+    except Exception as e:
+        print(f"  (API watchlist read failed: {e})")
+        api = set()
+    if args.mfr_csv:
+        active = read_mfr_csv(args.mfr_csv)
+        src_label = f"MFR CSV export ({os.path.basename(args.mfr_csv)})"
+    else:
+        active, src_label = api, "API list_watchlist()"
+
+    excluded = set(KNOWN_UNCOVERABLE) | set(PARKED_FOR_SOURCE)
+    backlog = sorted((universe - active) - excluded)
 
     print("=" * 78)
-    print("MFR BACKLOG PROVENANCE  (read-only)")
+    print("HEDGEYE UNIVERSE vs MFR ACTIVATED  (read-only)")
     print("=" * 78)
-    print(f"universe (union of {len(REGISTRY)} feeds): {len(universe)}")
-    print(f"active in MFR watchlist:                 {len(active)}")
-    print(f"excluded (uncoverable + parked):         {len(excluded & universe)}")
-    print(f"BACKLOG:                                 {len(backlog)}")
+    print(f"Hedgeye-side universe (union of {len(REGISTRY)} feeds): {len(universe)}")
+    print(f"activated, per {src_label}: {len(active)}")
+    print(f"excluded (uncoverable + parked, in universe):        {len(excluded & universe)}")
+    print(f"TRUE BACKLOG:                                        {len(backlog)}")
+
+    # ── the diagnosis: does the API agree with the CSV? ──────────────────────
+    if args.mfr_csv and api is not None:
+        only_csv = active - api
+        only_api = api - active
+        print(f"\nAPI CROSS-CHECK  (this is the 7/20 + 7/30 bug, measured)")
+        print(f"  list_watchlist() returned : {len(api)}")
+        print(f"  CSV export says activated : {len(active)}")
+        print(f"  in CSV but MISSING from API: {len(only_csv)}  <-- the API's error")
+        print(f"  in API but not in CSV      : {len(only_api)}")
+        if len(api) < len(active) * 0.9:
+            print(f"  ⚠️  The LIST endpoint is under-reporting by "
+                  f"{len(active) - len(api)} names ({1 - len(api)/max(1,len(active)):.0%}). "
+                  f"Every backlog computed from it is inflated by roughly that much.\n"
+                  f"      Do NOT enroll from an API-derived backlog until this is fixed.")
+            if only_csv:
+                print("  a sample the API failed to report as active:")
+                _wrap(sorted(only_csv)[:40], indent="      ")
     if not active:
-        print("\n  ⚠️  MFR watchlist came back EMPTY — every universe name will look\n"
-              "      backlogged. Fix mfr_client.list_watchlist() before trusting this.")
+        print("\n  ⚠️  Activated set is EMPTY — every universe name will look "
+              "backlogged.\n      Re-run with --mfr-csv before believing anything below.")
 
     # ── per-feed contribution ────────────────────────────────────────────────
     print("\nPER-FEED CONTRIBUTION")
@@ -92,50 +190,75 @@ def main() -> int:
     for s in REGISTRY:
         m = set(per_source.get(s.tag, ()))
         in_bl = m & bl
-        solo = {t for t in in_bl if set(origin.get(t, ())) == {s.tag}}
+        solo = {t for t in in_bl if origin.get(t, set()) == {s.tag}}
         print(f"  {s.tag:<10}{len(m):>8}{len(in_bl):>12}{len(solo):>13}   "
               f"{WHAT_IT_IS.get(s.tag, s.name)}")
 
-    # ── grouped by exact origin combination — this is the 'where from' answer ─
+    # ── grouped by exact origin combination ─────────────────────────────────
     print("\nBACKLOG GROUPED BY ORIGIN  (exact feed combination)")
     groups: dict = {}
     for t in backlog:
-        groups.setdefault("+".join(sorted(origin.get(t, ["<none>"]))), []).append(t)
+        groups.setdefault("+".join(sorted(origin.get(t, {"<none>"}))), []).append(t)
     for combo, ts in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         print(f"\n  [{combo}]  {len(ts)}")
-        line = "    "
-        for t in sorted(ts):
-            if len(line) + len(t) + 1 > 76:
-                print(line)
-                line = "    "
-            line += t + " "
-        if line.strip():
-            print(line)
+        _wrap(ts)
     if "<none>" in groups:
-        print("\n  ⚠️  '<none>' means a name is on the backlog with no feed claiming it —\n"
-              "      that should be impossible. Investigate before enrolling those.")
+        print("\n  ⚠️  '<none>' = on the backlog with no feed claiming it — "
+              "impossible by construction.\n      Investigate before enrolling those.")
 
-    # ── enrichment: held? has a range row? tagged sector? ────────────────────
+    # ── junk-token sweep (parser hygiene, independent of any backlog) ────────
+    WORDS = {"FROM", "LIST", "JUST", "BEEN", "SIGNAL", "THE", "AND", "FOR", "WITH",
+             "THIS", "THAT", "HAVE", "WILL", "NEW", "TOP", "BUY", "SELL", "LONG",
+             "SHORT", "ADD", "TRIM", "HOLD", "DATA", "NOTE", "CALL", "PUT"}
+    junk = sorted(WORDS & universe)
+    if junk:
+        print(f"\nSUSPECT TOKENS IN THE UNIVERSE ({len(junk)}) — English words a "
+              f"parser scraped\nas tickers. Not a backlog problem; a source problem.")
+        for t in junk:
+            print(f"  {t:<10} from: {','.join(sorted(origin.get(t, ())))}")
+
+    # ── enrichment ───────────────────────────────────────────────────────────
     held, has_range, sector = set(), set(), {}
     try:
         held = {r[0].upper() for r in _fetch(
             "SELECT DISTINCT underlying FROM book_positions WHERE snapshot_date = "
             "(SELECT max(snapshot_date) FROM book_positions) "
             "AND asset_class <> 'cash' AND COALESCE(quantity,0) <> 0") if r[0]}
-        has_range = {r[0].upper() for r in _fetch(
-            "SELECT DISTINCT ticker FROM mfr_snapshots WHERE ticker = ANY(%s)",
-            (backlog,)) if r[0]}
+        served = _fetch("SELECT count(DISTINCT ticker) FROM mfr_snapshots "
+                        "WHERE snapshot_date >= CURRENT_DATE - 7")
+        print(f"\nMFR has served ranges for {served[0][0]} distinct tickers in the "
+              f"last 7 days.\n(MFR cannot serve a range for a ticker that is not "
+              f"activated — so that is a FLOOR\non the true activated count. "
+              f"Compare it to the numbers at the top.)")
+        if universe:
+            has_range = {r[0].upper() for r in _fetch(
+                "SELECT DISTINCT ticker FROM mfr_snapshots WHERE ticker = ANY(%s)",
+                (sorted(universe),)) if r[0]}
         sector = {r[0].upper(): (r[1] or "") for r in _fetch(
             "SELECT ticker, gics_sector FROM ticker_tags WHERE ticker = ANY(%s)",
-            (backlog,)) if r[0]}
+            (sorted(universe),)) if r[0]}
     except Exception as e:
         print(f"\n  (enrichment skipped: {e})")
 
+    # ── the two lists worth acting on ────────────────────────────────────────
+    posmon_only = sorted(t for t in backlog if origin.get(t, set()) == {"posmon"})
+    if posmon_only:
+        print(f"\nFROZEN-SEED ONLY ({len(posmon_only)}) — ONLY from the 6/29 Position "
+              f"Monitor seed.\nHedgeye's Long/Short List, not your book, no live feed. "
+              f"Enrolling them creates\nrange data, NOT alert streams.")
+        _wrap(posmon_only, indent="  ")
+
+    held_dark = sorted(t for t in backlog if t in held and t not in has_range)
+    if held_dark:
+        print(f"\n⚠️  YOU HOLD THESE AND THEY HAVE NO MFR RANGE ({len(held_dark)}) "
+              f"— highest priority:\n  " + " ".join(held_dark))
+
+    # ── detail table + exports ───────────────────────────────────────────────
     print("\nEVERY BACKLOGGED TICKER")
     print(f"  {'ticker':<12}{'held':<6}{'range':<7}{'sector':<24}origin")
     rows = []
     for t in backlog:
-        src = ",".join(sorted(origin.get(t, ["<none>"])))
+        src = ",".join(sorted(origin.get(t, {"<none>"})))
         if args.only and args.only not in src.split(","):
             continue
         row = (t, "yes" if t in held else "", "row" if t in has_range else "DARK",
@@ -145,35 +268,29 @@ def main() -> int:
     if args.only:
         print(f"  ({len(rows)} shown · --only {args.only})")
 
-    # ── the two lists worth acting on ────────────────────────────────────────
-    posmon_only = sorted(t for t in backlog
-                         if set(origin.get(t, ())) == {"posmon"})
-    if posmon_only:
-        print(f"\nFROZEN-SEED ONLY ({len(posmon_only)}) — these come ONLY from the "
-              f"6/29 Position Monitor\nseed, which has no live feed. They are Hedgeye's "
-              f"Long/Short List, not your book.\nEnroll only the ones you'd actually "
-              f"trade; the rest belong in KNOWN_UNCOVERABLE\nor behind a posmon opt-out.")
-        line = "  "
-        for t in posmon_only:
-            if len(line) + len(t) + 1 > 76:
-                print(line)
-                line = "  "
-            line += t + " "
-        if line.strip():
-            print(line)
-
-    held_backlog = sorted(t for t in backlog if t in held)
-    if held_backlog:
-        print(f"\n⚠️  YOU HOLD THESE AND THEY HAVE NO MFR RANGE ({len(held_backlog)}) "
-              f"— highest priority:\n  " + " ".join(held_backlog))
-
     if args.csv:
-        import csv as _csv
-        with open(args.csv, "w", newline="", encoding="utf-8") as f:
-            w = _csv.writer(f)
+        with open(os.path.expanduser(args.csv), "w", newline="",
+                  encoding="utf-8") as f:
+            w = csv.writer(f)
             w.writerow(["ticker", "held", "range", "sector", "origin"])
             w.writerows(rows)
-        print(f"\nwrote {len(rows)} rows -> {args.csv}")
+        print(f"\nwrote {len(rows)} backlog rows -> {args.csv}")
+
+    if args.dump_universe:
+        tags = [s.tag for s in REGISTRY]
+        with open(os.path.expanduser(args.dump_universe), "w", newline="",
+                  encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["ticker", "active_in_mfr", "held", "has_range", "sector",
+                        "n_feeds"] + tags)
+            for t in sorted(universe):
+                o = origin.get(t, set())
+                w.writerow([t, "yes" if t in active else "",
+                            "yes" if t in held else "",
+                            "yes" if t in has_range else "",
+                            sector.get(t, ""), len(o)]
+                           + ["x" if tag in o else "" for tag in tags])
+        print(f"wrote {len(universe)} universe rows -> {args.dump_universe}")
     return 0
 
 
