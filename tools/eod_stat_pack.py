@@ -27,6 +27,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
+import urllib.error
 from datetime import date
 
 log = logging.getLogger("eod_stat_pack")
@@ -91,6 +93,69 @@ def ytd_return(closes, dates) -> float | None:
     if not base:
         return None
     return closes[-1] / base - 1.0
+
+
+def _ptd_return(closes, dates, same_period) -> float | None:
+    """Period-to-date from the last close BEFORE the current period started.
+    `same_period(d, ref)` says whether d is in the same period as the newest bar.
+    Date-driven for the same reason YTD is: a fixed day count is wrong at every
+    period boundary, and most wrong on the days you care about."""
+    if not closes or not dates or len(closes) != len(dates):
+        return None
+    ref = dates[-1]
+    base = None
+    for c, d in zip(closes, dates):
+        if not same_period(d, ref) and c:
+            base = c
+        elif same_period(d, ref):
+            break
+    if not base:
+        return None
+    return closes[-1] / base - 1.0
+
+
+def mtd_return(closes, dates) -> float | None:
+    return _ptd_return(closes, dates,
+                       lambda d, r: (d.year, d.month) >= (r.year, r.month))
+
+
+def qtd_return(closes, dates) -> float | None:
+    q = lambda d: (d.year, (d.month - 1) // 3)          # noqa: E731
+    return _ptd_return(closes, dates, lambda d, r: q(d) >= q(r))
+
+
+def sector_row(closes, dates) -> dict:
+    """Hedgeye's sector table windows: 1-Day, MTD, QTD, YTD (deck p38/p39).
+    Deliberately NOT the factor-board windows — the two pages measure
+    different things and matching Hedgeye matters more than internal symmetry."""
+    return {"price": closes[-1] if closes else None,
+            "1D": pct_return(closes, 1),
+            "MTD": mtd_return(closes, dates),
+            "QTD": qtd_return(closes, dates),
+            "YTD": ytd_return(closes, dates)}
+
+
+def rolling_corr_stats(a_closes, b_closes, window=30, lookback=252) -> dict:
+    """52-week summary of a rolling `window`-day correlation (deck p42's right
+    panel): {high, low, pct_pos, pct_neg, n}. A single 30D reading tells you
+    where correlation is; this tells you whether that is normal."""
+    ra, rb = daily_returns(a_closes), daily_returns(b_closes)
+    n = min(len(ra), len(rb))
+    if n < window + 5:
+        return {}
+    ra, rb = ra[-n:], rb[-n:]
+    series = []
+    for end in range(window, n + 1):
+        c = pearson(ra[end - window:end], rb[end - window:end])
+        if c is not None:
+            series.append(c)
+    series = series[-lookback:]
+    if not series:
+        return {}
+    pos = sum(1 for c in series if c > 0)
+    return {"high": max(series), "low": min(series),
+            "pct_pos": pos / len(series), "pct_neg": 1 - pos / len(series),
+            "n": len(series)}
 
 
 def returns_row(closes, dates) -> dict:
@@ -286,6 +351,32 @@ FRED_SERIES = [
     ("BBB OAS",  "BAMLC0A4CBBB",   "%"),
 ]
 FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
+# FRED keys are exactly 32 lowercase alphanumerics. Anything else 400s on EVERY
+# series, which reads as "the whole section is broken" rather than "one variable
+# has the wrong value in it".
+FRED_KEY_RE = re.compile(r"^[0-9a-f]{32}$")
+_FRED_ERRORS: list = []
+
+
+def key_shape_problem(key) -> str | None:
+    """Pure. Why this key cannot work, or None. Checked BEFORE the network call
+    so a malformed variable is named rather than producing four opaque 400s."""
+    if not key:
+        return "empty"
+    k = key.strip()
+    if k != key:
+        return "has leading/trailing whitespace — strip it in the Railway var"
+    if (k.startswith(("\"", "'")) and k.endswith(("\"", "'"))):
+        return "is wrapped in quotes — Railway stores the quotes as part of the value"
+    if k.startswith("http"):
+        return "looks like a URL, not a key"
+    if len(k) != 32:
+        return f"is {len(k)} characters, not 32"
+    if not FRED_KEY_RE.match(k):
+        if FRED_KEY_RE.match(k.lower()):
+            return "is uppercase — FRED requires lower-case"
+        return "contains non-alphanumeric characters"
+    return None
 
 
 def _fred_key():
@@ -310,8 +401,26 @@ def fred_series(series_id, key, days=400) -> list:
     try:
         with urllib.request.urlopen(f"{FRED_URL}?{q}", timeout=20) as r:
             data = _json.loads(r.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        # FRED puts the ACTUAL reason in the response body — "api_key is not a
+        # 32 character alpha-numeric lower-case string", "Bad Request. The
+        # series does not exist", etc. Discarding it turns a named, fixable
+        # cause into a bare 400 (2026-08-02: four-for-four 400s and no reason).
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            body = ""
+        detail = ""
+        try:
+            detail = _json.loads(body).get("error_message") or ""
+        except Exception:
+            detail = body
+        log.warning("fred %s: http %s — %s", series_id, e.code, detail or "(no body)")
+        _FRED_ERRORS.append(f"{series_id}: http {e.code} — {detail or 'no detail'}")
+        return []
     except Exception as e:
         log.warning("fred %s failed: %s", series_id, e)
+        _FRED_ERRORS.append(f"{series_id}: {type(e).__name__}: {e}")
         return []
     out = []
     for o in (data.get("observations") or []):
@@ -381,6 +490,12 @@ def _rates_credit_block() -> str:
                 + ", ".join(FRED_ENV_NAMES) + ".\n"
                 "  Operator says one IS set on Railway; if so it is under a "
                 "different name — tell me which and it is a one-line change.)")
+    problem = key_shape_problem(key)
+    if problem:
+        return (f"RATES + CREDIT: n/a — ${name} {problem}.\n"
+                f"  FRED keys are 32 lower-case alphanumerics. Fix the Railway "
+                f"variable and this section fills in with no code change.")
+    _FRED_ERRORS.clear()
     try:
         fetched = {sid: fred_series(sid, key) for _, sid, _ in FRED_SERIES}
         rows = [(label, level_changes(fetched.get(sid) or []))
@@ -390,7 +505,9 @@ def _rates_credit_block() -> str:
         block = format_rates_credit(rows, curve)
         if empty:
             block += f"\n  ⚠ no observations returned for: {', '.join(empty)}"
-        return block + f"\n  (FRED key from ${name})"
+        for e in _FRED_ERRORS[:4]:
+            block += f"\n    {e}"
+        return block + f"\n  (FRED key from ${name}, {len(key)} chars)"
     except Exception as e:
         return f"RATES + CREDIT: unavailable ({e})"
 

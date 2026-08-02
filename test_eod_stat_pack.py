@@ -9,6 +9,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from tools.eod_stat_pack import (CORR_ANCHORS, CORR_ROWS, CORR_WINDOWS,  # noqa: E402
+                                 key_shape_problem, mtd_return, qtd_return,
+                                 rolling_corr_stats, sector_row,
                                  FACTORS, RET_WINDOWS, corr_over,
                                  curve_2_10, daily_returns, fmt_corr,
                                  fmt_pct, format_correlations,
@@ -188,6 +190,74 @@ def test_dispatch_chain_is_wired():
                             "telegram_handler.py"), encoding="utf-8").read()
     assert "handle_eod_command" in src
     assert '("eod", _eod)' in src
+
+
+
+# ───────────────── Hedgeye deck conformance (HE_TMS_RR_MC p38/p41/p42) ──────
+
+def test_sector_windows_match_the_deck_not_the_factor_board():
+    """Deck p38/p39 use 1-Day / MTD / QTD / YTD and carry price. The factor
+    board (p41) uses 1D/1W/1M/3M/6M/YTD. Two different pages, two different
+    window sets — matching Hedgeye beats internal symmetry."""
+    ds = [dt.date(2025, 12, 31), dt.date(2026, 6, 30), dt.date(2026, 7, 1)]
+    r = sector_row([100, 200, 220], ds)
+    assert set(r) == {"price", "1D", "MTD", "QTD", "YTD"}, set(r)
+    assert r["price"] == 220
+
+
+def test_mtd_and_qtd_use_the_prior_period_close():
+    ds = [dt.date(2026, 6, 29), dt.date(2026, 6, 30),
+          dt.date(2026, 7, 1), dt.date(2026, 7, 2)]
+    cl = [95, 100, 105, 110]
+    assert abs(mtd_return(cl, ds) - 0.10) < 1e-9      # base = 6/30 close
+    assert abs(qtd_return(cl, ds) - 0.10) < 1e-9      # Q2 -> Q3, same base
+    # no prior period in the window -> unknown, not a guess
+    assert mtd_return([100, 110], ds[2:]) is None
+
+
+def test_qtd_boundary_is_the_quarter_not_the_month():
+    ds = [dt.date(2026, 3, 31), dt.date(2026, 4, 1), dt.date(2026, 5, 1)]
+    cl = [100, 110, 120]
+    assert abs(qtd_return(cl, ds) - 0.20) < 1e-9, "base must be the 3/31 close"
+    assert abs(mtd_return(cl, ds) - (120 / 110 - 1)) < 1e-9, "MTD base = 4/1"
+
+
+def test_rolling_corr_stats_summarise_a_year_of_30d_readings():
+    """Deck p42's right panel. A single 30D reading says where correlation is;
+    this says whether that is normal."""
+    import random
+    random.seed(21)
+    a, b = [100.0], [100.0]
+    for _ in range(400):
+        r = random.uniform(-.02, .02)
+        a.append(a[-1] * (1 + r))
+        b.append(b[-1] * (1 + r * 0.6 + random.uniform(-.01, .01)))
+    st = rolling_corr_stats(a, b)
+    assert st["n"] == 252, st["n"]
+    assert -1 <= st["low"] <= st["high"] <= 1
+    assert abs(st["pct_pos"] + st["pct_neg"] - 1.0) < 1e-9
+
+
+def test_rolling_corr_stats_absent_when_history_is_short():
+    assert rolling_corr_stats([100, 101, 102], [100, 101, 102]) == {}
+
+
+# ───────────────────────── FRED key diagnosis ───────────────────────────────
+
+def test_key_shape_problems_are_named_not_guessed():
+    """2026-08-02: four-for-four HTTP 400 with no reason. FRED keys are 32
+    lower-case alphanumerics; anything else fails every series identically,
+    which reads as 'the section is broken' rather than 'one variable is wrong'."""
+    good = "a" * 32
+    assert key_shape_problem(good) is None
+    assert "quotes" in key_shape_problem('"' + good + '"')
+    assert "whitespace" in key_shape_problem(" " + good + " ")
+    assert "lower-case" in key_shape_problem("A" * 32)
+    assert "32" in key_shape_problem("abc")
+    assert "URL" in key_shape_problem("https://api.stlouisfed.org/?k=1")
+    assert key_shape_problem("") == "empty"
+    assert key_shape_problem(None) == "empty"
+    assert "non-alphanumeric" in key_shape_problem("a" * 31 + "!")
 
 
 if __name__ == "__main__":
