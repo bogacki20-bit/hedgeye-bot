@@ -41,16 +41,21 @@ KNOWN_UNCOVERABLE = {
     #
     # THIS IS A BAND-AID. The cure is scoping that regex to the Add/Remove
     # section. Until then each new email can mint fresh ones.
-    "BEEN", "FROM", "LIST", "SIGNAL",   # not tickers at all
-    # HAS (Hasbro) and JUST (Goldman Sachs JUST US Large Cap Equity ETF) ARE
-    # real tradeable tickers — which is exactly why they are the dangerous case:
-    # every existence check passes them. Operator confirmed 2026-08-01 that
-    # neither appears in any Hedgeye research he follows. They are here because
-    # the regex matched the words "has" and "just" in a sentence. Nothing
-    # selected them, so they do not belong in full_universe() — where they would
-    # otherwise reach SCREEN, CONC and CANDIDATES as if a feed had surfaced them.
-    # Remove from this set if either is ever deliberately chosen.
-    "HAS", "JUST",
+    "BEEN", "FROM", "LIST", "SIGNAL",   # not tickers at all — safe to block forever
+    # HAS and JUST were here 2026-08-01 to 08-02 and have been REMOVED.
+    #
+    # Real securities: Hasbro (NASDAQ) and the Goldman Sachs JUST U.S. Large Cap
+    # Equity ETF (NYSE Arca). They entered the universe only because
+    # parser_research_common.side_blocks scraped the words "has" and "just" out
+    # of prose in ONE Keith's email on 7/29 16:13. That parser is bounded now
+    # (a4fbd0c), the rows were deleted from hedgeye_keiths_signals and
+    # hedgeye_ticker_inventory, and hedgeye_ticker_history keeps the audit trail.
+    #
+    # With the source fixed, the only way either returns is Hedgeye actually
+    # publishing them — and blocking them here would silently suppress exactly
+    # that. Blocking a real ticker forever, to defend against a bug that no
+    # longer exists, is the same failure as the stopword list this whole thread
+    # was about. Do not re-add. If they reappear, that is signal.
 }
 
 # Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.

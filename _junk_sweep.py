@@ -82,6 +82,10 @@ OCR_SQL = [
 
 # pm_parse's own vocabulary — a "ticker" equal to one of these is a header the
 # parser mis-read, not a security.
+# Below this share of candidates answering, the JUNK/TOKEN-ONLY split is not
+# trustworthy. Tuned loose: index and macro symbols legitimately never quote.
+QUOTE_RATE_FLOOR = 0.60
+
 PM_VOCAB = {"ACTIVE", "LONGS", "SHORTS", "TOP", "IDEA", "BENCH", "LONG", "SHORT",
             "RETAIL", "ENERGY", "GLL", "MACRO", "TECH", "FINANCIALS", "HEALTH",
             "CARE", "CONSUMER", "INDUSTRIALS", "UTILITIES", "MATERIALS",
@@ -239,13 +243,53 @@ def main() -> int:
         # could never have alerted on anyway
         prices = fetch_prices(list(cands)) or {}
         quoted = {str(k).upper() for k, v in prices.items() if v is not None}
-        print(f"price feed answered for {len(quoted)}/{len(cands)}")
+        rate = len(quoted) / max(1, len(cands))
+        print(f"price feed answered for {len(quoted)}/{len(cands)} ({rate:.0%})")
+        # "no quote" is one of the three conditions for JUNK, so a Yahoo outage
+        # pushes real tickers into JUNK. 2026-08-02: Yahoo returned 500/502 mid-run
+        # and the split could not be trusted. Some legitimate names never quote
+        # (SPX, VIX, UST10Y are index/macro symbols), so a low rate is not proof
+        # of an outage — but it IS enough to stop anyone acting on the JUNK list.
+        if rate < QUOTE_RATE_FLOOR:
+            print(f"\n  ⚠️  PRICE FEED LOOKS DEGRADED ({rate:.0%} answered, floor "
+                  f"{QUOTE_RATE_FLOOR:.0%}).\n"
+                  f"      JUNK requires 'no quote', so an outage INFLATES it. Treat "
+                  f"the JUNK and\n      TOKEN-ONLY split as unreliable and re-run "
+                  f"before dismissing anything.\n"
+                  f"      COVERED is unaffected — it rests on Hedgeye data, not "
+                  f"quotes.")
     except Exception as e:
         print(f"  ⚠️  price feed unavailable ({e}). Without quotes NOTHING can be "
               f"judged junk —\n      every verdict below would be a guess. Stopping.")
         return 2
 
-    verdicts = classify(cands, gather_evidence(cands), quoted, held)
+    evidence = gather_evidence(cands)
+    verdicts = classify(cands, evidence, quoted, held)
+
+    # RETRY THE ACCUSED. "no quote" is one of three conditions for JUNK, so a
+    # transient price-feed outage convicts real tickers. 2026-08-02: Yahoo
+    # returned 500/502 mid-run; the overall answer rate was 76%, which no
+    # sensible threshold would flag because index and macro symbols never quote
+    # anyway. A rate check is the wrong instrument. Re-probing only the accused
+    # is cheap (single digits) and defeats a blip directly: if it quotes on the
+    # second ask, it was never junk.
+    accused = sorted(t for t, (v, _) in verdicts.items() if v == "JUNK")
+    if accused:
+        try:
+            from price_monitor import fetch_prices as _fp
+            again = _fp(list(accused)) or {}
+            rescued = {str(k).upper() for k, v in again.items() if v is not None}
+            if rescued:
+                print(f"\n  ↻ re-probed {len(accused)} JUNK candidates: "
+                      f"{len(rescued)} quoted on retry — the first read was a "
+                      f"feed blip, not evidence. Reclassified: "
+                      f"{' '.join(sorted(rescued))}")
+                quoted |= rescued
+                verdicts = classify(cands, evidence, quoted, held)
+        except Exception as e:
+            print(f"\n  ⚠️  could not re-probe the JUNK candidates ({e}) — a feed "
+                  f"outage during the first read would leave real tickers "
+                  f"mislabelled. Re-run before dismissing any of them.")
     junk = sorted(t for t, (v, _) in verdicts.items() if v == "JUNK")
     token_only = sorted(t for t, (v, _) in verdicts.items() if v == "TOKEN-ONLY")
     pm_art = sorted(t for t, (v, _) in verdicts.items() if v == "PM-ARTIFACT")
@@ -254,8 +298,36 @@ def main() -> int:
         # Real names only. JUNK is not a ticker; PM-ARTIFACT is an OCR mis-read
         # or a naming mismatch — neither belongs in Activate Assets, and pasting
         # them wastes a slot at best.
+        #
+        # ALSO drop anything MFR is already serving a range for. 2026-08-02: the
+        # first --enrollable run listed ~20 macro aliases — SPX VIX GOLD BRENT
+        # COPPER SILVER NATGAS RUT DAX NIKK COMPQ SSEC WTIC UST2Y UST10Y UST30Y
+        # USD EUR/USD GBP/USD CAD/USD USD/YEN BITCOIN. Every one is already
+        # covered: mfr_client.fetch_raw resolves them through its alias table
+        # (VIX -> VIXIDX, GOLD -> XAUUSD, BITCOIN -> BTCUSD -> BTC) and ranges
+        # arrive nightly. They look un-enrolled only because the backlog compares
+        # RAW STRINGS against the watchlist. Pasting them would fail or duplicate
+        # an instrument already held under its canonical symbol — the same
+        # BTCUSD-vs-BTC mismatch as the parked crypto.
+        #
+        # If a range is already arriving, there is nothing to enroll. That test
+        # needs no alias table of its own.
+        served_now = set()
+        try:
+            served_now = {r[0].upper() for r in _fetch(
+                "SELECT DISTINCT ticker FROM mfr_snapshots "
+                "WHERE ticker = ANY(%s) AND snapshot_date >= CURRENT_DATE - 14",
+                (list(cands),)) if r[0]}
+        except Exception as e:
+            print(f"  ⚠️  could not check which names MFR already serves ({e}) — "
+                  f"the list below may contain aliases that are already covered.")
         good = [t for t in cands
-                if verdicts[t][0] in ("COVERED", "HELD", "TOKEN-ONLY")]
+                if verdicts[t][0] in ("COVERED", "HELD", "TOKEN-ONLY")
+                and t not in served_now]
+        if served_now:
+            print(f"\nalready served by MFR under a canonical symbol "
+                  f"({len(served_now)}) — nothing to enroll, excluded:")
+            print("  " + " ".join(sorted(served_now)))
         print(f"\nENROLLABLE ({len(good)} of {len(cands)}) — paste into "
               f"MFR → Activate Assets:")
         line = ""
