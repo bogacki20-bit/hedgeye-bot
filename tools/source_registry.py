@@ -203,6 +203,89 @@ def full_universe() -> dict:
             "total": len(union)}
 
 
+# ═══════════════ ENROLLMENT universe (all-time, deliberately wider) ═════════
+# Measured 2026-08-01: the registry's universe is 509 names while MFR already has
+# 623 activated, and 401 names Hedgeye has published data on sit outside it.
+#
+# Cause: every lookup above is CURRENT membership — MAX(week_of), MAX(
+# snapshot_date), MAX(signal_date). Correct for "what is Keith long right now",
+# wrong for "what should we hold range history on". ETF Pro alone has 166 names
+# all-time and only 43 in the latest week, so 123 names Hedgeye published RANGES
+# for are invisible; ~58 of those are already activated in MFR, meaning the data
+# is arriving and nothing reads it.
+#
+# Operator decision 2026-08-01: "we want to enrol everything, we want a large
+# source of data on our tradeable universe cuz we want to be able to go
+# anywhere." That is also the repo's own enroll-never-remove doctrine — a name
+# should not leave the universe because a weekly product stopped repeating it.
+#
+# DELIBERATELY SEPARATE from full_universe(). The current-membership lookups
+# above drive SCREEN routing (sigstr_side, the shorts gate) and the SOURCES
+# health display, both of which need "right now". Widening those would break
+# them. This function is read by the enrollment backlog and nothing else.
+#
+# Prose-derived tables (the_call, macro_show) and the accumulated mention log
+# (hedgeye_ticker_inventory) are NOT included: they carry parser scrape-through
+# — the 2026-08-01 backlog junk (FROM, BEEN, LIST) accumulates exactly there.
+# Mine those separately with _junk_sweep.py rather than enrolling them blind.
+ALLTIME_SQL = {
+    "etfpro":  "SELECT DISTINCT ticker FROM hedgeye_etf_pro_ranges "
+               "WHERE range_low IS NOT NULL AND range_high IS NOT NULL",
+    "portsol": "SELECT DISTINCT ticker FROM hedgeye_portfolio_solutions "
+               "WHERE rank IS NOT NULL",
+    "ideas":   "SELECT DISTINCT ticker FROM hedgeye_investing_ideas "
+               "WHERE rank IS NOT NULL",
+    "keiths":  "SELECT DISTINCT ticker FROM hedgeye_keiths_signals "
+               "WHERE side IN ('long','short')",
+    "riskrange": "SELECT DISTINCT ticker FROM hedgeye_risk_ranges "
+                 "WHERE buy_trade IS NOT NULL AND sell_trade IS NOT NULL",
+    "rta":       "SELECT DISTINCT ticker FROM hedgeye_rta "
+                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+    "sigchange": "SELECT DISTINCT ticker FROM hedgeye_signal_changes "
+                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+    "portactions": "SELECT DISTINCT ticker FROM hedgeye_portfolio_actions "
+                   "WHERE ticker IS NOT NULL AND ticker <> ''",
+    "iichanges": "SELECT DISTINCT ticker FROM hedgeye_ii_changes "
+                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+    "hedgai":    "SELECT DISTINCT ticker FROM hedgeye_hedgai "
+                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+    "momo":      "SELECT DISTINCT ticker FROM hedgeye_momo "
+                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+    "retail":    "SELECT DISTINCT ticker FROM hedgeye_retail "
+                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+}
+
+
+def enrollment_universe() -> dict:
+    """EVERY name Hedgeye has ever published data on, plus the live current-
+    membership feeds (posmon / book / btcquant / sigstr). Read-only.
+
+    Shape matches full_universe(): {universe, per_source, counts, total}. A
+    source whose query fails is logged and skipped — never silently absent, and
+    never fatal, because a missing table must not shrink the enrollment set."""
+    per_source, union = {}, set()
+    for tag, sql in ALLTIME_SQL.items():
+        try:
+            m = _members(sql)
+        except Exception as e:
+            log.warning("enrollment_universe: %s failed: %s", tag, e)
+            m = set()
+        per_source[tag] = m
+        union |= m
+    # current-membership sources that have no meaningful all-time form
+    for tag in ("sigstr", "posmon", "book", "btcquant"):
+        s = BY_TAG.get(tag)
+        if not s:
+            continue
+        m = s.members()
+        per_source[tag] = m
+        union |= m
+    return {"universe": union,
+            "per_source": {t: sorted(m) for t, m in per_source.items()},
+            "counts": {t: len(m) for t, m in per_source.items()},
+            "total": len(union)}
+
+
 def resolve(text) -> str | None:
     """Map a natural-language token to a source tag via tag/aliases (for SCREEN source=)."""
     t = (text or "").strip().lower()

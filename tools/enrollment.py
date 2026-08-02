@@ -418,9 +418,13 @@ def compile_backlog(force=False) -> dict:
 
     Raises WatchlistUnavailable when the MFR read is empty or collapsed — the whole
     computation is a subtraction, so a bad subtrahend yields a confident lie."""
-    from tools.source_registry import full_universe
+    from tools.source_registry import enrollment_universe
     from tools.enrollment_sources import KNOWN_UNCOVERABLE, PARKED_FOR_SOURCE
-    fu = full_universe()
+    # ALL-TIME, not current membership (2026-08-01). full_universe() answers
+    # "who is on the roster right now" and is right for SCREEN; enrollment wants
+    # "what has Hedgeye ever published data on", because range history is only
+    # there the day you need it if the name was enrolled long before.
+    fu = enrollment_universe()
     full = fu["universe"]
     active = active_watchlist(force=force)
     to_add = sorted((full - active) - set(KNOWN_UNCOVERABLE) - set(PARKED_FOR_SOURCE))
