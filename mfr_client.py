@@ -296,6 +296,67 @@ def refresh_watchlist() -> dict:
     return summary
 
 
+# MFR symbol aliases, module-level so DIAGNOSTICS can walk the same map the
+# fetcher uses. 2026-08-02: _junk_sweep's --enrollable offered GOLD, VIX,
+# BRENT, EUR/USD and ~16 more for enrollment. MFR does not use those symbols
+# — it serves XAUUSD, VIXIDX, BRENTOIL, EURUSD. Pasting the Hedgeye-side name
+# into Activate Assets fails. A diagnostic that cannot see this table cannot
+# tell 'not enrolled' from 'enrolled under another name'.
+MFR_ALIASES = {
+    # Crypto
+    "BITCOIN": ["BTCUSD", "BTC", "CRYPTO.BTC"],
+    "BTC":     ["BTCUSD", "CRYPTO.BTC"],
+    "BTCUSD":  ["CRYPTO.BTC"],
+    "ETH":     ["ETHUSD", "CRYPTO.ETH"],
+    "ETHEREUM":["ETHUSD", "CRYPTO.ETH"],
+    "ETHUSD":  ["CRYPTO.ETH"],
+    "SOL":     ["SOLUSD", "CRYPTO.SOL"],
+    "SOLUSD":  ["CRYPTO.SOL"],
+    "XRP":     ["CRYPTO.XRP"],   "XRPUSD":  ["CRYPTO.XRP"],
+    "AVAX":    ["CRYPTO.AVAX"],  "AVAXUSD": ["CRYPTO.AVAX"],
+    "RUNE":    ["CRYPTO.RUNE"],  "RUNEUSD": ["CRYPTO.RUNE"],
+    "TRX":     ["CRYPTO.TRX"],   "TRXUSD":  ["CRYPTO.TRX"],
+
+    # Commodities
+    "WTIC":    ["WTI", "CRUDE"],
+    "BRENT":   ["BRENTOIL", "BRN"],
+    "GOLD":    ["XAUUSD", "GOLD_FUT"],
+    "SILVER":  ["XAGUSD"],
+    "COPPER":  ["HG", "COPPER_FUT"],
+    "NATGAS":  ["NG", "NATURALGAS"],
+
+    # Currencies — MFR canonical confirmed by user 2026-05-11:
+    #   USD -> "UUP" (Invesco DB Dollar Bullish ETF, MFR's stand-in for the index)
+    #   CAD -> "USD/CAD" (MFR uses standard FX-pair notation;
+    #                     "crosses" put USD first, "majors" put USD second)
+    # Slash-form is the primary; concat / inverse / ETF kept as fallbacks.
+    # Pair conventions follow market standard:
+    #   EUR/GBP/AUD/NZD -> USD second (EUR/USD, GBP/USD, ...)
+    #   JPY/CAD/CHF/MXN/CNY -> USD first (USD/JPY, USD/CAD, ...)
+    "USD":     ["UUP", "DXY"],
+    "EUR":     ["EUR/USD", "EURUSD", "FXE"],
+    "GBP":     ["GBP/USD", "GBPUSD", "FXB"],
+    "AUD":     ["AUD/USD", "AUDUSD", "FXA"],
+    "NZD":     ["NZD/USD", "NZDUSD", "BNZ"],
+    "JPY":     ["USD/JPY", "USDJPY", "FXY"],
+    "CAD":     ["USDCAD", "USD/CAD", "FXC"],
+    "CHF":     ["USD/CHF", "USDCHF", "FXF"],
+    "MXN":     ["USD/MXN", "USDMXN", "FXM"],
+    "CNY":     ["USD/CNY", "USDCNY", "CYB"],
+    # Slash forms — kept for any caller still using them
+    "EUR/USD": ["EURUSD"],
+    "GBP/USD": ["GBPUSD"],
+    "USD/YEN": ["USDJPY"],
+    "USD/JPY": ["USDJPY"],
+    "CAD/USD": ["USDCAD"],
+    "USD/CAD": ["USDCAD"],
+    "AUD/USD": ["AUDUSD"],
+
+    # Vol
+    "VIX":     ["VIXIDX"],
+}
+
+
 def fetch_raw(ticker: str) -> dict | None:
     """GET the MFR API and return the parsed JSON, or None on failure.
 
@@ -308,64 +369,7 @@ def fetch_raw(ticker: str) -> dict | None:
         return None
 
     candidates = [ticker]
-    # Common MFR aliasing — extend as we discover more.
-    # NB: Hedgeye Macro Show TL;DR uses naked currency codes (GBP, CAD, USD)
-    # while MFR's symbol set is mixed: some entries use FX pair codes (EURUSD),
-    # some use ICE/futures dollar-index codes (DXY), and some use the WisdomTree
-    # currency ETF tickers (FXC, FXB, etc.). Try multiple variants per code.
-    aliases = {
-        # Crypto
-        "BITCOIN": ["BTCUSD", "BTC", "CRYPTO.BTC"],
-        "BTC":     ["BTCUSD", "CRYPTO.BTC"],
-        "BTCUSD":  ["CRYPTO.BTC"],
-        "ETH":     ["ETHUSD", "CRYPTO.ETH"],
-        "ETHEREUM":["ETHUSD", "CRYPTO.ETH"],
-        "ETHUSD":  ["CRYPTO.ETH"],
-        "SOL":     ["SOLUSD", "CRYPTO.SOL"],
-        "SOLUSD":  ["CRYPTO.SOL"],
-        "XRP":     ["CRYPTO.XRP"],   "XRPUSD":  ["CRYPTO.XRP"],
-        "AVAX":    ["CRYPTO.AVAX"],  "AVAXUSD": ["CRYPTO.AVAX"],
-        "RUNE":    ["CRYPTO.RUNE"],  "RUNEUSD": ["CRYPTO.RUNE"],
-        "TRX":     ["CRYPTO.TRX"],   "TRXUSD":  ["CRYPTO.TRX"],
-
-        # Commodities
-        "WTIC":    ["WTI", "CRUDE"],
-        "BRENT":   ["BRENTOIL", "BRN"],
-        "GOLD":    ["XAUUSD", "GOLD_FUT"],
-        "SILVER":  ["XAGUSD"],
-        "COPPER":  ["HG", "COPPER_FUT"],
-        "NATGAS":  ["NG", "NATURALGAS"],
-
-        # Currencies — MFR canonical confirmed by user 2026-05-11:
-        #   USD -> "UUP" (Invesco DB Dollar Bullish ETF, MFR's stand-in for the index)
-        #   CAD -> "USD/CAD" (MFR uses standard FX-pair notation;
-        #                     "crosses" put USD first, "majors" put USD second)
-        # Slash-form is the primary; concat / inverse / ETF kept as fallbacks.
-        # Pair conventions follow market standard:
-        #   EUR/GBP/AUD/NZD -> USD second (EUR/USD, GBP/USD, ...)
-        #   JPY/CAD/CHF/MXN/CNY -> USD first (USD/JPY, USD/CAD, ...)
-        "USD":     ["UUP", "DXY"],
-        "EUR":     ["EUR/USD", "EURUSD", "FXE"],
-        "GBP":     ["GBP/USD", "GBPUSD", "FXB"],
-        "AUD":     ["AUD/USD", "AUDUSD", "FXA"],
-        "NZD":     ["NZD/USD", "NZDUSD", "BNZ"],
-        "JPY":     ["USD/JPY", "USDJPY", "FXY"],
-        "CAD":     ["USDCAD", "USD/CAD", "FXC"],
-        "CHF":     ["USD/CHF", "USDCHF", "FXF"],
-        "MXN":     ["USD/MXN", "USDMXN", "FXM"],
-        "CNY":     ["USD/CNY", "USDCNY", "CYB"],
-        # Slash forms — kept for any caller still using them
-        "EUR/USD": ["EURUSD"],
-        "GBP/USD": ["GBPUSD"],
-        "USD/YEN": ["USDJPY"],
-        "USD/JPY": ["USDJPY"],
-        "CAD/USD": ["USDCAD"],
-        "USD/CAD": ["USDCAD"],
-        "AUD/USD": ["AUDUSD"],
-
-        # Vol
-        "VIX":     ["VIXIDX"],
-    }
+    aliases = MFR_ALIASES
     if ticker in aliases:
         candidates.extend(aliases[ticker])
 

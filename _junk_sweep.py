@@ -312,22 +312,59 @@ def main() -> int:
         #
         # If a range is already arriving, there is nothing to enroll. That test
         # needs no alias table of its own.
-        served_now = set()
+        # Walk mfr_client's OWN alias map — the same one fetch_raw uses. Checking
+        # only the candidate's own name caught 3 of ~22 (BITCOIN, USD, GLASF) and
+        # left GOLD, VIX, BRENT, SILVER, COPPER, NATGAS, EUR/USD, USD/YEN and the
+        # rest in the paste line. MFR does not use those symbols: it serves
+        # XAUUSD, VIXIDX, BRENTOIL, XAGUSD, EURUSD.
         try:
-            served_now = {r[0].upper() for r in _fetch(
+            from mfr_client import MFR_ALIASES
+        except Exception as e:
+            MFR_ALIASES = {}
+            print(f"  ⚠️  alias map unavailable ({e}) — macro names may be listed "
+                  f"under a symbol MFR does not accept.")
+
+        def _variants(t):
+            return [t] + list(MFR_ALIASES.get(t, []))
+
+        probe = sorted({v for t in cands for v in _variants(t)})
+        served_any = set()
+        try:
+            served_any = {r[0].upper() for r in _fetch(
                 "SELECT DISTINCT ticker FROM mfr_snapshots "
                 "WHERE ticker = ANY(%s) AND snapshot_date >= CURRENT_DATE - 14",
-                (list(cands),)) if r[0]}
+                (probe,)) if r[0]}
         except Exception as e:
-            print(f"  ⚠️  could not check which names MFR already serves ({e}) — "
-                  f"the list below may contain aliases that are already covered.")
-        good = [t for t in cands
-                if verdicts[t][0] in ("COVERED", "HELD", "TOKEN-ONLY")
-                and t not in served_now]
-        if served_now:
-            print(f"\nalready served by MFR under a canonical symbol "
-                  f"({len(served_now)}) — nothing to enroll, excluded:")
-            print("  " + " ".join(sorted(served_now)))
+            print(f"  ⚠️  could not check what MFR already serves ({e}) — the list "
+                  f"below may contain names already covered under an alias.")
+
+        served, translate, good = [], [], []
+        for t in cands:
+            if verdicts[t][0] not in ("COVERED", "HELD", "TOKEN-ONLY"):
+                continue
+            hit = next((v for v in _variants(t) if v in served_any), None)
+            if hit:
+                served.append(f"{t} → {hit}" if hit != t else t)
+            elif t in MFR_ALIASES:
+                # Hedgeye's name for it, and MFR has never served ANY variant.
+                # Still enrollable — but pasting the Hedgeye name would fail, so
+                # offer MFR's canonical symbol instead.
+                translate.append((t, MFR_ALIASES[t][0]))
+            else:
+                good.append(t)
+
+        if served:
+            print(f"\nALREADY SERVED by MFR ({len(served)}) — a range is already "
+                  f"arriving, nothing to enroll:")
+            print("  " + " · ".join(served))
+        if translate:
+            print(f"\nUSE MFR'S SYMBOL ({len(translate)}) — Hedgeye's name will be "
+                  f"rejected by Activate Assets.\n  Paste the right-hand symbol, "
+                  f"not the left:")
+            for h, m in translate:
+                alts = MFR_ALIASES[h][1:]
+                print(f"    {h:<10} → {m}"
+                      + (f"   (fallbacks: {' '.join(alts)})" if alts else ""))
         print(f"\nENROLLABLE ({len(good)} of {len(cands)}) — paste into "
               f"MFR → Activate Assets:")
         line = ""
@@ -338,8 +375,12 @@ def main() -> int:
             line += t + " "
         if line.strip():
             print(line)
+        # Disjoint from the blocks above: GLASF showed in BOTH "already served"
+        # and "excluded" on the 8/2 run, which is a contradiction — a name cannot
+        # be served by MFR and be an artifact nothing knows.
+        shown = {s.split(" → ")[0] for s in served} | {h for h, _ in translate}
         dropped = [(t, verdicts[t][0]) for t in cands
-                   if verdicts[t][0] in ("JUNK", "PM-ARTIFACT")]
+                   if verdicts[t][0] in ("JUNK", "PM-ARTIFACT") and t not in shown]
         if dropped:
             print(f"\nexcluded ({len(dropped)}): "
                   + " ".join(f"{t}[{v.split('-')[0].lower()}]" for t, v in dropped))
