@@ -10,6 +10,9 @@ Phase 1 (this file) needs NO new feeds:
   * correlation monitor — 4 anchors x 9 assets x 15/30/90/120/180D
   * sector performance, absolute and relative to SPY
   * quad + VIX header, from the same doctrine WEEKEND uses
+  * QUAD vs TAPE — rank-correlates realized returns against each Quad's
+    expected-return ordering, so the pack can say when its own numbers
+    contradict its own header (tools/quad_tape.py)
 Phase 2 adds the MFR vol complex (VIX/VXN/RVX/VVIX/MOVE/GVZ/OVX, confirmed
 ingesting) and the IVOL table. Phase 3 adds CFTC positioning and an FX realized-
 vol proxy. Rates/credit (FRED DGS2/DGS10, HY OAS, BBB) slot into Phase 1's
@@ -30,6 +33,8 @@ import os
 import re
 import urllib.error
 from datetime import date
+
+from tools import quad_tape
 
 log = logging.getLogger("eod_stat_pack")
 
@@ -122,6 +127,17 @@ def mtd_return(closes, dates) -> float | None:
 def qtd_return(closes, dates) -> float | None:
     q = lambda d: (d.year, (d.month - 1) // 3)          # noqa: E731
     return _ptd_return(closes, dates, lambda d, r: q(d) >= q(r))
+
+
+# Windows QUAD vs TAPE scores. MTD is the one that tests the MONTHLY Quad and
+# QTD the quarterly, so the two horizons Hedgeye actually publishes each get a
+# row instead of being approximated by a rolling day count.
+QUAD_TAPE_WINDOWS = [
+    ("1W",  lambda c, d: pct_return(c, 5)),
+    ("1M",  lambda c, d: pct_return(c, 21)),
+    ("MTD", lambda c, d: mtd_return(c, d)),
+    ("QTD", lambda c, d: qtd_return(c, d)),
+]
 
 
 def sector_row(closes, dates) -> dict:
@@ -316,9 +332,15 @@ def _fetch_bars(symbols, lookback_days=LOOKBACK_DAYS):
     return out
 
 
-def _header() -> list:
-    """Quad + VIX, from the same doctrine REPORT and WEEKEND use."""
+def _header() -> tuple[list, str | None]:
+    """Quad + VIX, from the same doctrine REPORT and WEEKEND use.
+
+    Returns (lines, monthly_quad). The Quad is handed back rather than only
+    printed because QUAD vs TAPE has to score against the SAME value the header
+    claims — re-reading it separately would let the two disagree.
+    """
     lines = [f"EOD STAT PACK — {date.today()}"]
+    mq = None
     try:
         import db_pg
         from tools.ps_flow import _quad_for
@@ -335,7 +357,7 @@ def _header() -> list:
         lines.append(regime_line())
     except Exception as e:
         lines.append(f"VOL: unavailable ({e})")
-    return lines
+    return lines, mq
 
 
 # ── rates + credit (FRED) ───────────────────────────────────────────────────
@@ -530,13 +552,14 @@ def _rates_credit_block() -> str:
 
 def build_eod_pack() -> str:
     """Assemble the pack. Every section guarded; a failure prints in place."""
-    parts = _header()
+    parts, header_quad = _header()
 
     need = {BENCH}
     for _, lng, sht, _ in FACTORS:
         need |= {lng, sht}
     need |= set(SECTORS)
     need |= {s for _, s in CORR_ROWS} | {s for _, s in CORR_ANCHORS}
+    need |= set(quad_tape.doctrine_tickers())
     bars = _fetch_bars(sorted(need))
     got = sum(1 for s in need if bars.get(s, {}).get("closes"))
     parts.append(f"(price data: {got}/{len(need)} symbols)")
@@ -544,6 +567,10 @@ def build_eod_pack() -> str:
     def _rets(sym):
         b = bars.get(sym) or {}
         return returns_row(b.get("closes"), b.get("dates"))
+
+    parts.append("")
+    parts.append(quad_tape.quad_tape_block(bars, header_quad,
+                                           QUAD_TAPE_WINDOWS))
 
     try:
         rows = []

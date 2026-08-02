@@ -307,6 +307,60 @@ def test_mfr_token_is_stripped_too():
             _os.environ["MFR_API_TOKEN"] = prev
 
 
+def test_quad_tape_windows_are_wired_and_labelled_honestly():
+    """The 1W/1M/MTD/QTD lambdas the pack actually passes to quad_tape.
+
+    test_quad_tape.py exercises the section with hand-rolled lambdas, so this
+    wiring — the part a reader would most want verified — had no coverage at all.
+    """
+    import datetime as _dt
+    from tools.eod_stat_pack import QUAD_TAPE_WINDOWS
+
+    labels = [lbl for lbl, _ in QUAD_TAPE_WINDOWS]
+    assert labels == ["1W", "1M", "MTD", "QTD"], labels
+
+    # One close per calendar day is fine: the windows count POSITIONS, and MTD /
+    # QTD read the dates. 1.0 growth per step makes each answer exact.
+    dates = [_dt.date(2026, 3, 1) + _dt.timedelta(days=i) for i in range(180)]
+    closes = [100.0 + i for i in range(180)]
+    got = {lbl: fn(closes, dates) for lbl, fn in QUAD_TAPE_WINDOWS}
+
+    # 1W = 5 back, 1M = 21 back — exactly what the labels claim.
+    assert abs(got["1W"] - (closes[-1] / closes[-6] - 1)) < 1e-12, got["1W"]
+    assert abs(got["1M"] - (closes[-1] / closes[-22] - 1)) < 1e-12, got["1M"]
+
+    # MTD/QTD off the last close BEFORE the boundary, not the first close in it.
+    last = dates[-1]                                    # 2026-08-27
+    m_base = max(i for i, d in enumerate(dates) if d.month < last.month)
+    assert abs(got["MTD"] - (closes[-1] / closes[m_base] - 1)) < 1e-12
+    q_base = max(i for i, d in enumerate(dates) if (d.month - 1) // 3 < 2)
+    assert abs(got["QTD"] - (closes[-1] / closes[q_base] - 1)) < 1e-12
+    assert got["QTD"] > got["MTD"] > 0, got
+
+    # A series too short for a window yields None, never an IndexError and never
+    # a silently-wrong number off whatever element the negative index landed on.
+    assert all(fn([100.0, 101.0], dates[:2]) is None
+               for lbl, fn in QUAD_TAPE_WINDOWS if lbl in ("1W", "1M"))
+    assert all(fn([], []) is None for _, fn in QUAD_TAPE_WINDOWS)
+
+
+def test_header_returns_the_quad_alongside_its_lines():
+    """_header() went from -> list to -> (lines, quad) so QUAD vs TAPE scores
+    against the SAME value the header prints. Nothing covered the signature, so
+    a caller unpacking it as a list would have failed only in production.
+
+    No DB here: the DB block raises, which is the interesting path — mq must be
+    None, NOT a stale or defaulted Quad."""
+    from tools.eod_stat_pack import _header
+    lines, quad = _header()
+    assert isinstance(lines, list) and lines, lines
+    assert lines[0].startswith("EOD STAT PACK"), lines[0]
+    assert quad is None or str(quad).startswith("Quad"), quad
+    # And the section must not manufacture a verdict from that None.
+    from tools.quad_tape import verdict
+    assert verdict({"rho": {"Quad 4": 0.9}, "crit": 0.3}, None) == "no header"
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0
