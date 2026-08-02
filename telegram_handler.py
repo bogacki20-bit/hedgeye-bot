@@ -346,6 +346,7 @@ def _dispatch_message(token, chat_id, text):
     def _dpk():  from tools.daypack import handle_daypack_command;        return handle_daypack_command(text)
     def _kp():   from tools.keith_pattern import handle_keith_command;    return handle_keith_command(text)
     def _wk():   from tools.weekend_report import handle_weekend_command; return handle_weekend_command(text)
+    def _eod():  from tools.eod_stat_pack import handle_eod_command;      return handle_eod_command(text)
     def _sc():   from tools.shadow_scorecard import handle_scorecard_command; return handle_scorecard_command(text)
 
     # report runs BEFORE screen: report owns exact sentinels (REPORT*, BOOK
@@ -357,6 +358,7 @@ def _dispatch_message(token, chat_id, text):
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
                      ("daypack", _dpk), ("keith", _kp), ("weekend", _wk),
+                     ("eod", _eod),
                      ("scorecard", _sc)):
         reply = run(name, fn)
         if reply is not None:
