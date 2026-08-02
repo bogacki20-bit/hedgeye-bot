@@ -239,21 +239,36 @@ ALLTIME_SQL = {
                "WHERE side IN ('long','short')",
     "riskrange": "SELECT DISTINCT ticker FROM hedgeye_risk_ranges "
                  "WHERE buy_trade IS NOT NULL AND sell_trade IS NOT NULL",
+    # 2026-08-02 — these seven were added with `ticker IS NOT NULL` and nothing
+    # else, which is the exact mistake the junk sweep's coverage model exists to
+    # prevent: membership-only rows can never vouch for a name. The live sweep
+    # showed the cost immediately — 39 JUNK in a 181-name backlog, tagged
+    # `scraped by retail` and `scraped by portactions`.
+    #
+    # Every one of these tables DOES carry a value column. Requiring it drops the
+    # bare-token rows a scraping regex produces while keeping the breadth the
+    # enroll-everything policy wants.
     "rta":       "SELECT DISTINCT ticker FROM hedgeye_rta "
-                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+                 "WHERE side IS NOT NULL OR price IS NOT NULL",
     "sigchange": "SELECT DISTINCT ticker FROM hedgeye_signal_changes "
-                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+                 "WHERE new_state IS NOT NULL",
     "portactions": "SELECT DISTINCT ticker FROM hedgeye_portfolio_actions "
-                   "WHERE ticker IS NOT NULL AND ticker <> ''",
+                   "WHERE action IS NOT NULL AND bps IS NOT NULL",
     "iichanges": "SELECT DISTINCT ticker FROM hedgeye_ii_changes "
-                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+                 "WHERE change_type IS NOT NULL",
     "hedgai":    "SELECT DISTINCT ticker FROM hedgeye_hedgai "
-                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+                 "WHERE side IS NOT NULL OR action IS NOT NULL",
     "momo":      "SELECT DISTINCT ticker FROM hedgeye_momo "
-                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+                 "WHERE pct_change IS NOT NULL OR sentiment IS NOT NULL",
     "retail":    "SELECT DISTINCT ticker FROM hedgeye_retail "
-                 "WHERE ticker IS NOT NULL AND ticker <> ''",
+                 "WHERE side IS NOT NULL",
 }
+# NOTE this does NOT fully close it. Where a parser assigns a side to an entire
+# block, a scraped token inherits that side and still passes. parser_retail.py:95
+# (`_SCAN_RE = \b[A-Z]{2,5}\b`) and the portfolio-actions path are the two the
+# live sweep fingered and neither is fixed yet — same class as the keiths and
+# signal-strength regexes already bounded. Run _junk_sweep.py before enrolling;
+# that is what it is for.
 
 
 def enrollment_universe() -> dict:
