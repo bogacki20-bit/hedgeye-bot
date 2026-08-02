@@ -56,6 +56,17 @@ KNOWN_UNCOVERABLE = {
     # that. Blocking a real ticker forever, to defend against a bug that no
     # longer exists, is the same failure as the stopword list this whole thread
     # was about. Do not re-add. If they reappear, that is signal.
+
+    # ── Treasury yields — MFR ranges instruments, not rates (2026-08-02) ────
+    # Operator: "we can take out the treasury yields cuz MFR doesn't range them."
+    # These classify as COVERED and correctly so: Hedgeye publishes risk ranges
+    # on the yield itself, so hedgeye_risk_ranges carries buy_trade/sell_trade
+    # for all three. But COVERED means "Hedgeye published data", NOT "MFR will
+    # accept it". Not an alias case either — there is no MFR symbol to translate
+    # to. Without this they sit in the backlog permanently and get hand-deleted
+    # from every paste line, the same permanent-resident problem as the *USD
+    # crypto names in PARKED_FOR_SOURCE below.
+    "UST10Y", "UST2Y", "UST30Y",
 }
 
 # Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.
