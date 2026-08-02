@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,136 @@ def _normalize(q: Optional[str]) -> Optional[str]:
     if s in ("1", "2", "3", "4"):
         return f"Quad {s}"
     return None
+
+
+# ─────────────────────────── staleness ───────────────────────────────
+#
+# Added 2026-08-02 after the August rollover shipped a WRONG header.
+#
+# On 8/2 the EOD pack printed "QUAD: monthly=Quad 4 quarterly=Quad 4 (last
+# confirm 2026-07-31)". The confirmed state was monthly=Quad 3 / quarterly=
+# Quad 4. Nothing malfunctioned: quad_regime_history has no column saying which
+# MONTH a monthly_quad is for, so the read path did the only thing it could —
+# returned the latest row — and July's monthly silently became August's.
+#
+# Hedgeye publishes a new monthly Quad every month. So a monthly value last
+# confirmed inside a previous calendar month is not a current reading, it is a
+# leftover, and the two are indistinguishable downstream unless the read path
+# says so. Same argument one level up for the quarterly axis and quarters.
+#
+# This does NOT derive, default, or advance anything — deriving a Quad is
+# exactly the failure being fixed. It carries the confirmed value forward
+# untouched and reports that it needs re-confirming. Hedgeye stays the only
+# source; the QUAD: command stays the only input.
+
+MARKET_TZ = "America/New_York"
+
+# Every non-history read path returns these so callers get one stable shape.
+# No confirmation timestamp is the MOST unconfirmed a Quad can be, so both axes
+# report stale rather than silently reading as current.
+_NO_CONFIRMATION = {"effective_at": None, "confirmed_on": None,
+                    "monthly_stale": True, "quarterly_stale": True,
+                    "stale_reason": "no confirmation timestamp"}
+
+
+def _month_key(d):
+    return (d.year, d.month)
+
+
+def _quarter_key(d):
+    return (d.year, (d.month - 1) // 3)
+
+
+def market_date(value):
+    """Any timestamp-ish value -> the ET CALENDAR DATE it belongs to.
+
+    This is the whole ballgame for staleness and it is not cosmetic.
+    `quad_regime_history.effective_at` is TIMESTAMPTZ DEFAULT NOW(), and Railway
+    runs UTC, so an operator setting the Quad at 20:30 ET on 7/31 is stored as
+    00:30 UTC on 8/1. Calling .date() on that tz-aware value returns 2026-08-01
+    — an AUGUST date for a JULY action. The monthly axis then reads FRESH on
+    8/2 and the whole B1 guard silently does nothing, which is the exact bug it
+    exists to catch. Same trap one level up: a 6/30 evening confirmation becomes
+    7/1 UTC and a whole quarter rollover goes unflagged.
+
+    Naive values are assumed to already be ET (that is what a `date` from the
+    caller means). Strings are parsed so a caller handing us a raw DB text
+    column gets the right answer instead of an AttributeError.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                return date.fromisoformat(value.strip()[:10])
+            except ValueError:
+                return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            try:
+                from zoneinfo import ZoneInfo
+                value = value.astimezone(ZoneInfo(MARKET_TZ))
+            except Exception:
+                # No tzdata: UTC-5 is still far closer than not converting, and
+                # the failure mode being avoided is a late-evening ET
+                # confirmation reading as the next calendar day.
+                value = value.astimezone(timezone(timedelta(hours=-5)))
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
+def today_market() -> date:
+    """Today in ET. `date.today()` is container-local — UTC on Railway — so
+    between 20:00 and 24:00 ET it is already tomorrow, and on the last evening
+    of a month it disagrees with the trading calendar the Quad is keyed to."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(MARKET_TZ)).date()
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=-5))).date()
+
+
+def quad_staleness(effective_at, asof=None) -> dict:
+    """Is a Quad confirmed at `effective_at` still current as of `asof`?
+
+    Returns {'monthly_stale', 'quarterly_stale', 'confirmed_on', 'reason'}.
+    Both sides are normalised to ET calendar dates first — see market_date().
+    `asof` defaults to today in ET.
+
+    Staleness is a CALENDAR question, not an elapsed-days one. A monthly Quad
+    confirmed 7/31 is one day old and already stale on 8/1, while one confirmed
+    8/1 is stale on nothing until September. Counting days would call the first
+    fresh and is the bug this replaces.
+
+    Unknown or unparseable `effective_at` returns stale on both axes: an
+    unconfirmable Quad must never present as confirmed.
+    """
+    out = {"monthly_stale": True, "quarterly_stale": True,
+           "confirmed_on": None, "reason": "no confirmation timestamp"}
+    asof = market_date(asof) if asof is not None else today_market()
+    eff = market_date(effective_at)
+    if eff is None or asof is None:
+        if effective_at is not None:
+            out["reason"] = f"unparseable confirmation timestamp: {effective_at!r}"
+        return out
+    out["confirmed_on"] = str(eff)[:10]
+    out["monthly_stale"] = _month_key(eff) < _month_key(asof)
+    out["quarterly_stale"] = _quarter_key(eff) < _quarter_key(asof)
+    # A future-dated confirmation is not stale, but it is not normal either.
+    if _month_key(eff) > _month_key(asof):
+        out["reason"] = f"confirmed {out['confirmed_on']}, AHEAD of {asof}"
+        return out
+    bad = [k for k, v in (("monthly", out["monthly_stale"]),
+                          ("quarterly", out["quarterly_stale"])) if v]
+    out["reason"] = (f"{' and '.join(bad)} last confirmed "
+                     f"{out['confirmed_on']}, before this "
+                     f"{'quarter' if out['quarterly_stale'] else 'month'}"
+                     ) if bad else ""
+    return out
 
 
 # ─────────────────────────── canonical read ──────────────────────────
@@ -80,10 +210,22 @@ def current_quad_regime() -> dict[str, Optional[str]]:
                 )
                 row = cur.fetchone()
         if row:
+            # effective_at was SELECTed and then thrown away, so every consumer
+            # of the canonical read path — price_monitor, decision_engine,
+            # quad_detector, the parsers — got July's monthly Quad in August
+            # with no way to know. The staleness fields are additive: existing
+            # callers keep working unchanged, and new ones can refuse to act on
+            # an unconfirmed regime instead of trusting it silently.
+            st = quad_staleness(row[3])
             return {
                 "monthly_quad":   _normalize(row[0]) or row[0],
                 "quarterly_quad": _normalize(row[1]) or row[1],
                 "source":         f"history:{row[2]}",
+                "effective_at":   row[3],
+                "confirmed_on":   st["confirmed_on"],
+                "monthly_stale":  st["monthly_stale"],
+                "quarterly_stale": st["quarterly_stale"],
+                "stale_reason":   st["reason"],
             }
     except Exception as e:
         log.debug("quad_regime: history lookup failed (%s); falling back to env",
@@ -93,7 +235,11 @@ def current_quad_regime() -> dict[str, Optional[str]]:
     env_m = _normalize(os.environ.get("CURRENT_MONTHLY_QUAD_OVERRIDE"))
     env_q = _normalize(os.environ.get("CURRENT_QUARTERLY_QUAD_OVERRIDE"))
     if env_m and env_q:
-        return {"monthly_quad": env_m, "quarterly_quad": env_q, "source": "env"}
+        # Same key set as the history path — an env/doctrine/fallback Quad has
+        # no confirmation timestamp at all, which is the most unconfirmed a
+        # Quad can be, so both axes report stale.
+        return {"monthly_quad": env_m, "quarterly_quad": env_q, "source": "env",
+                **_NO_CONFIRMATION}
 
     # 3. doctrine fallback
     try:
@@ -102,6 +248,7 @@ def current_quad_regime() -> dict[str, Optional[str]]:
             "monthly_quad":   _normalize(current_monthly_quad())   or _FALLBACK_MONTHLY,
             "quarterly_quad": _normalize(current_quarterly_quad()) or _FALLBACK_QUARTERLY,
             "source":         "doctrine",
+            **_NO_CONFIRMATION,
         }
     except Exception as e:
         log.debug("quad_regime: doctrine fallback failed (%s)", e)
@@ -114,6 +261,7 @@ def current_quad_regime() -> dict[str, Optional[str]]:
         "monthly_quad":   _FALLBACK_MONTHLY,
         "quarterly_quad": _FALLBACK_QUARTERLY,
         "source":         "fallback",
+        **_NO_CONFIRMATION,
     }
 
 

@@ -61,9 +61,14 @@ BENCH = "SPY"
 
 # ── correlation monitor ─────────────────────────────────────────────────────
 CORR_ROWS = [("SPX", "SPY"), ("Nasdaq", "QQQ"), ("R2000", "IWM"),
-             ("20y UST", "TLT"), ("Oil", "USO"), ("Gold", "GLD"),
+             ("20y+ UST", "TLT"), ("Oil", "USO"), ("Gold", "GLD"),
              ("Copper", "CPER"), ("HY", "HYG"), ("Bitcoin", "BTC-USD")]
-CORR_ANCHORS = [("USD", "UUP"), ("SPX", "SPY"), ("10y", "TLT"), ("Oil", "USO")]
+# H1: TLT is the 20y+ Treasury ETF. It was labelled "20y UST" as a row and
+# "10y" as an anchor IN THE SAME PACK, so the correlation monitor appeared to
+# carry two different instruments that were one series. 20y+ is the accurate
+# one and is now used in both places.
+CORR_ANCHORS = [("USD", "UUP"), ("SPX", "SPY"), ("20y+ UST", "TLT"),
+                ("Oil", "USO")]
 CORR_WINDOWS = [15, 30, 90, 120, 180]
 
 # Trading-day windows. YTD is handled separately — it needs dates, not a count.
@@ -332,7 +337,19 @@ def _fetch_bars(symbols, lookback_days=LOOKBACK_DAYS):
     return out
 
 
-def _header() -> tuple[list, str | None]:
+def _now_et() -> str:
+    """Wall clock in ET, for the as-of stamp. Falls back to naive local time
+    rather than failing the whole pack over a missing tzdata."""
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).strftime(
+            "%Y-%m-%d %H:%M ET")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d %H:%M (local)")
+
+
+def _header() -> tuple[list, str | None, bool]:
     """Quad + VIX, from the same doctrine REPORT and WEEKEND use.
 
     Returns (lines, monthly_quad). The Quad is handed back rather than only
@@ -340,24 +357,52 @@ def _header() -> tuple[list, str | None]:
     claims — re-reading it separately would let the two disagree.
     """
     lines = [f"EOD STAT PACK — {date.today()}"]
-    mq = None
+    # FAIL CLOSED. These start at "no Quad, and treat it as unconfirmed", and
+    # are only relaxed on the success path at the bottom of the try.
+    #
+    # The previous version initialised stale=False and assigned mq mid-try, so
+    # any exception AFTER the _quad_for call — a dropped connection on cursor
+    # teardown, a bad timestamp — left a real Quad paired with stale=False. The
+    # header printed "QUAD: unavailable" and the next section printed CONFIRM
+    # against that Quad. That is the same class of failure as the bug this
+    # whole guard exists to fix, reintroduced by the guard's own error path.
+    mq, stale = None, True
     try:
         import db_pg
         from tools.ps_flow import _quad_for
+        from tools.quad_regime import quad_staleness, today_market
+        today = today_market()
         with db_pg.get_conn() as conn, conn.cursor() as cur:
-            mq, qq = _quad_for(cur, date.today())
+            _mq, qq = _quad_for(cur, today)
             cur.execute("SELECT max(effective_at) FROM quad_regime_history")
             conf = cur.fetchone()[0]
-        lines.append(f"QUAD: monthly={mq or '?'} quarterly={qq or '?'} "
-                     f"(last confirm {str(conf)[:10] if conf else 'NONE'})")
+        st = quad_staleness(conf, today)
+        lines.append(f"QUAD: monthly={_mq or '?'} quarterly={qq or '?'} "
+                     f"(last confirm {st['confirmed_on'] or 'NONE'})")
+        mq, stale = _mq, st["monthly_stale"]
+        if stale or st["quarterly_stale"]:
+            # Carried forward UNCHANGED and flagged. Not re-derived, not
+            # defaulted — the 8/2 header was wrong because July's monthly Quad
+            # silently became August's, and the cure for that is saying so, not
+            # guessing a replacement.
+            axes = ("monthly and quarterly" if st["quarterly_stale"]
+                    else "monthly")
+            lines.append(f"  ⚠ STALE — carried forward unchanged from "
+                         f"{st['confirmed_on'] or 'an unknown date'}. The "
+                         f"{axes} Quad has not been")
+            lines.append(f"    confirmed for this "
+                         f"{'quarter' if st['quarterly_stale'] else 'month'}. "
+                         f"Set it with the QUAD: command before trading off "
+                         f"this pack.")
     except Exception as e:
         lines.append(f"QUAD: unavailable ({e})")
+        mq, stale = None, True
     try:
         from tools.vol_regime import regime_line
         lines.append(regime_line())
     except Exception as e:
         lines.append(f"VOL: unavailable ({e})")
-    return lines, mq
+    return lines, mq, stale
 
 
 # ── rates + credit (FRED) ───────────────────────────────────────────────────
@@ -552,7 +597,7 @@ def _rates_credit_block() -> str:
 
 def build_eod_pack() -> str:
     """Assemble the pack. Every section guarded; a failure prints in place."""
-    parts, header_quad = _header()
+    parts, header_quad, quad_stale = _header()
 
     need = {BENCH}
     for _, lng, sht, _ in FACTORS:
@@ -562,7 +607,13 @@ def build_eod_pack() -> str:
     need |= set(quad_tape.doctrine_tickers())
     bars = _fetch_bars(sorted(need))
     got = sum(1 for s in need if bars.get(s, {}).get("closes"))
-    parts.append(f"(price data: {got}/{len(need)} symbols)")
+    # H2: as-of stamp. The LAST BAR DATE, not the clock — a pack built at 09:00
+    # Monday off Friday's closes is not stale by the clock and is stale by three
+    # days of tape. Both are printed so the gap between them is visible.
+    last_bar = max((b["dates"][-1] for b in bars.values()
+                    if b.get("dates")), default=None)
+    parts.append(f"(price data: {got}/{len(need)} symbols · last bar "
+                 f"{last_bar or 'n/a'} · built {_now_et()})")
 
     def _rets(sym):
         b = bars.get(sym) or {}
@@ -570,7 +621,8 @@ def build_eod_pack() -> str:
 
     parts.append("")
     parts.append(quad_tape.quad_tape_block(bars, header_quad,
-                                           QUAD_TAPE_WINDOWS))
+                                           QUAD_TAPE_WINDOWS,
+                                           stale=quad_stale))
 
     try:
         rows = []

@@ -174,10 +174,19 @@ def test_the_eight_specced_factors_are_present():
 
 
 def test_correlation_rows_and_anchors_match_the_spec():
-    assert [r[0] for r in CORR_ROWS] == ["SPX", "Nasdaq", "R2000", "20y UST",
+    assert [r[0] for r in CORR_ROWS] == ["SPX", "Nasdaq", "R2000", "20y+ UST",
                                          "Oil", "Gold", "Copper", "HY", "Bitcoin"]
-    assert [a[0] for a in CORR_ANCHORS] == ["USD", "SPX", "10y", "Oil"]
+    assert [a[0] for a in CORR_ANCHORS] == ["USD", "SPX", "20y+ UST", "Oil"]
     assert CORR_WINDOWS == [15, 30, 90, 120, 180]
+
+    # H1: TLT appeared as a ROW labelled "20y UST" and an ANCHOR labelled "10y"
+    # in the same pack, so one series read as two different instruments. Any
+    # symbol used in both places must carry the same label in both.
+    by_sym = {}
+    for label, sym in list(CORR_ROWS) + list(CORR_ANCHORS):
+        by_sym.setdefault(sym, set()).add(label)
+    clashes = {s: ls for s, ls in by_sym.items() if len(ls) > 1}
+    assert not clashes, clashes
 
 
 def test_command_claims_only_its_own_sentinels():
@@ -352,13 +361,212 @@ def test_header_returns_the_quad_alongside_its_lines():
     No DB here: the DB block raises, which is the interesting path — mq must be
     None, NOT a stale or defaulted Quad."""
     from tools.eod_stat_pack import _header
-    lines, quad = _header()
+    lines, quad, stale = _header()
     assert isinstance(lines, list) and lines, lines
     assert lines[0].startswith("EOD STAT PACK"), lines[0]
     assert quad is None or str(quad).startswith("Quad"), quad
+    assert isinstance(stale, bool), stale
     # And the section must not manufacture a verdict from that None.
     from tools.quad_tape import verdict
     assert verdict({"rho": {"Quad 4": 0.9}, "crit": 0.3}, None) == "no header"
+
+
+def test_the_august_rollover_that_shipped_a_wrong_header():
+    """B1 end-to-end, replaying 2026-08-02 exactly.
+
+    The pack printed "QUAD: monthly=Quad 4 quarterly=Quad 4 (last confirm
+    2026-07-31)" when the confirmed monthly Quad was Quad 3, then scored QUAD
+    vs TAPE against Quad 4 and returned CONFIRM. Correct arithmetic, wrong
+    question — which is worse than no answer, because it reads as agreement.
+    """
+    import datetime as _dt
+    from tools.quad_regime import quad_staleness
+    from tools.quad_tape import quad_tape_block, load_table
+
+    st = quad_staleness(_dt.datetime(2026, 7, 31, 16, 0), _dt.date(2026, 8, 2))
+    assert st["monthly_stale"] is True, st
+    assert st["quarterly_stale"] is False, st      # Q3 quarterly WAS current
+
+    # Feed a tape that genuinely fits Quad 4 — i.e. the case where the old code
+    # was most confident and most wrong.
+    table = load_table()
+    bars = {t: {"closes": [100.0] * 30 + [100.0 * (1 + v[3] / 100.0)],
+                "dates": []} for t, v in table.items()}
+    win = [("1M", lambda c, d: c[-1] / c[-22] - 1)]
+
+    fresh = quad_tape_block(bars, "Quad 4", win, stale=False)
+    assert "CONFIRM" in fresh and "AWAIT" not in fresh, fresh[:400]
+
+    stale = quad_tape_block(bars, "Quad 4", win, stale=True)
+    assert "HEADER QUAD IS UNCONFIRMED" in stale, stale[:400]
+    # The rho table survives — the numbers were never the problem.
+    assert "floor" in stale and "Quad 4" in stale, stale[:400]
+
+    # Read the VERDICT CELL out of the data row rather than substring-hunting
+    # the whole block: "UNCONFIRMED" contains "CONFIRM", and prose in the legend
+    # legitimately names every verdict word. Only the cell is the claim.
+    import re as _re
+    KNOWN = {"CONFIRM", "DIVERGE", "NOISE", "AWAIT CONFIRM", "no header", "n/a"}
+
+    def _verdict_cell(block):
+        row = next(l for l in block.split("\n") if l.startswith("1M "))
+        hits = [f for f in _re.split(r"\s{2,}", row.strip()) if f in KNOWN]
+        assert len(hits) == 1, (hits, row)
+        return hits[0]
+
+    assert _verdict_cell(stale) == "AWAIT CONFIRM", repr(_verdict_cell(stale))
+    assert _verdict_cell(fresh) == "CONFIRM", repr(_verdict_cell(fresh))
+
+
+def _stub_db(monkey_rows, effective_at):
+    """Fake db_pg + ps_flow._quad_for so _header() can be driven without a DB."""
+    import contextlib
+    import sys
+    import types
+
+    class _Cur:
+        def __init__(self): self._r = None
+        def execute(self, sql, *a): self._r = (effective_at,)
+        def fetchone(self): return self._r
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _Conn:
+        def cursor(self): return _Cur()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    fake = types.ModuleType("db_pg")
+    fake.get_conn = lambda: _Conn()
+    ps = types.ModuleType("tools.ps_flow")
+    ps._quad_for = lambda cur, d: monkey_rows
+
+    @contextlib.contextmanager
+    def _ctx():
+        old = {k: sys.modules.get(k) for k in ("db_pg", "tools.ps_flow")}
+        sys.modules["db_pg"], sys.modules["tools.ps_flow"] = fake, ps
+        try:
+            yield
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+    return _ctx()
+
+
+def test_header_marks_a_prior_month_confirmation_stale():
+    """The B1 WIRING, not just the helper.
+
+    Mutation-checked: setting `stale = False` in _header, or passing
+    stale=False into quad_tape_block, previously left BOTH suites green. The
+    guard could be fully disconnected and nothing noticed. These drive
+    _header() itself.
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from tools.eod_stat_pack import _header
+
+    # Exactly the 8/2 row: a July confirmation stored as a UTC timestamp.
+    july = _dt.datetime(2026, 7, 31, 20, 30,
+                        tzinfo=ZoneInfo("America/New_York")) \
+        .astimezone(_dt.timezone.utc)
+    assert july.date() == _dt.date(2026, 8, 1)   # the trap: UTC says August
+
+    with _stub_db(("Quad 4", "Quad 4"), july):
+        lines, quad, stale = _header()
+    assert quad == "Quad 4", quad                # carried forward UNCHANGED
+    blob = "\n".join(lines)
+    # Only stale if we are actually past July — the guard is date-dependent, so
+    # assert the relationship rather than a hardcoded verdict.
+    from tools.quad_regime import quad_staleness, today_market
+    expect = quad_staleness(july, today_market())["monthly_stale"]
+    assert stale is expect, (stale, expect, today_market())
+    if expect:
+        assert "STALE" in blob and "carried forward unchanged" in blob, blob
+        assert "2026-07-31" in blob, blob         # ET date, not the UTC 08-01
+    else:
+        assert "STALE" not in blob, blob
+
+
+def test_header_fails_closed_when_the_db_blows_up_mid_read():
+    """A real Quad must never escape paired with stale=False.
+
+    _header used to assign mq inside the try and initialise stale=False, so an
+    exception AFTER the _quad_for call left a live Quad marked fresh: the header
+    printed 'QUAD: unavailable' and the next section printed CONFIRM against it.
+    That is the same failure the whole guard exists to prevent, reintroduced by
+    the guard's own error path.
+    """
+    import sys
+    import types
+    from tools.eod_stat_pack import _header
+
+    class _Boom:
+        def cursor(self): raise RuntimeError("connection reset by peer")
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    fake = types.ModuleType("db_pg")
+    fake.get_conn = lambda: _Boom()
+    ps = types.ModuleType("tools.ps_flow")
+    ps._quad_for = lambda cur, d: ("Quad 4", "Quad 4")
+
+    old = {k: sys.modules.get(k) for k in ("db_pg", "tools.ps_flow")}
+    sys.modules["db_pg"], sys.modules["tools.ps_flow"] = fake, ps
+    try:
+        lines, quad, stale = _header()
+    finally:
+        for k, v in old.items():
+            sys.modules[k] = v if v is not None else sys.modules.pop(k, None)
+
+    assert quad is None, quad
+    assert stale is True, stale
+    assert any("QUAD: unavailable" in ln for ln in lines), lines
+
+    # The case that actually mattered: the Quad read SUCCEEDS and the failure
+    # comes afterwards, on the effective_at query. The old code had already
+    # written a live Quad into `mq` by then, with stale still False from its
+    # initialiser — so a real Quad escaped marked fresh. Failing on cursor()
+    # (above) never exercised that; this does.
+    class _LateBoom:
+        def execute(self, sql, *a): raise RuntimeError("server closed connection")
+        def fetchone(self): return (None,)
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class _LateConn:
+        def cursor(self): return _LateBoom()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    fake.get_conn = lambda: _LateConn()
+    sys.modules["db_pg"], sys.modules["tools.ps_flow"] = fake, ps
+    try:
+        lines2, quad2, stale2 = _header()
+    finally:
+        for k, v in old.items():
+            sys.modules[k] = v if v is not None else sys.modules.pop(k, None)
+
+    assert quad2 is None, f"a live Quad escaped a failed read: {quad2}"
+    assert stale2 is True, stale2
+    assert any("QUAD: unavailable" in ln for ln in lines2), lines2
+
+
+def test_build_eod_pack_threads_staleness_into_the_section():
+    """The last link: _header -> build_eod_pack -> quad_tape_block.
+
+    Asserted on the SOURCE because running build_eod_pack needs network. A
+    literal `stale=False` at the call site is exactly the mutation that survived
+    review, so pin the identifier.
+    """
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "tools", "eod_stat_pack.py"), encoding="utf-8").read()
+    assert "parts, header_quad, quad_stale = _header()" in src, \
+        "build_eod_pack must unpack the staleness flag from _header"
+    assert "stale=quad_stale" in src, \
+        "quad_tape_block must receive _header's flag, not a literal"
 
 
 if __name__ == "__main__":

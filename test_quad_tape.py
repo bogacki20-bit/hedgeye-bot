@@ -10,9 +10,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from tools.quad_tape import (  # noqa: E402
     DETAIL_PREF, MIN_NAMES, QUADS, TIE_EPS, avg_ranks, doctrine_tickers,
-    fit_all_quads, format_quad_tape, load_table, pair, quad_index,
+    fit_all_quads, format_quad_tape, headline, load_table, pair, quad_index,
     quad_tape_block, rank_gaps, rho_critical, spearman, verdict,
 )
+from tools.quad_regime import quad_staleness  # noqa: E402
 
 FAILED = []
 
@@ -31,6 +32,100 @@ def approx(name, got, want, tol=1e-9):
     if not ok:
         print(f"        got  {got!r}\n        want ~{want!r}")
         FAILED.append(name)
+
+
+# ── quad_staleness (B1) ─────────────────────────────────────────────────────
+# The 2026-08-02 bug: the pack printed "monthly=Quad 4 (last confirm
+# 2026-07-31)" at the August turn when the confirmed monthly Quad was Quad 3.
+# quad_regime_history has no column for WHICH MONTH a monthly_quad is for, so
+# the read path returned the latest row and July's monthly silently became
+# August's. Staleness is the calendar question that makes that visible.
+import datetime as _dt  # noqa: E402
+
+
+def _stale(eff, asof):
+    return quad_staleness(_dt.date.fromisoformat(eff) if eff else None,
+                          _dt.date.fromisoformat(asof))
+
+
+# THE case. One day apart, but across a month boundary.
+_b1 = _stale("2026-07-31", "2026-08-02")
+check("B1: monthly confirmed in July is stale in August", _b1["monthly_stale"],
+      True)
+# The quarterly axis was CORRECT that day (Quad 4, still Q3) and must not be
+# swept up — over-flagging trains the operator to ignore the flag.
+check("B1: quarterly confirmed 7/31 is fresh in Q3", _b1["quarterly_stale"],
+      False)
+check("B1: reports the confirmation date", _b1["confirmed_on"], "2026-07-31")
+check("B1: explains itself", "before this month" in _b1["reason"], True)
+
+# Elapsed DAYS is the wrong measure and would invert both of these.
+check("staleness is calendar, not elapsed: 1 day across a month = stale",
+      _stale("2026-07-31", "2026-08-01")["monthly_stale"], True)
+check("staleness is calendar, not elapsed: 27 days inside a month = fresh",
+      _stale("2026-08-01", "2026-08-28")["monthly_stale"], False)
+
+check("same day is fresh", _stale("2026-08-02", "2026-08-02")["monthly_stale"],
+      False)
+_q = _stale("2026-06-30", "2026-08-02")
+check("a prior quarter is stale on both axes",
+      (_q["monthly_stale"], _q["quarterly_stale"]), (True, True))
+check("prior-quarter reason names the quarter",
+      "before this quarter" in _q["reason"], True)
+# Quarter boundaries: Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec.
+check("Mar 31 -> Apr 1 crosses a quarter",
+      _stale("2026-03-31", "2026-04-01")["quarterly_stale"], True)
+check("Jul 1 -> Sep 30 is the same quarter",
+      _stale("2026-07-01", "2026-09-30")["quarterly_stale"], False)
+check("Dec 31 -> Jan 1 crosses a year",
+      _stale("2025-12-31", "2026-01-01")["monthly_stale"], True)
+# An unconfirmable Quad must never present as confirmed.
+check("no timestamp is stale on both axes",
+      (_stale(None, "2026-08-02")["monthly_stale"],
+       _stale(None, "2026-08-02")["quarterly_stale"]), (True, True))
+check("no timestamp says so", _stale(None, "2026-08-02")["reason"],
+      "no confirmation timestamp")
+# asof defaults to TODAY in ET (not "unknown") — the pack always asks about now.
+check("asof defaults to today",
+      quad_staleness(_dt.date(2026, 8, 2), None),
+      quad_staleness(_dt.date(2026, 8, 2), _dt.date.today()))
+# Railway runs UTC, so date.today() there is already tomorrow after 20:00 ET.
+# A confirmation made this evening ET must not read as yesterday's.
+check("a tz-aware evening confirmation keeps its ET date",
+      quad_staleness(_dt.datetime(2026, 7, 31, 20, 30,
+                                  tzinfo=_dt.timezone(_dt.timedelta(hours=-4))),
+                     _dt.date(2026, 8, 2))["confirmed_on"], "2026-07-31")
+check("...and is therefore stale, not fresh",
+      quad_staleness(_dt.datetime(2026, 7, 31, 20, 30,
+                                  tzinfo=_dt.timezone(_dt.timedelta(hours=-4))),
+                     _dt.date(2026, 8, 2))["monthly_stale"], True)
+# The same instant expressed in UTC is the SAME July confirmation.
+check("UTC and ET spellings of one instant agree",
+      quad_staleness(_dt.datetime(2026, 8, 1, 0, 30, tzinfo=_dt.timezone.utc),
+                     _dt.date(2026, 8, 2))["confirmed_on"], "2026-07-31")
+# A quarter rollover hides in the same trap: 6/30 evening ET -> 7/1 UTC.
+check("a quarter rollover survives the UTC trap",
+      quad_staleness(_dt.datetime(2026, 7, 1, 0, 30, tzinfo=_dt.timezone.utc),
+                     _dt.date(2026, 8, 2))["quarterly_stale"], True)
+# Strings (a raw text column) must parse, not raise.
+check("ISO string with offset", quad_staleness("2026-07-31T20:30:00-04:00",
+      _dt.date(2026, 8, 2))["confirmed_on"], "2026-07-31")
+check("bare ISO date string", quad_staleness("2026-07-31",
+      _dt.date(2026, 8, 2))["confirmed_on"], "2026-07-31")
+check("garbage is stale, not a crash",
+      quad_staleness("not-a-date", _dt.date(2026, 8, 2))["monthly_stale"], True)
+check("garbage says it could not parse",
+      "unparseable" in quad_staleness(12345, _dt.date(2026, 8, 2))["reason"],
+      True)
+# A datetime works the same as a date — the DB column is TIMESTAMPTZ.
+check("accepts a datetime",
+      quad_staleness(_dt.datetime(2026, 7, 31, 16, 30), _dt.date(2026, 8, 2))
+      ["monthly_stale"], True)
+# Future-dated confirmation: not stale, but flagged as abnormal.
+_ahead = _stale("2026-09-01", "2026-08-02")
+check("a future confirmation is not stale", _ahead["monthly_stale"], False)
+check("a future confirmation is called out", "AHEAD of" in _ahead["reason"],
+      True)
 
 
 # ── quad_index ──────────────────────────────────────────────────────────────
@@ -184,17 +279,56 @@ check("TIE_EPS is wide enough to mean something", TIE_EPS >= 0.15, True)
 _diverge = dict(_q4_perfect)
 _diverge["HHH"] = -0.20
 _gaps = rank_gaps(_diverge, _TABLE, "Quad 4")
-check("rank_gaps sorted worst-lag first", _gaps[0]["ticker"], "HHH")
-check("rank_gaps lag is positive", _gaps[0]["gap"] > 0, True)
+_byT = {g["ticker"]: g for g in _gaps}
+# B2: rank 1 = BEST. Under the old 1=worst form the biggest laggard printed as
+# "1/34", which reads as "ranked number one" and means the exact opposite.
+check("rank 1 is the doctrine's BEST name", _byT["HHH"]["exp_rank"], 1.0)
+check("rank n is the doctrine's WORST name", _byT["AAA"]["exp_rank"], 8.0)
+check("tape rank 1 is the best performer",
+      min(_gaps, key=lambda g: g["act_rank"])["ticker"], "GGG")
+check("ranks span 1..n",
+      (min(g["exp_rank"] for g in _gaps), max(g["exp_rank"] for g in _gaps)),
+      (1.0, 8.0))
+# Sign convention is unchanged by the flip: positive still means the Quad likes
+# it more than the tape does.
+check("rank_gaps lag is positive", _byT["HHH"]["gap"] > 0, True)
+check("HHH lag is the full width of the table", _byT["HHH"]["gap"], 7.0)
 check("rank_gaps carries n", _gaps[0]["n"], 8)
 check("rank_gaps covers every paired name", len(_gaps), 8)
 check("rank_gaps gaps sum to zero",
       abs(sum(g["gap"] for g in _gaps)) < 1e-9, True)
-# The mirror case: something the Quad ranks LOW that the tape is bidding.
-check("rank_gaps names the bid-up laggard", _gaps[-1]["gap"] < 0, True)
+# F3: sorted by |gap| descending, so the widest divergence in EITHER direction
+# is row one — the old form sorted by signed gap and buried big negatives.
+check("rank_gaps sorted by |gap| descending",
+      [abs(g["gap"]) for g in _gaps] ==
+      sorted([abs(g["gap"]) for g in _gaps], reverse=True), True)
+check("rank_gaps widest gap is row one", _gaps[0]["ticker"], "HHH")
+# A big NEGATIVE must outrank a small positive — the bug the |gap| sort fixes.
+_bid = {t: v[3] / 100.0 for t, v in _TABLE.items()}
+_bid["AAA"] = 0.50                      # Quad 4's WORST name, tape's best
+check("a large negative gap sorts to the top",
+      rank_gaps(_bid, _TABLE, "Quad 4")[0]["ticker"], "AAA")
+check("that top row is negative",
+      rank_gaps(_bid, _TABLE, "Quad 4")[0]["gap"] < 0, True)
+# Ties must not depend on dict order.
+check("rank_gaps ties broken by ticker",
+      rank_gaps(_bid, _TABLE, "Quad 4") == rank_gaps(dict(reversed(
+          list(_bid.items()))), _TABLE, "Quad 4"), True)
 check("rank_gaps no quad -> empty", rank_gaps(_diverge, _TABLE, None), [])
 check("rank_gaps bad quad -> empty", rank_gaps(_diverge, _TABLE, "Quad 7"), [])
 check("rank_gaps under MIN_NAMES -> empty", rank_gaps(_few, _TABLE, "Quad 4"), [])
+
+# ── headline (F7) ───────────────────────────────────────────────────────────
+_head = headline(_gaps, "Quad 4")
+check("headline names the widest gap", "HHH" in _head, True)
+check("headline says which way it diverges", "LAGGING its billing" in _head, True)
+check("headline on a bid-up name reads the other way",
+      "BID ABOVE its billing" in headline(rank_gaps(_bid, _TABLE, "Quad 4"),
+                                          "Quad 4"), True)
+check("headline flags an unconfirmed quad",
+      "[UNCONFIRMED QUAD]" in headline(_gaps, "Quad 4", stale=True), True)
+check("headline with no gaps still returns a line",
+      headline([], "Quad 4").startswith("HEADLINE:"), True)
 
 # ── verdict ─────────────────────────────────────────────────────────────────
 # verdict scores the HEADER Quad's own column — one test at the stated floor.
@@ -242,6 +376,21 @@ check("verdict n/a when the header column has no rho",
 check("verdict n/a with no floor",
       verdict({"rho": {q: 0.9 for q in QUADS}, "crit": None}, "Quad 4"), "n/a")
 
+# B1: a header carried forward from a prior month is not a claim about THIS
+# month, so the verdict is suppressed. On 2026-08-02 the pack printed CONFIRM
+# against a Quad 4 header when the confirmed monthly Quad was Quad 3 — correct
+# arithmetic on the wrong question, which is worse than no answer.
+check("stale header suppresses CONFIRM",
+      verdict(_fit_of(q4=0.90), "Quad 4", stale=True), "AWAIT CONFIRM")
+check("stale header suppresses DIVERGE",
+      verdict(_fit_of(q4=-0.90), "Quad 4", stale=True), "AWAIT CONFIRM")
+check("stale header suppresses NOISE too",
+      verdict(_fit_of(q4=0.01), "Quad 4", stale=True), "AWAIT CONFIRM")
+# Unknown beats stale: with no Quad at all there is nothing to await confirming.
+check("unknown quad still reads no header when stale",
+      verdict(_fit_of(q1=0.9), None, stale=True), "no header")
+check("stale defaults to off", verdict(_fit_of(q4=0.90), "Quad 4"), "CONFIRM")
+
 # ── formatting ──────────────────────────────────────────────────────────────
 _fits = [("1W", fit_all_quads(_q4_perfect, _TABLE)),
          ("1M", fit_all_quads(_diverge, _TABLE))]
@@ -255,6 +404,81 @@ check("format warns it is not a signal", "not a signal" in _txt, True)
 check("format warns best fit is a soft read", "Read it" in _txt, True)
 check("format shows the lagging name", "HHH" in _txt, True)
 check("format labels the window", "1M window" in _txt, True)
+
+# F3: every name prints, not a top-5. Three outliers over thirty flat rows is
+# one sector's news; thirty names re-ordering together is a regime turning, and
+# a top-5 cannot tell those apart.
+check("format prints a row for every name",
+      all(f"    {t:<6}" in _txt for t in _TABLE), True)
+check("format states the rank convention", "rank 1 = BEST" in _txt, True)
+check("format has a gap column", "gap" in _txt, True)
+check("format summarises the shape", "shape:" in _txt, True)
+check("format calls a concentrated move news",
+      "read it as news, not regime" in _txt, True)
+# Every name diverging by a third of the table = broad, not news.
+_wide = {t: -v[3] / 100.0 for t, v in _TABLE.items()}
+check("format calls a broad move a regime turn",
+      "consistent with a regime turn" in
+      format_quad_tape(_fits, "Quad 4", rank_gaps(_wide, _TABLE, "Quad 4"),
+                       "1M"), True)
+# A gap that rounds to zero must not print "-0" — a minus sign on a zero reads
+# as a direction that isn't there. Half-integer ranks make this reachable.
+check("format never prints minus zero", "     -0" not in _txt, True)
+
+# Which number lands under which column. Mutation-checked: swapping exp_rank
+# and act_rank in the printed row — and separately in the headline — used to
+# leave every test green. "The row exists" is not "the row is right", and this
+# is the one place the author already got a direction backwards once.
+_row = next(l for l in _txt.split("\n") if l.strip().startswith("HHH"))
+_cells = _row.split()
+check("divergence row is tkr, doc, tape, gap, exp, act", len(_cells), 6)
+check("doc rank column carries the DOCTRINE rank", _cells[1], "1/8")
+check("tape rank column carries the TAPE rank", _cells[2], "8/8")
+check("gap column is tape minus doc", _cells[3], "+7")
+check("exp column is the quarterly expectation", _cells[4], "7.0%")
+check("act column is the realized return", _cells[5], "-20.0%")
+# Same pin on the headline.
+_h = headline(_gaps, "Quad 4")
+check("headline doc rank precedes tape rank",
+      "doc rank 1/8 vs tape 8/8" in _h, True)
+
+# A gap of zero must not claim a direction. Sorted by |gap|, so a zero at the
+# top means the WIDEST gap is zero — the tape is in doctrine order — and the
+# old code called that "bid above its billing" on a rho = +1.00 tape.
+_perfect_gaps = rank_gaps(_q4_perfect, _TABLE, "Quad 4")
+check("perfect tape has no gaps", max(abs(g["gap"]) for g in _perfect_gaps), 0.0)
+_hp = headline(_perfect_gaps, "Quad 4")
+check("headline on a perfect tape claims no direction",
+      "billing" in _hp and "BID ABOVE" not in _hp and "LAGGING" not in _hp, True)
+check("headline on a perfect tape says so", "no divergence" in _hp, True)
+check("headline on a perfect tape never prints -0", "-0" not in _hp, True)
+# ...and the shape line must not contradict the CONFIRM two lines above it.
+_ptxt = format_quad_tape([("1M", _fit)], "Quad 4", _perfect_gaps, "1M")
+check("shape line does not call a perfect tape 'news'",
+      "read it as news" not in _ptxt, True)
+check("shape line says the tape is in doctrine order",
+      "the tape is in doctrine order" in _ptxt, True)
+
+# Ties print consistently. Banker's rounding gave 4.5 -> 4 but 9.5 -> 10, so
+# two structurally identical ties rendered differently.
+from tools.quad_tape import _rank  # noqa: E402
+check("_rank rounds .5 up at an even place", _rank(4.5), "5")
+check("_rank rounds .5 up at an odd place", _rank(9.5), "10")
+check("_rank leaves integers alone", (_rank(3.0), _rank(34.0)), ("3", "34"))
+
+# B1 banner
+_stale_txt = format_quad_tape(_fits, "Quad 4", _gaps, "1M", stale=True)
+check("stale format shouts at the top",
+      _stale_txt.split("\n")[1].strip().startswith("⚠⚠"), True)
+check("stale format says verdicts are suppressed",
+      "Verdicts are SUPPRESSED" in _stale_txt, True)
+check("stale format still prints the rho table",
+      "Quad 4" in _stale_txt and "floor" in _stale_txt, True)
+check("stale format shows AWAIT CONFIRM in every row",
+      _stale_txt.count("AWAIT CONFIRM"), len(_fits))
+check("stale format never says CONFIRM alone",
+      "  CONFIRM" not in _stale_txt.replace("AWAIT CONFIRM", ""), True)
+check("non-stale format has no banner", "⚠⚠" not in _txt, True)
 
 # The floor is PER ROW. A single footnote floor with rows judged at their own n
 # put two contradictory numbers on one screen: rho=+0.59 labelled NOISE under a
@@ -382,14 +606,14 @@ _w = [("MTD", lambda c, d: (c[-1] / c[-2] - 1)),
       ("1M", lambda c, d: (c[-1] / c[-22] - 1))]
 _block_pref = quad_tape_block(_closes, "Quad 4", _w)
 check("block draws detail from 1M not the first window",
-      "(1M window" in _block_pref and "(MTD window" not in _block_pref, True)
+      "1M window" in _block_pref and "MTD window" not in _block_pref, True)
 # Both windows still get SCORED — preference governs the callouts only.
 check("block still scores every window",
       _block_pref.count("\nMTD ") == 1 and _block_pref.count("\n1M ") == 1, True)
 # A caller passing windows outside DETAIL_PREF still gets a callout block.
 _block_odd = quad_tape_block(_closes, "Quad 4",
                              [("5D", lambda c, d: (c[-1] / c[-22] - 1))])
-check("block falls back to an unlisted window", "(5D window" in _block_odd, True)
+check("block falls back to an unlisted window", "5D window" in _block_odd, True)
 
 # Missing prices must be NAMED, not silently reduce the sample.
 _partial = {k: v for k, v in list(_closes.items())[:20]}

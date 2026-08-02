@@ -201,12 +201,21 @@ def fit_all_quads(realized, table) -> dict:
 
 
 def rank_gaps(realized, table, quad) -> list[dict]:
-    """Per-name doctrine rank vs realized rank for one Quad, worst first.
+    """Per-name doctrine rank vs realized rank for one Quad.
 
-    gap = doctrine_rank - realized_rank, both 1 = worst performer. Positive gap
-    means doctrine ranked it higher than the tape did: the Quad says own it and
-    it is lagging. Negative means the tape is bidding something the Quad says to
-    avoid.
+    RANK 1 = BEST (flipped 2026-08-02, B2). It used to be 1 = worst, so the
+    biggest laggard in the table printed as "GBTC 1/34" — which every reader on
+    earth parses as "ranked number one" and is the exact opposite of what it
+    meant. Best-is-1 is the convention everywhere else, so it is the convention
+    here.
+
+    gap = act_rank - exp_rank under best-is-1, so the SIGN is unchanged from the
+    old formula and still reads the same way:
+      gap > 0  doctrine ranks it better than the tape does — the Quad says own
+               it and it is lagging.
+      gap < 0  the tape is bidding something the Quad ranks poorly.
+    Returned sorted by |gap| descending (F3), so the largest divergence in
+    either direction is row one.
     """
     qi = quad_index(quad)
     if qi is None:
@@ -214,16 +223,43 @@ def rank_gaps(realized, table, quad) -> list[dict]:
     names, acts = pair(realized, table)
     if len(names) < MIN_NAMES:
         return []
+    n = len(names)
     exps = [table[t][qi] for t in names]
-    er, ar = avg_ranks(exps), avg_ranks(acts)
+    # avg_ranks is 1 = smallest. Best-is-1 is its mirror: n + 1 - r. Mirroring
+    # keeps tie handling intact (a tie at 30.5 of 34 mirrors to 4.5, still tied).
+    er = [n + 1 - r for r in avg_ranks(exps)]
+    ar = [n + 1 - r for r in avg_ranks(acts)]
     rows = [{"ticker": t, "exp": exps[i], "act": acts[i],
-             "exp_rank": er[i], "act_rank": ar[i], "gap": er[i] - ar[i],
-             "n": len(names)}
+             "exp_rank": er[i], "act_rank": ar[i], "gap": ar[i] - er[i],
+             "n": n}
             for i, t in enumerate(names)]
-    return sorted(rows, key=lambda r: -r["gap"])
+    return sorted(rows, key=lambda r: (-abs(r["gap"]), r["ticker"]))
 
 
-def verdict(fit, header_quad) -> str:
+def headline(gaps, header_quad, stale=False) -> str:
+    """F7: the one line that goes at the top — the single largest doctrine-vs-
+    tape gap. Derived line for speed; the full table below it is the audit
+    trail, and today's stale-header bug is the case for why both must print."""
+    if not gaps:
+        return "HEADLINE: no divergence detail (Quad unknown or too few names)."
+    g = gaps[0]
+    q = header_quad if quad_index(header_quad) is not None else "the Quad"
+    tag = " [UNCONFIRMED QUAD]" if stale else ""
+    # gaps are sorted by |gap|, so a zero here means the WIDEST gap in the table
+    # is zero — the tape is in perfect doctrine order. Claiming a direction on
+    # that ("bid above its billing" on a name that matched exactly) is a
+    # fabricated read, and it fired on a tape that scored rho = +1.00.
+    if round(g["gap"]) == 0:
+        return (f"HEADLINE{tag}: no divergence — every name is within half a "
+                f"rank of its {q} billing. The tape is trading {q} in order.")
+    d = "LAGGING its billing" if g["gap"] > 0 else "BID ABOVE its billing"
+    return (f"HEADLINE{tag}: {g['ticker']} is the widest {q} gap — doc rank "
+            f"{_rank(g['exp_rank'])}/{g['n']} vs tape {_rank(g['act_rank'])}/"
+            f"{g['n']} ({_gap(g['gap'], 0)}), {d} ({_pct(g['act'], 0).strip()} "
+            f"actual vs {g['exp']:+.1f}%/qtr expected).")
+
+
+def verdict(fit, header_quad, stale=False) -> str:
     """One word for the fit row, judged on the HEADER Quad's own rho.
 
     Rewritten 2026-08-02 after review. It used to compare the header Quad against
@@ -249,6 +285,12 @@ def verdict(fit, header_quad) -> str:
     qi = quad_index(header_quad)
     if qi is None:
         return "no header"
+    # B1: a header carried forward from a previous month is not a claim about
+    # this month, so scoring against it answers the wrong question with full
+    # confidence. Suppress the verdict, keep the rho table — the numbers are
+    # still real, it is the QUESTION that is unconfirmed.
+    if stale:
+        return "AWAIT CONFIRM"
     rho, crit = (fit.get("rho") or {}).get(QUADS[qi]), fit.get("crit")
     if rho is None or crit is None:
         return "n/a"
@@ -269,20 +311,67 @@ def _rho(v, width=9) -> str:
     return "n/a".rjust(width) if v is None else f"{v:+.2f}".rjust(width)
 
 
-def format_quad_tape(fits, header_quad, gaps, gap_window) -> str:
+def _gap(v, width=7) -> str:
+    """Signed gap. Ranks carry .5 from ties, so a gap of -0.5 formats as '-0'
+    under %.0f — a minus sign on a zero, which reads as a direction that isn't
+    there. Anything rounding to zero prints a bare 0."""
+    r = round(v)
+    return ("0" if r == 0 else f"{r:+.0f}").rjust(width)
+
+
+def _shape_read(big) -> str:
+    """Plain-language read of how many names moved by a third of the table.
+
+    The zero branch is not pedantry. `big <= 3` used to catch it, so a tape in
+    PERFECT doctrine order — rho +1.00, verdict CONFIRM — printed "concentrated
+    — read it as news, not regime" two lines under its own CONFIRM. It fired on
+    100% of simulated confirming tapes and 0% of random ones: wrong on exactly
+    the days the section agrees with the header.
+    """
+    if big == 0:
+        return "none — the tape is in doctrine order"
+    if big <= 3:
+        return "concentrated — read it as news, not regime"
+    return "broad — consistent with a regime turn"
+
+
+def _rank(v) -> str:
+    """A rank as an integer string.
+
+    Averaged ranks carry .5 from ties, and Python rounds half to EVEN — so a
+    tie at place 4.5 prints 4 while an identical tie at 9.5 prints 10. Two
+    structurally identical situations rendered differently, which reads as a
+    difference in the data. Round half up, always, so ties are consistent.
+    """
+    return str(int(math.floor(v + 0.5)))
+
+
+def format_quad_tape(fits, header_quad, gaps, gap_window, stale=False) -> str:
     """fits: [(window_label, fit_dict)] from fit_all_quads."""
     hq = header_quad if quad_index(header_quad) is not None else "unknown"
-    out = ["QUAD vs TAPE — does the market agree with the header?",
-           f"  header Quad: {hq}   |   doctrine: hedgeye_doctrine.yaml "
-           f"expected_returns",
-           "  Spearman rank correlation, realized vs each Quad's expected "
-           "ordering.",
-           "  Ranks only — the doctrine numbers are average QUARTERLY returns, "
-           "so",
-           "  magnitudes are not comparable and are never compared.",
-           "",
-           f"{'window':<8}{'names':>6}" + "".join(q.rjust(9) for q in QUADS)
-           + f"{'floor':>8}{'header':>10}{'best fit':>11}"]
+    out = ["QUAD vs TAPE — does the market agree with the header?"]
+    if stale:
+        # Loud, at the top, before any number. On 2026-08-02 this section
+        # printed CONFIRM against a Quad 4 header when the confirmed monthly
+        # Quad was Quad 3 — a correct calculation of the wrong question.
+        out += [f"  ⚠⚠ HEADER QUAD IS UNCONFIRMED FOR THIS MONTH ({hq} carried "
+                f"forward).",
+                "     Verdicts are SUPPRESSED. The rho table below is still "
+                "real — it is the",
+                "     question that is unconfirmed, not the arithmetic. Set the "
+                "Quad with the",
+                "     QUAD: command and re-run before reading anything here as "
+                "agreement."]
+    out += [f"  header Quad: {hq}   |   doctrine: hedgeye_doctrine.yaml "
+            f"expected_returns",
+            "  Spearman rank correlation, realized vs each Quad's expected "
+            "ordering.",
+            "  Ranks only — the doctrine numbers are average QUARTERLY returns, "
+            "so",
+            "  magnitudes are not comparable and are never compared.",
+            "",
+            f"{'window':<8}{'names':>6}" + "".join(q.rjust(9) for q in QUADS)
+            + f"{'floor':>8}{'header':>15}{'best fit':>11}"]
 
     # The floor is printed PER ROW because it depends on that row's n. A single
     # footnote floor plus rows judged at their own n put two contradictory
@@ -303,7 +392,7 @@ def format_quad_tape(fits, header_quad, gaps, gap_window) -> str:
         out.append(f"{label:<8}{n:>6}"
                    + "".join(_rho(f["rho"][q]) for q in QUADS)
                    + ("n/a".rjust(8) if crit is None else f"{crit:.2f}".rjust(8))
-                   + verdict(f, header_quad).rjust(10)
+                   + verdict(f, header_quad, stale).rjust(15)
                    + f"{shown:>11}")
 
     out.append(f"  header = the {hq} column alone vs the tape: CONFIRM at "
@@ -327,25 +416,32 @@ def format_quad_tape(fits, header_quad, gaps, gap_window) -> str:
                    "priced)")
         return "\n".join(out)
 
+    # F3: every name, one table, sorted by |gap|. The old form printed the top 5
+    # each way, which shows the extremes and hides the SHAPE — and the shape is
+    # the actual question. Thirty-four names re-ordering together is a regime
+    # turning; three outliers on top of thirty flat rows is one sector's news.
+    # You cannot tell those apart from a top-5.
     n = gaps[0]["n"]
-    lag = [g for g in gaps if g["gap"] > 0][:TOP_N]
-    bid = [g for g in sorted(gaps, key=lambda r: r["gap"])
-           if g["gap"] < 0][:TOP_N]
-
-    def _rows(title, rs):
-        block = ["", f"  {title}   ({gap_window} window, {n} names)",
-                 f"    {'tkr':<6}{'doc rank':>10}{'tape rank':>11}"
-                 f"{'exp/qtr':>10}{'actual':>10}"]
-        for g in rs:
-            block.append(f"    {g['ticker']:<6}"
-                         f"{g['exp_rank']:>7.0f}/{n:<2}"
-                         f"{g['act_rank']:>8.0f}/{n:<2}"
-                         f"{g['exp']:>9.1f}%" + _pct(g["act"], 10))
-        return block
-
-    hq_short = header_quad or "the Quad"
-    out += _rows(f"{hq_short} ranks these HIGH — the tape does not", lag)
-    out += _rows(f"{hq_short} ranks these LOW — the tape is bidding them", bid)
+    hq_short = hq if hq != "unknown" else "the Quad"
+    lag = sum(1 for g in gaps if g["gap"] > 0)
+    big = sum(1 for g in gaps if abs(g["gap"]) >= n / 3)
+    out += ["",
+            f"  DIVERGENCE — all {n} names, {gap_window} window, rank 1 = BEST",
+            f"  gap = tape rank − doc rank.  POSITIVE = {hq_short} says own it "
+            f"and it is LAGGING;",
+            f"  NEGATIVE = the tape is BIDDING it above its {hq_short} billing."
+            f"  Sorted by |gap|.",
+            f"  shape: {lag} of {n} names lag their doctrine rank; {big} moved "
+            f"by",
+            f"  a third of the table or more ({_shape_read(big)}).",
+            f"    {'tkr':<6}{'doc rank':>10}{'tape rank':>11}{'gap':>7}"
+            f"{'exp/qtr':>10}{'actual':>10}"]
+    for g in gaps:
+        out.append(f"    {g['ticker']:<6}"
+                   + f"{_rank(g['exp_rank']) + '/' + str(n):>9}"
+                   + f"{_rank(g['act_rank']) + '/' + str(n):>10}"
+                   + _gap(g["gap"])
+                   + f"{g['exp']:>9.1f}%" + _pct(g["act"], 10))
     return "\n".join(out)
 
 
@@ -403,7 +499,7 @@ def doctrine_tickers() -> list[str]:
         return []
 
 
-def quad_tape_block(bars, header_quad, windows) -> str:
+def quad_tape_block(bars, header_quad, windows, stale=False) -> str:
     """bars: {sym: {'closes','dates'}}. windows: [(label, fn(closes,dates))].
 
     Guarded the same way every other EOD section is: a failure prints its reason
@@ -440,7 +536,14 @@ def quad_tape_block(bars, header_quad, windows) -> str:
                 gap_window, gaps = label, rows
                 break
 
-        block = format_quad_tape(fits, header_quad, gaps, gap_window or "n/a")
+        head = headline(gaps, header_quad, stale)
+
+        # F7: derived headline on top for speed, full raw table always below it
+        # as the audit trail. Never one instead of the other — the 8/2 stale
+        # header is the case study for why a summary alone is not enough.
+        block = (head + "\n\n"
+                 + format_quad_tape(fits, header_quad, gaps,
+                                    gap_window or "n/a", stale))
 
         # Two DIFFERENT reasons a doctrine name can be absent from a row's n,
         # both named. Reporting only the first lets the second one shrink the
