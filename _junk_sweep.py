@@ -165,10 +165,14 @@ def main() -> int:
     ap.add_argument("--tickers", help="space/comma separated list to test instead")
     args = ap.parse_args()
 
-    from tools.source_registry import REGISTRY, full_universe
+    from tools.source_registry import REGISTRY, enrollment_universe
     from tools.enrollment_sources import KNOWN_UNCOVERABLE, PARKED_FOR_SOURCE
 
-    fu = full_universe()
+    # MUST match what the deployed MFR BACKLOG computes. compile_backlog
+    # moved to enrollment_universe() (all-time) in 90f8345; a diagnostic
+    # still reading full_universe() reports a different backlog than the
+    # bot does, which is worse than reporting nothing.
+    fu = enrollment_universe()
     universe, per_source = fu["universe"], fu["per_source"]
     origin: dict = {}
     for tag, members in per_source.items():
@@ -190,9 +194,17 @@ def main() -> int:
             print(f"  (watchlist read failed: {e}) — falling back to --all")
             active = set()
         if not active:
-            print("  ⚠️  watchlist read is EMPTY — sweeping the whole universe "
-                  "instead of a bogus backlog.")
-            cands = sorted(universe)
+            # ABORT, don't degrade. 2026-08-02: a run without MFR_API_TOKEN fell
+            # back to the whole universe and produced a confident 595-line report
+            # answering a different question. That is the exact failure the
+            # watchlist guard exists to stop inside the bot, and this script had
+            # no business doing it either. Use `railway run python _junk_sweep.py`
+            # so the token resolves, or --all to sweep the universe deliberately.
+            sys.exit("LOUD FAIL: the MFR watchlist read returned NOTHING, so the "
+                     "backlog cannot be computed — every universe name would look "
+                     "un-enrolled.\n  Run under `railway run` so MFR_API_TOKEN "
+                     "resolves, or pass --all to sweep the whole universe on "
+                     "purpose.")
         else:
             cands = sorted((universe - active)
                            - set(KNOWN_UNCOVERABLE) - set(PARKED_FOR_SOURCE))

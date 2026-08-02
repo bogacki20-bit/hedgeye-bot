@@ -67,6 +67,18 @@ KNOWN_UNCOVERABLE = {
 # so ranges flow from MFR while trend continues to come from btcquant.
 PARKED_FOR_SOURCE = {
     "RUNEUSD", "TRXUSD",
+    # 2026-08-02: the five promoted majors are PERMANENT backlog residents and
+    # always will be. The posmon seed and btcquant carry them as BTCUSD/ETHUSD/
+    # SOLUSD/XRPUSD/AVAXUSD, while MFR activates and serves them under the bare
+    # symbol (BTC, ETH, SOL, XRP, AVAX) plus the CRYPTO.* forms — so the *USD
+    # name can never appear in list_watchlist() and the diff can never clear it.
+    # Not uncoverable, not missing: a NAMING mismatch. Ranges already arrive via
+    # mfr_client._CRYPTO_FORCE_FANOUT and the alias table in fetch_raw.
+    # They showed up in the 8/1 backlog flagged 'persisted >=3 wks' for exactly
+    # this reason — the weeks-seen counter was measuring an unfixable diff.
+    # Proper fix is a wrapper/alias mapping on the ENROLLMENT side; parking them
+    # stops the nag until that exists.
+    "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "AVAXUSD",
 }
 
 REGISTRY = [

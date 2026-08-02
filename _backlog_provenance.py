@@ -127,10 +127,14 @@ def main() -> int:
                                             "per-feed membership here")
     args = ap.parse_args()
 
-    from tools.source_registry import REGISTRY, full_universe
+    from tools.source_registry import REGISTRY, enrollment_universe
     from tools.enrollment_sources import KNOWN_UNCOVERABLE, PARKED_FOR_SOURCE
 
-    fu = full_universe()
+    # MUST match what the deployed MFR BACKLOG computes. compile_backlog
+    # moved to enrollment_universe() (all-time) in 90f8345; a diagnostic
+    # still reading full_universe() reports a different backlog than the
+    # bot does, which is worse than reporting nothing.
+    fu = enrollment_universe()
     universe, per_source = fu["universe"], fu["per_source"]
     origin: dict = {}
     for tag, members in per_source.items():
