@@ -380,11 +380,22 @@ def key_shape_problem(key) -> str | None:
 
 
 def _fred_key():
+    """(key, env_name, was_padded). STRIPS the value.
+
+    2026-08-02: FRED_API_KEY on Railway was " aca4…71cb " — 34 chars, one space
+    each side. Every series 400'd. Copying the value out of the Railway UI
+    reproduces it clean, so the padding is invisible at exactly the moment you
+    go looking for it.
+
+    Being strict about that buys nothing: a leading space is never intentional,
+    and no legitimate key is distinguished by its whitespace. So accept it and
+    SAY SO — the operator still needs to fix the variable, but not at the cost
+    of the section being dark until they do."""
     for n in FRED_ENV_NAMES:
         v = os.environ.get(n)
-        if v:
-            return v, n
-    return None, None
+        if v and v.strip():
+            return v.strip(), n, (v != v.strip())
+    return None, None, False
 
 
 def fred_series(series_id, key, days=400) -> list:
@@ -484,7 +495,7 @@ def curve_2_10(two, ten) -> dict:
 def _rates_credit_block() -> str:
     """FRED sections. Prints why it is empty rather than vanishing — an absent
     section reads as 'nothing to report', which is a different claim."""
-    key, name = _fred_key()
+    key, name, padded = _fred_key()
     if not key:
         return ("RATES + CREDIT: n/a (no FRED key found — looked for "
                 + ", ".join(FRED_ENV_NAMES) + ".\n"
@@ -507,7 +518,12 @@ def _rates_credit_block() -> str:
             block += f"\n  ⚠ no observations returned for: {', '.join(empty)}"
         for e in _FRED_ERRORS[:4]:
             block += f"\n    {e}"
-        return block + f"\n  (FRED key from ${name}, {len(key)} chars)"
+        note = ""
+        if padded:
+            note = (f"\n  ⚠ ${name} has leading/trailing whitespace — stripped "
+                    f"here so this works, but fix the Railway variable: it will "
+                    f"break anything else that reads it.")
+        return block + f"\n  (FRED key from ${name}, {len(key)} chars){note}"
     except Exception as e:
         return f"RATES + CREDIT: unavailable ({e})"
 

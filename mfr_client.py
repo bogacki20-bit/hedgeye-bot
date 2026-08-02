@@ -165,7 +165,14 @@ def _http_get_json(url, *, timeout=MFR_TIMEOUT, retries=MFR_MAX_RETRIES):
 
 
 def _resolve_token() -> str | None:
-    return os.environ.get("MFR_API_TOKEN") or os.environ.get("MFR_TOKEN")
+    """STRIPPED. 2026-08-02: FRED_API_KEY on Railway carried a space at each end
+    and 400'd every request, while the Railway UI showed it clean. The same
+    padding on MFR_API_TOKEN would take down the watchlist read, the fan-out and
+    the enrollment backlog at once — and would look exactly like the auth
+    failure the watchlist guard was built for. One strip removes the whole
+    class."""
+    v = os.environ.get("MFR_API_TOKEN") or os.environ.get("MFR_TOKEN")
+    return v.strip() if v else v
 
 
 # ─────────────────────────── Watchlist (fan-out source of truth) ───────────

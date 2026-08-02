@@ -9,7 +9,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from tools.eod_stat_pack import (CORR_ANCHORS, CORR_ROWS, CORR_WINDOWS,  # noqa: E402
-                                 key_shape_problem, mtd_return, qtd_return,
+                                 _fred_key, key_shape_problem, mtd_return,
+                                 qtd_return,
                                  rolling_corr_stats, sector_row,
                                  FACTORS, RET_WINDOWS, corr_over,
                                  curve_2_10, daily_returns, fmt_corr,
@@ -258,6 +259,52 @@ def test_key_shape_problems_are_named_not_guessed():
     assert key_shape_problem("") == "empty"
     assert key_shape_problem(None) == "empty"
     assert "non-alphanumeric" in key_shape_problem("a" * 31 + "!")
+
+
+
+def test_padded_env_key_is_stripped_and_reported():
+    """2026-08-02 live: FRED_API_KEY on Railway was " aca4...71cb " -- 34 chars,
+    one space each side, every series 400'd, and copying the value out of the
+    Railway UI reproduced it clean. Being strict about that buys nothing: a
+    leading space is never intentional. Accept it, and say so, so the variable
+    still gets fixed."""
+    import os as _os
+    prev = _os.environ.get("FRED_API_KEY")
+    try:
+        _os.environ["FRED_API_KEY"] = " " + "a" * 32 + " "
+        k, n, padded = _fred_key()
+        assert len(k) == 32 and padded is True and n == "FRED_API_KEY"
+        assert key_shape_problem(k) is None, "stripped key must pass the shape check"
+
+        _os.environ["FRED_API_KEY"] = "a" * 32
+        assert _fred_key()[2] is False, "a clean value must not be flagged"
+
+        _os.environ["FRED_API_KEY"] = "   "
+        assert _fred_key() == (None, None, False), "whitespace-only is no key"
+    finally:
+        if prev is None:
+            _os.environ.pop("FRED_API_KEY", None)
+        else:
+            _os.environ["FRED_API_KEY"] = prev
+
+
+def test_mfr_token_is_stripped_too():
+    """Same padding on MFR_API_TOKEN would take down the watchlist read, the
+    fan-out and the enrollment backlog at once — and would look exactly like the
+    auth failure the watchlist guard exists for."""
+    import importlib
+    import os as _os
+    prev = _os.environ.get("MFR_API_TOKEN")
+    try:
+        _os.environ["MFR_API_TOKEN"] = "  tok123  "
+        import mfr_client
+        importlib.reload(mfr_client)
+        assert mfr_client._resolve_token() == "tok123"
+    finally:
+        if prev is None:
+            _os.environ.pop("MFR_API_TOKEN", None)
+        else:
+            _os.environ["MFR_API_TOKEN"] = prev
 
 
 if __name__ == "__main__":
