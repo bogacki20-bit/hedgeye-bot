@@ -298,11 +298,30 @@ def clean_tickers(blob: str, *, paren_only: bool = False,
 
 
 # "LONGS: a, b, c   SHORTS: d, e" — also matches a "BULLISH:/BEARISH:" pair.
+#
+# 2026-08-02 — this minted BEEN, FROM, HAS, JUST, LIST and SIGNAL into
+# ticker_inventory (source=keiths_signals, all six in a two-second window on
+# 7/29), and from there into the MFR enrollment backlog under a "paste into
+# Activate Assets" instruction.
+#
+# Two compounding defects:
+#   * seg was `.+?` under re.S, so it ran across newlines until it found a
+#     terminator — if the email had no "Please visit"/"TL;DR" tail, that meant
+#     600 characters of prose (clean_tickers' cap) fed to a token matcher.
+#   * the whole pattern carried re.I, which would also have made any lowercase
+#     stop-character useless, since [a-z] matches uppercase under IGNORECASE.
+#
+# Fix: the segment is [^a-z], so a ticker list ENDS at the first lowercase
+# letter — which is where the list ends in every real email. IGNORECASE is
+# applied to the labels only, via (?i:...), so "Longs:" and "LONGS:" both match
+# while the bound stays real. TICKER_TOK_RE allows 1-6 chars, which is why
+# SIGNAL could come from here and not from parser_signal_strength's 1-5 matcher.
 _SIDE_BLOCK_RE = re.compile(
-    r"\b(?P<side>LONGS?|SHORTS?|BULLISH|BEARISH)\s*:\s*"
-    r"(?P<seg>.+?)(?=\b(?:LONGS?|SHORTS?|BULLISH|BEARISH|NEUTRAL)\s*:|"
-    r"Please\s+visit|\(\s*VIEW|TL;?DR|$)",
-    re.I | re.S,
+    r"\b(?P<side>(?i:LONGS?|SHORTS?|BULLISH|BEARISH))\s*:\s*"
+    r"(?P<seg>[^a-z]+?)"
+    r"(?=(?i:LONGS?|SHORTS?|BULLISH|BEARISH|NEUTRAL)\s*:|"
+    r"(?i:Please\s+visit)|\(\s*VIEW|(?i:TL;?DR)|[a-z]|$)",
+    re.S,
 )
 
 
