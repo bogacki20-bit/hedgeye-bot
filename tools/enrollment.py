@@ -271,6 +271,36 @@ def group_by_origin(backlog, per_source) -> dict:
     return {k: sorted(v) for k, v in groups.items()}
 
 
+# Two-letter codes so a per-ticker tag stays readable at 300 names. Any source
+# not listed falls back to its own tag, so a new feed is never silently untagged.
+SRC_TAG = {
+    "etfpro": "ep", "portsol": "ps", "ideas": "ii", "keiths": "kt",
+    "sigstr": "ss", "finsigstr": "fs", "posmon": "pm", "book": "bk",
+    "btcquant": "bq", "riskrange": "rr", "rta": "rt", "sigchange": "sc",
+    "portactions": "pa", "iichanges": "ic", "hedgai": "ha", "momo": "mo",
+    "retail": "rl",
+}
+TAG_LEGEND = ("ep=ETF Pro · ps=PortSol · ii=Ideas · kt=Keith's · ss=SigStr · "
+              "fs=FinSigStr · pm=PosMon · bk=book · bq=BTCQuant · rr=RiskRange "
+              "· rt=RTA · sc=SigChange · pa=PSActions · ic=IIChanges · "
+              "ha=HedgAI · mo=MOMO · rl=Retail")
+
+
+def tagged_list(backlog, per_source) -> str:
+    """Pure. 'AAPL(rr,pm) BBRE(bk) BEEN(ss)' — every ticker carries the feed(s)
+    that put it on the backlog, so an unfamiliar name explains itself in place
+    rather than in a separate block.
+
+    NOT pasteable — the tags are inside the token. The untagged list is printed
+    separately for that; a tagged list pasted into MFR would enroll nothing."""
+    origin: dict = {}
+    for tag, members in (per_source or {}).items():
+        for t in members:
+            origin.setdefault(t, set()).add(SRC_TAG.get(tag, tag))
+    return " ".join(
+        f"{t}({','.join(sorted(origin.get(t, {'?'})))})" for t in backlog)
+
+
 def origin_summary(backlog, per_source, top=6) -> list:
     """Pure. COUNTS per origin combination — no ticker names, so it can never
     crowd out or truncate the paste list. `MFR BACKLOG WHY` prints the names."""
@@ -457,13 +487,15 @@ def run_weekly_backlog() -> str:
         return "skip:backlog-clear"
     persisted = [t for t in to_add if new_seen[t] >= PERSIST_WEEKS]
     lines = [f"🧹 MFR backlog ({len(to_add)} of {r['full_count']} universe · "
-             f"{r['active_count']} already active) — roster names not yet active:"]
+             f"{r['active_count']} already active) — roster names not yet active:",
+             tagged_list(to_add, r["per_source"]), TAG_LEGEND]
     lines += origin_summary(to_add, r["per_source"])
+    lines.append("── paste this line (no tags) ──")
     lines.append(" ".join(to_add))          # COMPLETE list — the paste target
     if persisted:
         lines.append(f"⚠️ persisted ≥{PERSIST_WEEKS} wks — ENROLL or DISMISS "
                      f"(add to KNOWN_UNCOVERABLE): " + " ".join(persisted))
-    lines.append("(paste the full list above into MFR → Activate Assets)")
+    lines.append("(paste the untagged line into MFR → Activate Assets)")
     try:
         ok = _send_chunked("MFR backlog", "\n".join(lines) + dark_footer())
     except Exception as e:
@@ -570,10 +602,11 @@ def handle_backlog_command(text: str):
         lines.append("(explanatory view — paste from plain MFR BACKLOG, "
                      "which prints the complete list)")
         return "\n".join(lines) + dark_footer()
-    lines = [head + ":"]
+    lines = [head + ":", tagged_list(to_add, r["per_source"]), TAG_LEGEND]
     lines += origin_summary(to_add, r["per_source"])
+    lines.append("── paste this line (no tags) ──")
     lines.append(" ".join(to_add))          # COMPLETE list — the paste target
     if persisted:
         lines.append(f"⚠️ persisted ≥{PERSIST_WEEKS} wks: " + " ".join(persisted))
-    lines.append("(paste the full list above into MFR → Activate Assets)")
+    lines.append("(paste the untagged line into MFR → Activate Assets)")
     return "\n".join(lines) + dark_footer()

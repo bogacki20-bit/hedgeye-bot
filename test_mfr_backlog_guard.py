@@ -15,10 +15,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from tools.enrollment import (COLLAPSE_FLOOR, TG_CHUNK,               # noqa: E402
-                              WatchlistUnavailable, _send_chunked,
+from tools.enrollment import (COLLAPSE_FLOOR, SRC_TAG, TAG_LEGEND,     # noqa: E402
+                              TG_CHUNK, WatchlistUnavailable, _send_chunked,
                               group_by_origin, origin_summary,
-                              provenance_lines, watchlist_verdict)
+                              provenance_lines, tagged_list, watchlist_verdict)
 
 
 # ───────────────────────── the guard ────────────────────────────────────────
@@ -226,7 +226,7 @@ def test_default_reply_carries_every_name_not_a_capped_view():
     body = src.split("def handle_backlog_command")[1]
     assert '" ".join(to_add)' in body, \
         "the default reply must emit the COMPLETE to_add list"
-    assert "paste the full list above" in body
+    assert "paste the untagged line" in body
     # the lossy view must not claim to be pasteable
     why = body.split("if why:")[1].split("return")[0]
     assert "provenance_lines" in why and "paste from plain MFR BACKLOG" in why
@@ -467,6 +467,49 @@ def test_a_values_feed_still_outranks_everything():
     v = c(["AAPL"], {"AAPL": _E(strong=["risk_range"], ocr=["posmon_seed"])},
           quoted=set(), held=set())
     assert v["AAPL"][0] == "COVERED" and "risk_range" in v["AAPL"][1]
+
+
+
+# ───────────────────── per-ticker source tags ───────────────────────────────
+
+def test_every_ticker_carries_its_source():
+    per = {"etfpro": ["CARZ"], "posmon": ["CARZ", "RTX"], "book": ["BBRE"],
+           "riskrange": ["RTX"]}
+    out = tagged_list(["BBRE", "CARZ", "RTX"], per)
+    assert out == "BBRE(bk) CARZ(ep,pm) RTX(pm,rr)", out
+
+
+def test_multi_source_tags_are_sorted_and_deduped():
+    per = {"posmon": ["X"], "etfpro": ["X"], "book": ["X"]}
+    assert tagged_list(["X"], per) == "X(bk,ep,pm)"
+
+
+def test_unknown_feed_falls_back_to_its_own_name():
+    """A newly registered source must never render as untagged."""
+    assert tagged_list(["X"], {"brand_new": ["X"]}) == "X(brand_new)"
+
+
+def test_orphan_is_marked_not_blank():
+    assert tagged_list(["Z"], {}) == "Z(?)"
+    assert tagged_list(["Z"], None) == "Z(?)"
+
+
+def test_legend_documents_every_code():
+    for code in SRC_TAG.values():
+        assert f"{code}=" in TAG_LEGEND, code
+
+
+def test_tags_never_contaminate_the_paste_line():
+    """The tagged view is not pasteable — MFR would reject 'CARZ(ep,pm)'. The
+    untagged list must still be emitted separately and stay clean."""
+    src = _src("tools/enrollment.py")
+    body = src.split("def handle_backlog_command")[1]
+    assert 'lines.append(" ".join(to_add))' in body, "clean paste line missing"
+    assert "paste this line (no tags)" in body
+    assert "paste the untagged line" in body
+    # and the tagged helper says so itself
+    assert "NOT pasteable" in _src("tools/enrollment.py")
+
 
 
 if __name__ == "__main__":
