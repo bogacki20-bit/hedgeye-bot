@@ -163,6 +163,11 @@ def main() -> int:
     ap.add_argument("--all", action="store_true",
                     help="sweep the whole universe, not just the backlog")
     ap.add_argument("--tickers", help="space/comma separated list to test instead")
+    ap.add_argument("--enrollable", action="store_true",
+                    help="print ONLY the clean paste line for MFR -> Activate "
+                         "Assets: COVERED + HELD + TOKEN-ONLY, with JUNK and "
+                         "PM-ARTIFACT excluded. One command for the "
+                         "enroll-everything-real policy.")
     args = ap.parse_args()
 
     from tools.source_registry import REGISTRY, enrollment_universe
@@ -245,6 +250,29 @@ def main() -> int:
     token_only = sorted(t for t, (v, _) in verdicts.items() if v == "TOKEN-ONLY")
     pm_art = sorted(t for t, (v, _) in verdicts.items() if v == "PM-ARTIFACT")
 
+    if args.enrollable:
+        # Real names only. JUNK is not a ticker; PM-ARTIFACT is an OCR mis-read
+        # or a naming mismatch — neither belongs in Activate Assets, and pasting
+        # them wastes a slot at best.
+        good = [t for t in cands
+                if verdicts[t][0] in ("COVERED", "HELD", "TOKEN-ONLY")]
+        print(f"\nENROLLABLE ({len(good)} of {len(cands)}) — paste into "
+              f"MFR → Activate Assets:")
+        line = ""
+        for t in good:
+            if len(line) + len(t) + 1 > 76:
+                print(line)
+                line = ""
+            line += t + " "
+        if line.strip():
+            print(line)
+        dropped = [(t, verdicts[t][0]) for t in cands
+                   if verdicts[t][0] in ("JUNK", "PM-ARTIFACT")]
+        if dropped:
+            print(f"\nexcluded ({len(dropped)}): "
+                  + " ".join(f"{t}[{v.split('-')[0].lower()}]" for t, v in dropped))
+        return 0
+
     print(f"\n{'ticker':<10}{'verdict':<12}{'detail':<58}origin")
     for t in cands:
         v, d = verdicts[t]
@@ -289,8 +317,12 @@ def main() -> int:
         print(f'    "{t}",'.ljust(20)
               + f"# not a ticker — scraped by {','.join(sorted(origin.get(t, ())))}")
     print("\n   Cure: the feed(s) above extract tickers with a bare uppercase-token\n"
-          "   regex over email text. parser_signal_strength.py:62 is\n"
-          "   TICKER_RE = re.compile(r'\\b([A-Z]{1,5})\\b') with no filter at all.")
+          "   regex over email text. ALREADY BOUNDED: parser_signal_strength\n"
+          "   (parse_body, 8/1) and parser_research_common.side_blocks (8/2).\n"
+          "   STILL OPEN: parser_retail.py:95 (_SCAN_RE = r'\\b[A-Z]{2,5}\\b')\n"
+          "   and the portfolio-actions path. Both assign a side/action to a whole\n"
+          "   block, so a scraped token inherits one and survives the value filter\n"
+          "   in source_registry.ALLTIME_SQL — which is why anything is left here.")
     return 0
 
 
