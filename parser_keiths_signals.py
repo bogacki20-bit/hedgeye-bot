@@ -132,6 +132,33 @@ def _note(rows, mid):
         return 0
 
 
+def one_sided_refusal(sides_now, prev_sides) -> bool:
+    """Ingest-time guard decision (pure — no DB, unit-testable).
+
+    Refuse a Keith's load that is entirely ONE side when the PREVIOUS load
+    carried BOTH sides. That is the exact shape of the 2026-07-29 regression
+    (parser mis-swallowed the LONGS block -> an all-short load where 7/27 was
+    16 long / 11 short) and it ran silent for ~2.5 weeks. Refusing loudly beats
+    a silent bad write; a genuinely one-sided week is rare and an operator can
+    force it. If the previous load was itself one-sided we cannot tell, so we
+    do NOT block (avoids wedging recovery)."""
+    return len(set(sides_now)) == 1 and set(prev_sides) == {"long", "short"}
+
+
+def _prev_load_sides(sd) -> set:
+    """Distinct side values at the most recent signal_date strictly before sd."""
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT side FROM hedgeye_keiths_signals "
+            "WHERE signal_date = (SELECT max(signal_date) "
+            "                       FROM hedgeye_keiths_signals "
+            "                      WHERE signal_date < %s)",
+            (sd,),
+        )
+        return {r[0] for r in cur.fetchall() if r[0]}
+
+
 def process_email(message_id: str, *, dry_run=False, fan_out=False) -> dict:
     import db_pg
     with db_pg.get_conn() as conn, conn.cursor() as cur:
@@ -154,6 +181,24 @@ def process_email(message_id: str, *, dry_run=False, fan_out=False) -> dict:
         if not dry_run:
             _stamp(message_id, CLASSIFIED + "_parse_failed")
         summ["error"] = "no LONGS/SHORTS block"
+        return summ
+    # Ingest-time one-sided-load guard: refuse (do not write) if this load is
+    # entirely one side while the previous load had both. This is the net that
+    # would have caught the 2026-07-29 all-short regression on day one.
+    sides_now = {r["side"] for r in rows}
+    prev_sides = _prev_load_sides(sd)
+    guard_tripped = one_sided_refusal(sides_now, prev_sides)
+    summ["sides_now"] = sorted(sides_now)
+    summ["prev_sides"] = sorted(prev_sides)
+    if guard_tripped:
+        log.error("KEITH'S SIGNALS GUARD TRIPPED: one-sided load (%s) for %s "
+                  "while previous load had both sides (%s) — REFUSING to write. "
+                  "email=%s", sorted(sides_now), sd, sorted(prev_sides), message_id)
+        summ["error"] = "one-sided-load guard tripped — refused write"
+        summ["guard"] = {"sides_now": sorted(sides_now),
+                         "prev_sides": sorted(prev_sides)}
+        if not dry_run:
+            _stamp(message_id, CLASSIFIED + "_one_sided_refused")
         return summ
     if dry_run:
         return summ

@@ -86,6 +86,94 @@ def test_stop_list_still_shadows_real_tickers():
     assert shadowed == ["AI", "GOLD", "KEY", "OIL"], shadowed
 
 
+# ─────────────────────────────────────────────────────────────────────
+# 2026-08-14 — the SECOND defect from the same 7/29 intra-week email: a
+# compound "Longs/Shorts:" header whose "Shorts:" swallowed the whole LONGS
+# block, mis-storing every long as short for ~2.5 weeks. Tests A4.1–A4.5.
+
+_HEALTHY_727 = (  # real 2026-07-27 body shape — the format that always worked
+    "Keith's Signal Strength List LONGS: V, MA, XYZ, FICO, COF, CFG, CPAY, "
+    "GPN, PYPL, OMF, TRU, EXPN, SPGI, JPM, WFC, COMP SHORTS : ADYEY, FISV, "
+    "AXP, AFRM, SYF, SOFI, ALLY, OPEN, RKT, ZG, FCFS")
+
+_BROKEN_729 = (  # real 2026-07-29 body shape — compound "Longs/Shorts:" header
+    "Keith's updated Signal Strength Longs/Shorts: LONGS: V, MA, XYZ, FICO, "
+    "COF, CFG, CPAY, GPN, PYPL, OMF, TRU, EXPN, SPGI, JPM, WFC, COMP "
+    "SHORTS : ADYEY, AXP, AFRM, SYF, SOFI, ALLY, OPEN, RKT, ZG, FCFS")
+
+
+def test_compound_header_no_longer_swallows_the_longs_block():
+    """THE 2026-07-29 bug: the 'Shorts:' in a 'Longs/Shorts:' header must NOT
+    consume the following LONGS block. Longs must survive as LONG."""
+    got = _t(_BROKEN_729)
+    shorts = {t for t, s in got if s == "short"}
+    for t in ("V", "MA", "JPM", "WFC", "XYZ", "COMP"):
+        assert (t, "long") in got, f"{t} should be LONG, got={sorted(got)}"
+        assert t not in shorts, f"{t} leaked to SHORT"
+    assert {t for t, s in got if s == "long"}, "LONGS block was swallowed"
+    assert ("ADYEY", "short") in got and ("AXP", "short") in got
+
+
+def test_healthy_pre_0727_format_unchanged():
+    """A4.3 — the pre-07-27 format still parses EXACTLY as before."""
+    got = _t(_HEALTHY_727)
+    longs = sorted(t for t, s in got if s == "long")
+    shorts = sorted(t for t, s in got if s == "short")
+    assert longs == ["CFG", "COF", "COMP", "CPAY", "EXPN", "FICO", "GPN", "JPM",
+                     "MA", "OMF", "PYPL", "SPGI", "TRU", "V", "WFC", "XYZ"], longs
+    assert shorts == ["ADYEY", "AFRM", "ALLY", "AXP", "FCFS", "FISV", "OPEN",
+                      "RKT", "SOFI", "SYF", "ZG"], shorts
+
+
+def test_shorts_first_two_uppercase_blocks():
+    """A4.1 — SHORTS block immediately followed by LONGS block, no lowercase."""
+    assert _t("SHORTS: TSLA, F LONGS: AAPL, NVDA") == {
+        ("TSLA", "short"), ("F", "short"), ("AAPL", "long"), ("NVDA", "long")}
+
+
+def test_longs_first_two_uppercase_blocks():
+    """A4.2 — LONGS block first, SHORTS after, all uppercase."""
+    assert _t("LONGS: AAPL, NVDA SHORTS: TSLA, F") == {
+        ("AAPL", "long"), ("NVDA", "long"), ("TSLA", "short"), ("F", "short")}
+
+
+def test_label_adjacent_blocks_do_not_cross_contaminate():
+    """A block whose label is immediately followed by the next label (empty
+    ticker list) must not swallow that next block — the case the plain
+    lookahead could not catch because seg began on the next label's letter."""
+    got = _t("SHORTS: LONGS: AAPL, NVDA")
+    assert ("AAPL", "long") in got and ("NVDA", "long") in got
+    assert "AAPL" not in {t for t, s in got if s == "short"}
+
+
+def test_slash_compound_label_is_not_a_block():
+    """(?<!/): a side label glued to a slash ('Longs/Shorts:') is a header,
+    not a block, so it mints no tickers and swallows nothing."""
+    got = _t("Signal Longs/Shorts: LONGS: AAPL SHORTS: TSLA")
+    assert got == {("AAPL", "long"), ("TSLA", "short")}, sorted(got)
+
+
+def test_paren_only_consumer_path_still_works():
+    """A4.4 — parser_macro_show calls side_blocks(paren_only=True). Confirm the
+    paren-only extraction is unaffected by the fix."""
+    rows = side_blocks("LONGS: (AAPL) plain NVDA SHORTS: (TSLA)",
+                       paren_only=True)
+    got = {(r["ticker"], r["side"]) for r in rows}
+    assert ("AAPL", "long") in got and ("TSLA", "short") in got
+    assert "NVDA" not in {t for t, _ in got}, "paren_only must skip bare NVDA"
+
+
+def test_ingest_one_sided_guard_decision():
+    """A4.5 — pure guard: refuse a one-sided load only when the prior load had
+    both sides."""
+    from parser_keiths_signals import one_sided_refusal
+    assert one_sided_refusal({"short"}, {"long", "short"}) is True   # 7/29 case
+    assert one_sided_refusal({"long"}, {"long", "short"}) is True
+    assert one_sided_refusal({"long", "short"}, {"long", "short"}) is False
+    assert one_sided_refusal({"short"}, {"short"}) is False          # prev 1-sided
+    assert one_sided_refusal({"short"}, set()) is False              # no prior load
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0

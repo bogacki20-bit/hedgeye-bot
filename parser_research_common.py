@@ -316,9 +316,22 @@ def clean_tickers(blob: str, *, paren_only: bool = False,
 # applied to the labels only, via (?i:...), so "Longs:" and "LONGS:" both match
 # while the bound stays real. TICKER_TOK_RE allows 1-6 chars, which is why
 # SIGNAL could come from here and not from parser_signal_strength's 1-5 matcher.
+# 2026-08-14 — a SECOND defect from the same 7/29 intra-week email. Its body
+# carried a NEW compound header "Signal Strength Longs/Shorts:" (a colon after
+# "Longs/Shorts" the weekly never had). The "Shorts:" inside that header matched
+# as a block label, and because \s*:\s* consumed the space, seg began on the 'L'
+# of the very next "LONGS:" — the [^a-z]+? lookahead can't re-anchor from "ONGS:",
+# so seg swallowed the entire LONGS block as side=short. Every long was mis-stored
+# short from 2026-07-29 onward, silently, for ~2.5 weeks. Two fixes:
+#   (?<!/) — a label fused to a "Longs/Shorts:" compound header is not a block.
+#   seg's inline (?!<label>:) — seg can never consume into the next block's label,
+#     regardless of case, so a block cannot swallow the next block even when the
+#     two are label-adjacent (the case the plain lookahead could not catch).
+# Neither change drops real tickers: real ticker lists contain no LONGS:/SHORTS:
+# tokens, and real block labels are never preceded by '/'.
 _SIDE_BLOCK_RE = re.compile(
-    r"\b(?P<side>(?i:LONGS?|SHORTS?|BULLISH|BEARISH))\s*:\s*"
-    r"(?P<seg>[^a-z]+?)"
+    r"(?<!/)\b(?P<side>(?i:LONGS?|SHORTS?|BULLISH|BEARISH))\s*:\s*"
+    r"(?P<seg>(?:(?!(?i:LONGS?|SHORTS?|BULLISH|BEARISH|NEUTRAL)\s*:)[^a-z])+?)"
     r"(?=(?i:LONGS?|SHORTS?|BULLISH|BEARISH|NEUTRAL)\s*:|"
     r"(?i:Please\s+visit)|\(\s*VIEW|(?i:TL;?DR)|[a-z]|$)",
     re.S,
