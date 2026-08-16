@@ -2155,12 +2155,25 @@ def decide_notifier(
     # persistence pipeline still sees a uniform record.
     if zone in ("mid_range", "unknown"):
         if account_value_usd is None:
+            # 2026-08-16: this used to fall back to 50_000.0 on ANY failure,
+            # which fabricated a denominator for bps sizing. That is the same
+            # fail-open pattern the caps were just rebuilt to remove: a made-up
+            # account value produces a confident-looking size that is wrong.
+            # account_value now RAISES UnresolvedAccountValue rather than
+            # returning 0.0, and we let that stand as "cannot size".
             try:
-                from portfolio import account_value, hedgeye_target_account
+                from portfolio import (account_value, hedgeye_target_account,
+                                       UnresolvedAccountValue)
                 acct = hedgeye_target_account("Long")
-                account_value_usd = float(account_value(acct) or 0)
-            except Exception:
-                account_value_usd = 50_000.0
+                account_value_usd = float(account_value(acct))
+            except UnresolvedAccountValue as _e:
+                log.error("account value unresolvable (%s) — declining to size; "
+                          "no denominator is NOT 50,000", _e)
+                account_value_usd = None
+            except Exception as _e:
+                log.error("account value lookup failed (%s) — declining to size",
+                          _e)
+                account_value_usd = None
         if range_pos_parts:
             reason = ("mid_range — " + " / ".join(range_pos_parts)
                       + stale_rr_note + "; no edge, no Haiku call")
@@ -2235,12 +2248,25 @@ def decide_notifier(
     # short-circuit so scanner dedup + persistence stay uniform.
     if _is_informational(ticker):
         if account_value_usd is None:
+            # 2026-08-16: this used to fall back to 50_000.0 on ANY failure,
+            # which fabricated a denominator for bps sizing. That is the same
+            # fail-open pattern the caps were just rebuilt to remove: a made-up
+            # account value produces a confident-looking size that is wrong.
+            # account_value now RAISES UnresolvedAccountValue rather than
+            # returning 0.0, and we let that stand as "cannot size".
             try:
-                from portfolio import account_value, hedgeye_target_account
+                from portfolio import (account_value, hedgeye_target_account,
+                                       UnresolvedAccountValue)
                 acct = hedgeye_target_account("Long")
-                account_value_usd = float(account_value(acct) or 0)
-            except Exception:
-                account_value_usd = 50_000.0
+                account_value_usd = float(account_value(acct))
+            except UnresolvedAccountValue as _e:
+                log.error("account value unresolvable (%s) — declining to size; "
+                          "no denominator is NOT 50,000", _e)
+                account_value_usd = None
+            except Exception as _e:
+                log.error("account value lookup failed (%s) — declining to size",
+                          _e)
+                account_value_usd = None
         regime = _informational_phrasing(ticker, zone, price, rr_lo, rr_hi)
         return {
             "ticker":            ticker.upper(),
@@ -2530,12 +2556,15 @@ def decide_notifier(
 
     # Resolve account value for downstream sizing math.
     if account_value_usd is None:
+        # See the note at the mid_range site: no fabricated denominator.
         try:
-            from portfolio import account_value, hedgeye_target_account
+            from portfolio import (account_value, hedgeye_target_account,
+                                   UnresolvedAccountValue)
             acct = hedgeye_target_account("Long")
-            account_value_usd = float(account_value(acct) or 0)
-        except Exception:
-            account_value_usd = 50_000.0
+            account_value_usd = float(account_value(acct))
+        except (UnresolvedAccountValue, Exception) as _e:
+            log.error("account value unresolvable (%s) — declining to size", _e)
+            account_value_usd = None
 
     # Sizing: BUY/SELL/SHORT/COVER all get the 50 bps notifier adder
     # (operator handles position-sizing promotion to starters via reply).
@@ -2678,13 +2707,17 @@ def _decide_legacy(
         bool(_early_key), len(_early_key),
     )
     if account_value_usd is None:
+        # No fabricated denominator. A wrong account value silently rescales
+        # every bps size computed from it, which is worse than not sizing.
         try:
-            from portfolio import account_value, hedgeye_target_account
+            from portfolio import (account_value, hedgeye_target_account,
+                                   UnresolvedAccountValue)
             acct = hedgeye_target_account("Long")
-            account_value_usd = float(account_value(acct) or 0)
-        except Exception as e:
-            log.warning("decision_engine: could not resolve account value: %s", e)
-            account_value_usd = 50_000.0  # safe fallback for sizing math
+            account_value_usd = float(account_value(acct))
+        except (UnresolvedAccountValue, Exception) as e:
+            log.error("decision_engine: account value unresolvable (%s) — "
+                      "declining to size rather than assuming 50,000", e)
+            account_value_usd = None
 
     ctx = gather_context(ticker, signal_conviction=signal_conviction)
     per_ticker_static, dynamic_block = _format_user_message(

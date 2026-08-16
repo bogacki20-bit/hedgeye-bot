@@ -18,6 +18,7 @@ from portfolio import (
     ACCOUNTS,
     INDIVIDUAL_ACCOUNT,
     MARGIN_BUFFER_USD,
+    UnresolvedAccountValue,
     account_value,
     can_trade,
     hedgeye_target_account,
@@ -72,7 +73,16 @@ def size_for(conviction, account=None, *, ticker=None, side="long"):
     `side` ('long'|'short') only feeds the ADDITIVE Hedgeye position-cap
     layer below — it does NOT affect the Style B bps math.
     """
-    acct_value = float(account_value(account=account, ticker=ticker) or 0.0)
+    # A refused denominator means NO SIZE, not a guessed one. account_value now
+    # raises rather than returning 0.0 when the account is absent from the
+    # current book (portfolio.UnresolvedAccountValue).
+    try:
+        acct_value = float(account_value(account=account, ticker=ticker))
+    except UnresolvedAccountValue as e:
+        log.error("sizing REFUSED for %s: %s", ticker, e)
+        return None, {"bps": None, "acct_value": None, "raw": None,
+                      "clamped_by": "unresolved_account_value",
+                      "refused": str(e)}
     bps = _STYLE_B_BPS_BY_CONVICTION.get(conviction)
     if bps is None:
         return None, {"bps": None, "acct_value": acct_value, "raw": None, "clamped_by": None}

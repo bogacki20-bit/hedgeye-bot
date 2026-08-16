@@ -336,29 +336,54 @@ def _name_to_account_number(name_or_number: str) -> str:
     return name_or_number  # caller passed something we don't recognize — let it through
 
 
-def _account_value_pg(account_number: str) -> float | None:
-    """Latest-snapshot sum of current_value for an account, from Postgres.
+class UnresolvedAccountValue(RuntimeError):
+    """The denominator for an account could not be established.
 
-    Returns None if Postgres isn't reachable or has no data yet.
+    Raised instead of returning a number, because every cap here is a
+    PERCENTAGE: a wrong or missing denominator silently rescales every ceiling
+    that divides by it. 2026-08-16 is the worked example — account_value read
+    portfolio_positions, stale since 2026-05-18, so the Rollover IRA's 6% cap
+    was computed against $26,354 while the account actually held $51,703.
+    """
+
+
+def _account_value_pg(account_number: str) -> float | None:
+    """Latest-snapshot total account value from book_positions, INCLUDING cash.
+
+    BOOK OF RECORD (2026-08-16). This used to read portfolio_positions, written
+    by tools/import_fidelity_positions.py — a script NOT in _daily_upload.py's
+    chain, which had not run since 2026-05-18. book_positions is written by
+    ingest_fidelity on every upload and is what every other read surface already
+    uses (v_screener, book_direction, position_targets, CONC). One book of
+    record, so every cap divides by the same number.
+
+    Cash is INCLUDED: it is account value, and both the per-position and the
+    sector cap express a ceiling as a share of the whole account. The Rollover
+    IRA is ~86% cash, so this is not a rounding detail.
+
+    Returns None when the account has no rows in the CURRENT snapshot — the
+    caller must treat that as unresolvable, never as zero.
     """
     try:
         import db_pg
         with db_pg.get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT MAX(snapshot_date) FROM portfolio_positions "
-                    "WHERE account_number = %s",
-                    (account_number,),
-                )
+                cur.execute("SELECT MAX(snapshot_date) FROM book_positions")
                 snap = cur.fetchone()[0]
                 if not snap:
                     return None
+                # count first: an account absent from the current snapshot must
+                # be unresolvable, not a $0 account that caps everything at $0.
                 cur.execute(
-                    "SELECT COALESCE(SUM(current_value), 0) FROM portfolio_positions "
+                    "SELECT count(*), COALESCE(SUM(market_value), 0) "
+                    "FROM book_positions "
                     "WHERE account_number = %s AND snapshot_date = %s",
                     (account_number, snap),
                 )
-                return float(cur.fetchone()[0] or 0.0)
+                n, total = cur.fetchone()
+                if not n:
+                    return None
+                return float(total or 0.0)
     except Exception:
         return None
 
@@ -371,13 +396,18 @@ def _account_that_held(ticker: str) -> str | None:
         import db_pg
         with db_pg.get_conn() as conn:
             with conn.cursor() as cur:
+                # book_positions, same book of record as _account_value_pg.
+                # On portfolio_positions this routed sizing to whichever account
+                # held the name back in MAY — including KM13868186, which is
+                # closed and absent from the live book.
                 cur.execute(
                     """
                     SELECT account_number
-                      FROM portfolio_positions
-                     WHERE UPPER(symbol) = UPPER(%s)
-                        OR UPPER(normalized_symbol) = UPPER(%s)
-                     ORDER BY snapshot_date DESC, ingested_at DESC
+                      FROM book_positions
+                     WHERE (UPPER(symbol) = UPPER(%s)
+                            OR UPPER(underlying) = UPPER(%s))
+                       AND COALESCE(quantity, 0) <> 0
+                     ORDER BY snapshot_date DESC, id DESC
                      LIMIT 1
                     """,
                     (ticker, ticker),
@@ -397,8 +427,14 @@ def account_value(account=None, ticker: str | None = None) -> float:
          it (so signals route sizing to the account already exposed).
       3. Else fall back to Individual.
 
-    Prefers Postgres (portfolio_positions populated by tools.import_fidelity_positions).
-    Falls back to the legacy SQLite snapshot if PG returns None.
+    Reads book_positions (the book of record) INCLUDING cash.
+
+    RAISES UnresolvedAccountValue when the denominator cannot be established —
+    the account is absent from the current snapshot, or resolves to zero. It
+    does NOT return 0.0 in that case: a percentage cap dividing by a wrong or
+    missing denominator is worse than no cap, because it still produces a
+    confident-looking ceiling. Callers that genuinely want a soft value must
+    catch it explicitly and say what they are doing.
     """
     if account:
         acct = _name_to_account_number(account)
@@ -408,20 +444,19 @@ def account_value(account=None, ticker: str | None = None) -> float:
         acct = INDIVIDUAL_ACCOUNT
 
     pg_val = _account_value_pg(acct)
-    if pg_val is not None:
-        return pg_val
-
-    # Legacy SQLite fallback (older snapshots, pre-PG ingestion).
-    snap = latest_snapshot_date()
-    if not snap:
-        return 0.0
-    with get_conn() as conn:
-        row = conn.execute("""
-            SELECT COALESCE(SUM(current_value), 0) AS total
-            FROM portfolio_positions
-            WHERE snapshot_date = ? AND account_number = ?
-        """, (snap, acct)).fetchone()
-        return float(row["total"] or 0)
+    if pg_val is None:
+        raise UnresolvedAccountValue(
+            "no rows for account %r in the current book_positions snapshot — "
+            "denominator unresolvable, refusing to return a number" % acct)
+    if pg_val <= 0:
+        raise UnresolvedAccountValue(
+            "account %r resolves to %.2f — a zero denominator would make every "
+            "percentage cap meaningless" % (acct, pg_val))
+    return pg_val
+    # The legacy SQLite portfolio_positions fallback was REMOVED 2026-08-16.
+    # It was already unreachable once PG answered, and it read the same stale
+    # table this change exists to stop trusting. A second denominator source is
+    # exactly the failure being fixed.
 
 
 # ───── Trading rule check ─────
