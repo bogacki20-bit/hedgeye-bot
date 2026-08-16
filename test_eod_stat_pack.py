@@ -328,15 +328,22 @@ def test_quad_tape_windows_are_wired_and_labelled_honestly():
     labels = [lbl for lbl, _ in QUAD_TAPE_WINDOWS]
     assert labels == ["1W", "1M", "MTD", "QTD"], labels
 
-    # One close per calendar day is fine: the windows count POSITIONS, and MTD /
-    # QTD read the dates. 1.0 growth per step makes each answer exact.
+    # One close per calendar day. 2026-08-16: these windows are now indexed by
+    # CALENDAR DATE, not by row position. yfinance returns a varying number of
+    # rows for the same request (SPHB 627 then 630 in one process), so a row
+    # offset landed on a different DATE run to run and the pack was
+    # non-deterministic. With one bar per calendar day the date offset maps
+    # straight onto an index:
+    #     1W = 7 calendar days back  -> closes[-8]   (was 5 rows -> closes[-6])
+    #     1M = 28 calendar days back -> closes[-29]  (was 21 rows -> closes[-22])
+    # 28 days is also Hedgeye's "4 Wks Ago", the level their MoM column
+    # compares against.
     dates = [_dt.date(2026, 3, 1) + _dt.timedelta(days=i) for i in range(180)]
     closes = [100.0 + i for i in range(180)]
     got = {lbl: fn(closes, dates) for lbl, fn in QUAD_TAPE_WINDOWS}
 
-    # 1W = 5 back, 1M = 21 back — exactly what the labels claim.
-    assert abs(got["1W"] - (closes[-1] / closes[-6] - 1)) < 1e-12, got["1W"]
-    assert abs(got["1M"] - (closes[-1] / closes[-22] - 1)) < 1e-12, got["1M"]
+    assert abs(got["1W"] - (closes[-1] / closes[-8] - 1)) < 1e-12, got["1W"]
+    assert abs(got["1M"] - (closes[-1] / closes[-29] - 1)) < 1e-12, got["1M"]
 
     # MTD/QTD off the last close BEFORE the boundary, not the first close in it.
     last = dates[-1]                                    # 2026-08-27

@@ -302,5 +302,121 @@ check("prior-level columns rendered", "4W ago" in rendered, True)
 check("live series shows no FROZEN warning",
       "FROZEN" in eod.format_rates_credit([("BBB-10y", lc2)], {}), False)
 
+
+# ── 13. DETERMINISM: date-indexed windows survive a dropped bar ─────────────
+print("\n13. windows are indexed by DATE, not row offset:")
+from tools.eod_stat_pack import (asof_index, pct_return_asof, pct_return,
+                                 WINDOW_DAYS, returns_row)
+
+# a clean weekday series, and the SAME series with one interior bar dropped --
+# exactly what yfinance does between calls (SPHB 627 rows then 630).
+# Returns must VARY. My first version compounded at a constant 0.1%/bar, which
+# makes a row-offset return identical no matter which rows it spans -- the
+# fixture could not have shown the bug it was written to show.
+_rnd.seed(11)
+d0 = date(2026, 1, 1)
+full_d, full_c = [], []
+dd, px = d0, 100.0
+while len(full_d) < 200:
+    if dd.weekday() < 5:
+        px *= 1 + _rnd.uniform(-1.5, 1.5) / 100
+        full_d.append(dd); full_c.append(px)
+    dd += _td(days=1)
+# The dropped bar must fall INSIDE the window being measured. My first version
+# dropped index 150 while the 21-row window covered only the last 21 rows, so
+# the gap was never spanned and both methods agreed -- a fixture that proved
+# nothing. Real yfinance drops land anywhere, recent bars included.
+drop_at = len(full_d) - 10
+gap_d = full_d[:drop_at] + full_d[drop_at + 1:]
+gap_c = full_c[:drop_at] + full_c[drop_at + 1:]
+check("the two frames differ by exactly one row",
+      len(full_d) - len(gap_d), 1)
+
+print("     ROW-OFFSET (old behaviour) -- the bug:")
+old_full = pct_return(full_c, 21)
+old_gap = pct_return(gap_c, 21)
+check("row offset gives DIFFERENT answers", abs(old_full - old_gap) > 1e-9, True)
+print("       full %.4f%%  vs gapped %.4f%%" % (old_full * 100, old_gap * 100))
+
+print("     DATE-INDEXED (new behaviour) -- the fix:")
+new_full = pct_return_asof(full_c, full_d, 28)
+new_gap = pct_return_asof(gap_c, gap_d, 28)
+check("date indexing gives the SAME answer", abs(new_full - new_gap) < 1e-12, True)
+print("       full %.4f%%  vs gapped %.4f%%" % (new_full * 100, new_gap * 100))
+
+check("asof_index lands on the last bar <= target",
+      full_d[asof_index(full_d, 28)] <= full_d[-1] - _td(days=28), True)
+check("and on the LATEST such bar",
+      full_d[asof_index(full_d, 28) + 1] > full_d[-1] - _td(days=28), True)
+check("28d window == Hedgeye's '4 weeks ago'",
+      dict(WINDOW_DAYS)["1M"], 28)
+check("no window is a row count any more",
+      sorted(dict(WINDOW_DAYS).values()), [1, 7, 28, 91, 182])
+check("returns_row is date-indexed end to end",
+      returns_row(full_c, full_d)["1M"], returns_row(gap_c, gap_d)["1M"])
+check("empty input -> None", pct_return_asof([], [], 28), None)
+check("series shorter than the window -> None",
+      pct_return_asof(full_c[-3:], full_d[-3:], 182), None)
+
+print("\n14. correlations are date-BOUNDED, not last-N-rows:")
+# a genuinely independent second series (a constant multiple would be a
+# degenerate, zero-variance pair and pearson correctly refuses those)
+_rnd.seed(23)
+bc, q = [], 50.0
+for _ in full_c:
+    q *= 1 + _rnd.uniform(-1.2, 1.2) / 100
+    bc.append(q)
+bc_gap = bc[:drop_at] + bc[drop_at + 1:]
+c_full = corr_over(full_c, bc, 90, full_d, full_d)
+c_gap = corr_over(gap_c, bc_gap, 90, gap_d, gap_d)
+check("both windows resolve", (c_full is not None, c_gap is not None),
+      (True, True))
+check("a dropped bar barely moves the correlation",
+      abs(c_full - c_gap) < 0.10, True)
+print("     full %.3f vs one-bar-gapped %.3f (delta %.3f)"
+      % (c_full, c_gap, c_gap - c_full))
+
+
+# ── 15. PERMANENT DETERMINISM REGRESSION (needs DB; failure if unrunnable) ──
+print("\n15. two builds for the same as-of are byte-identical:")
+
+
+def _data_only(txt):
+    """Strip the two lines that are SUPPOSED to differ between builds: the
+    build clock, and the provenance note saying whether bars were fetched or
+    replayed. Everything else must match exactly."""
+    out = []
+    for ln in (txt or "").splitlines():
+        if ln.startswith("BUILT:"):
+            continue
+        if "bars fetched and banked" in ln or "bars REPLAYED from store" in ln:
+            ln = re.sub(r"bars (fetched and banked|REPLAYED from store)",
+                        "bars <provenance>", ln)
+        out.append(ln)
+    return "\n".join(out)
+
+
+try:
+    import re
+    import db_pg as _db
+    _db._load_dotenv_fallback()
+    from tools.eod_stat_pack import build_eod_pack
+    b1 = build_eod_pack()
+    b2 = build_eod_pack()
+    d1, d2 = _data_only(b1), _data_only(b2)
+    check("every DATA line is identical across builds", d1 == d2, True)
+    if d1 != d2:
+        for i, (x, y) in enumerate(zip(d1.splitlines(), d2.splitlines())):
+            if x != y:
+                print("     line %d:\n       A: %s\n       B: %s" % (i, x[:100], y[:100]))
+                break
+    check("the build clock IS allowed to differ",
+          "BUILT:" in b1 and "BUILT:" in b2, True)
+    check("second build REPLAYED rather than refetched",
+          "REPLAYED from store" in b2, True)
+except Exception as _e:
+    print("  !! DETERMINISM TEST COULD NOT RUN (%s) — counted as FAILURE." % _e)
+    FAIL += 1
+
 print("\n" + ("ALL PASS" if FAIL == 0 else f"{FAIL} FAILURE(S)"))
 sys.exit(1 if FAIL else 0)

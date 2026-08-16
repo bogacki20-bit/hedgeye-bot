@@ -79,9 +79,64 @@ LOOKBACK_DAYS = 400          # enough for 180D corr and a full YTD
 
 # ═══════════════════════ pure logic (no I/O, fixture-tested) ════════════════
 
+# CALENDAR-DAY window definitions. These replaced trading-day ROW OFFSETS on
+# 2026-08-16 (see asof_index). 28 days is deliberately "4 weeks", which is also
+# Hedgeye's MoM definition -- their slides print the "4 Wks Ago" LEVEL, so the
+# bot now compares against the same point in time rather than 21 rows back.
+WINDOW_DAYS = [("1D", 1), ("1W", 7), ("1M", 28), ("3M", 91), ("6M", 182)]
+CORR_WINDOW_DAYS = {15: 21, 30: 42, 90: 126, 120: 168, 180: 252}
+
+
+def asof_index(dates, days_back, ref=None) -> int | None:
+    """Index of the last bar ON OR BEFORE (ref - days_back calendar days).
+
+    THE FIX for the 2026-08-16 non-determinism. Every window used to be a ROW
+    OFFSET -- cs[-1 - 21]. yfinance returns a varying number of rows for the
+    same request (measured: SPHB 627 then 630 rows in the same process, no
+    market open in between), so -21 landed on a DIFFERENT CALENDAR DATE run to
+    run: SPHB's "1M ago" was 2026-07-13 on one build and 2026-07-16 on the next,
+    producing 1M returns of +4.05% and +6.07% from identical inputs.
+
+    Indexing by DATE makes the answer independent of how many rows came back. A
+    dropped bar shifts nothing: the comparison point is still "the last session
+    on or before four weeks ago". Short windows looked stable before only
+    because they rarely spanned a gap; the error grew with the window, which is
+    exactly what was observed.
+    """
+    if not dates:
+        return None
+    ref = ref or dates[-1]
+    from datetime import timedelta
+    target = ref - timedelta(days=days_back)
+    lo, hi, found = 0, len(dates) - 1, None
+    while lo <= hi:                      # bisect: dates are sorted ascending
+        mid = (lo + hi) // 2
+        if dates[mid] <= target:
+            found, lo = mid, mid + 1
+        else:
+            hi = mid - 1
+    return found
+
+
+def pct_return_asof(closes, dates, days_back) -> float | None:
+    """% return from the last close on or before `days_back` CALENDAR days ago.
+    Deterministic across fetches with differing row counts."""
+    if not closes or not dates or len(closes) != len(dates):
+        return None
+    i = asof_index(dates, days_back)
+    if i is None or i >= len(closes) - 0 or not closes[i]:
+        return None
+    if i == len(closes) - 1:             # target is the last bar itself
+        return None
+    return closes[-1] / closes[i] - 1.0
+
+
 def pct_return(closes, window) -> float | None:
-    """Close-to-close % return over `window` trading days. None when the series
-    is too short or the base is zero — never 0.0, which would read as flat."""
+    """Close-to-close % return over `window` ROWS.
+
+    ROW-OFFSET. Retained for pure fixture tests and for callers that hold a
+    known-complete series. Everything in the pack that touches fetched data now
+    uses pct_return_asof -- see asof_index for why."""
     cs = [c for c in (closes or []) if c is not None]
     if len(cs) <= window or not cs[-1 - window]:
         return None
@@ -138,8 +193,8 @@ def qtd_return(closes, dates) -> float | None:
 # QTD the quarterly, so the two horizons Hedgeye actually publishes each get a
 # row instead of being approximated by a rolling day count.
 QUAD_TAPE_WINDOWS = [
-    ("1W",  lambda c, d: pct_return(c, 5)),
-    ("1M",  lambda c, d: pct_return(c, 21)),
+    ("1W",  lambda c, d: pct_return_asof(c, d, 7)),
+    ("1M",  lambda c, d: pct_return_asof(c, d, 28)),
     ("MTD", lambda c, d: mtd_return(c, d)),
     ("QTD", lambda c, d: qtd_return(c, d)),
 ]
@@ -150,7 +205,7 @@ def sector_row(closes, dates) -> dict:
     Deliberately NOT the factor-board windows — the two pages measure
     different things and matching Hedgeye matters more than internal symmetry."""
     return {"price": closes[-1] if closes else None,
-            "1D": pct_return(closes, 1),
+            "1D": pct_return_asof(closes, dates, 1),
             "MTD": mtd_return(closes, dates),
             "QTD": qtd_return(closes, dates),
             "YTD": ytd_return(closes, dates)}
@@ -180,8 +235,9 @@ def rolling_corr_stats(a_closes, b_closes, window=30, lookback=252) -> dict:
 
 
 def returns_row(closes, dates) -> dict:
-    """{'1D','1W','1M','3M','6M','YTD'} for one series."""
-    out = {lbl: pct_return(closes, w) for lbl, w in RET_WINDOWS}
+    """{'1D','1W','1M','3M','6M','YTD'} for one series, DATE-INDEXED.
+    Row offsets moved with the row count; calendar dates do not."""
+    out = {lbl: pct_return_asof(closes, dates, d) for lbl, d in WINDOW_DAYS}
     out["YTD"] = ytd_return(closes, dates)
     return out
 
@@ -258,11 +314,28 @@ def align_on_dates(a_closes, a_dates, b_closes, b_dates) -> tuple:
 def corr_over(a_closes, b_closes, window, a_dates=None, b_dates=None):
     """Correlation of daily returns over the last `window` SHARED sessions.
 
-    Pass dates whenever you have them. Without them this falls back to
-    positional alignment, which is only safe when both series are known to sit
-    on the same date grid — see align_on_dates for why that matters.
+    Pass dates whenever you have them: they do BOTH jobs. align_on_dates fixes
+    the 24/7-vs-5-day pairing, and the window is then bounded by CALENDAR DATE
+    rather than by a row count, so a dropped bar cannot silently change which
+    period is being measured (the 2026-08-16 non-determinism).
+    Without dates this falls back to positional, which is only safe on a known
+    complete, shared grid.
     """
-    a_closes, b_closes = align_on_dates(a_closes, a_dates, b_closes, b_dates)
+    if a_dates and b_dates:
+        da = dict(zip(a_dates, a_closes or []))
+        db = dict(zip(b_dates, b_closes or []))
+        common = sorted(set(da) & set(db))
+        if len(common) < 4:
+            return None
+        span = CORR_WINDOW_DAYS.get(window, int(window * 1.4))
+        from datetime import timedelta
+        cutoff = common[-1] - timedelta(days=span)
+        common = [d for d in common if d >= cutoff]
+        a_closes = [da[d] for d in common]
+        b_closes = [db[d] for d in common]
+        ra, rb = daily_returns(a_closes), daily_returns(b_closes)
+        n = min(len(ra), len(rb))
+        return pearson(ra, rb) if n >= 3 else None
     ra, rb = daily_returns(a_closes), daily_returns(b_closes)
     n = min(len(ra), len(rb), window)
     if n < 3:
@@ -347,7 +420,7 @@ def _fetch_bars(symbols, lookback_days=LOOKBACK_DAYS):
     except Exception as e:
         log.warning("eod: yfinance unavailable: %s", e)
         return {}
-    period = f"{int(lookback_days * 1.5) + 30}d"
+    period = f"{int(lookback_days * 1.5) + 30}d"      # see _fetch_bars docstring
     out = {}
     syms = list(dict.fromkeys(symbols))
     try:
@@ -367,6 +440,63 @@ def _fetch_bars(symbols, lookback_days=LOOKBACK_DAYS):
         except Exception:
             continue
     return out
+
+
+# ── deterministic bar store ────────────────────────────────────────────────
+
+def _bars_from_store(as_of, symbols) -> dict:
+    """Bars previously banked for `as_of`, or {} if none/partial.
+
+    Replay is ALL-OR-NOTHING: a partial store would silently mix banked and
+    freshly-fetched series in one pack, which is the same class of bug as
+    mixing two row counts."""
+    import db_pg
+    try:
+        with db_pg.get_conn() as c:
+            cur = c.cursor()
+            cur.execute("SELECT symbol, bars FROM eod_bar_store WHERE as_of=%s",
+                        (as_of,))
+            rows = cur.fetchall()
+    except Exception as e:
+        log.warning("bar store unreadable (%s) — fetching live", e)
+        return {}
+    have = {sym: b for sym, b in rows}
+    if not have or not set(symbols) <= set(have):
+        return {}
+    from datetime import date as _d
+    out = {}
+    for sym in symbols:
+        pairs = have[sym]
+        out[sym] = {"dates": [_d.fromisoformat(p[0]) for p in pairs],
+                    "closes": [float(p[1]) for p in pairs]}
+    return out
+
+
+def _bank_bars(as_of, bars) -> None:
+    """Write the fetched bars for `as_of`. Never raises — failing to bank must
+    not stop delivery, but it does mean the build is not replayable, so it
+    says so."""
+    import json
+    import db_pg
+    try:
+        with db_pg.get_conn() as c:
+            cur = c.cursor()
+            for sym, b in (bars or {}).items():
+                d, cl = b.get("dates") or [], b.get("closes") or []
+                if not d:
+                    continue
+                payload = json.dumps([[x.isoformat(), y] for x, y in zip(d, cl)])
+                cur.execute(
+                    """INSERT INTO eod_bar_store
+                       (as_of, symbol, bars, n_bars, first_bar, last_bar)
+                       VALUES (%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (as_of, symbol) DO NOTHING""",
+                    (as_of, sym, payload, len(d), d[0], d[-1]))
+            c.commit()
+        log.info("banked %d symbols for as_of %s", len(bars or {}), as_of)
+    except Exception as e:
+        log.error("BARS NOT BANKED for %s (%s) — this build is NOT replayable",
+                  as_of, e)
 
 
 def _now_et() -> str:
@@ -634,10 +764,20 @@ def format_rates_credit(rows, curve) -> str:
                       "identical; this is a STALE SERIES, not a calm one"
                       if d.get("frozen") else ""))
     if curve:
+        # The derived row must fill the SAME eight columns as every other row.
+        # It previously emitted only four, so its DELTAS rendered underneath the
+        # prior-level headers and the row read as a different metric entirely.
+        # curve_2_10 and spread_series both return prior levels — they run the
+        # date-aligned paired series through level_changes — so these come from
+        # the spread's own history rather than being re-derived from the legs.
         out.append(f"{'2-10 curve':<10}{curve['last']:>8.2f}"
+                   + _lv(curve.get("1D_level")) + _lv(curve.get("1W_level"))
+                   + _lv(curve.get("1M_level"))
                    + _bp(curve.get("1D")) + _bp(curve.get("1W"))
                    + _bp(curve.get("1M"))
-                   + ("   INVERTED" if curve["last"] < 0 else ""))
+                   + "  " + str(curve.get("last_date") or "?")
+                   + ("   INVERTED" if curve["last"] < 0 else "")
+                   + ("  !! FROZEN" if curve.get("frozen") else ""))
     return "\n".join(out)
 
 
@@ -766,7 +906,17 @@ def build_eod_pack() -> str:
     need |= set(SECTORS)
     need |= {s for _, s in CORR_ROWS} | {s for _, s in CORR_ANCHORS}
     need |= set(quad_tape.doctrine_tickers())
-    bars = _fetch_bars(sorted(need))
+    # DETERMINISM. Replay banked bars for this as-of when they exist, so a
+    # rebuild is byte-identical. yfinance is NOT reproducible -- three identical
+    # ranged calls returned 617/617/614 rows for CPER -- so the only way a
+    # second build can match the first is to reuse the first build's input.
+    from tools.trading_calendar import last_completed_session
+    _asof = last_completed_session()
+    bars = _bars_from_store(_asof, sorted(need))
+    replayed = bool(bars)
+    if not bars:
+        bars = _fetch_bars(sorted(need))
+        _bank_bars(_asof, bars)
     got = sum(1 for s in need if bars.get(s, {}).get("closes"))
     # H2: as-of stamp. The LAST BAR DATE, not the clock — a pack built at 09:00
     # Monday off Friday's closes is not stale by the clock and is stale by three
@@ -812,7 +962,9 @@ def build_eod_pack() -> str:
     parts.append(f"DATA AS OF: {last_bar:%a %Y-%m-%d} close")
     parts.append(f"BUILT:      {built}")
     parts.append(f"(price data: {got}/{len(need)} symbols · bar date validated "
-                 f"against the NYSE calendar)")
+                 f"against the NYSE calendar · bars "
+                 f"{'REPLAYED from store' if replayed else 'fetched and banked'}"
+                 f" for as-of {_asof})")
     if off_consensus:
         # Named, never silent. A 24/7 instrument legitimately has a later bar;
         # it just must not define the session. Anything ELSE in this list is
