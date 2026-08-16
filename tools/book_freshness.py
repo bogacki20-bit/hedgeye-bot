@@ -54,24 +54,41 @@ def stale_note(snapshot: date | None, today: date | None = None) -> str | None:
     return "book %d days old (%s)" % (d, snapshot)
 
 
-def status_line(snapshot: date | None, today: date | None = None) -> str:
+def status_line(snapshot: date | None, today: date | None = None,
+                carries_positions: bool = True) -> str:
     """The line every book-dependent surface prints. ALWAYS states the date.
 
-    Fresh:  "BOOK as of 2026-08-15 (1d old)"
-    Stale:  "!! STALE BOOK: as of 2026-08-07, 9 days old -- positions, weights
-             and % figures below are from that date, NOT today. Re-run
-             _daily_upload.py after exporting from Fidelity."
+    `carries_positions` says whether THIS document actually renders position,
+    weight or % figures. It must, because the warning has to describe the
+    document it appears in:
+      report.py     -> True  (BOOK / CONC / CASH / fills are rendered below)
+      eod_stat_pack -> False (factor board, sectors, correlations, rates only)
+    2026-08-16: the EOD pack printed "positions, weights and % figures BELOW
+    are from that date" and then rendered no such figures. A warning that
+    promises content the document does not contain is crying wolf, and a
+    reader who learns to discount it will discount the real staleness event
+    later.
+
+    Fresh: "BOOK as of 2026-08-15 (1d old)"
+    Stale: "!! STALE BOOK: as of 2026-08-07, 9 days old -- ..."
     """
     if snapshot is None:
-        return ("!! BOOK DATE UNKNOWN -- book_positions is empty or unreadable. "
-                "Every position figure below is unverifiable.")
+        tail = (" Every position figure below is unverifiable."
+                if carries_positions else
+                " This document renders no position figures, but anything that"
+                " does is unverifiable.")
+        return ("!! BOOK DATE UNKNOWN -- book_positions is empty or unreadable."
+                + tail)
     d = age_days(snapshot, today)
     if d is not None and d <= STALE_AFTER_DAYS:
         return "BOOK as of %s (%dd old)" % (snapshot, d)
-    return ("!! STALE BOOK: as of %s, %d days old -- positions, weights and %% "
-            "figures below are from that date, NOT today. Re-run "
-            "_daily_upload.py after exporting from Fidelity."
-            % (snapshot, d))
+    tail = ("positions, weights and %% figures below are from that date, NOT "
+            "today. Re-run _daily_upload.py after exporting from Fidelity."
+            if carries_positions else
+            "this document renders NO position or weight figures, so nothing "
+            "here is affected -- but BOOK/CONC in the REPORT are. Re-run "
+            "_daily_upload.py after exporting from Fidelity.")
+    return ("!! STALE BOOK: as of %s, %d days old -- " % (snapshot, d)) + tail
 
 
 # ─────────────────────────── DB-backed wrappers ───────────────────────────
@@ -90,16 +107,22 @@ def book_snapshot_date() -> date | None:
         return None
 
 
-def book_status(today: date | None = None) -> dict:
-    """{snapshot, days, stale, line} for the current book."""
+def book_status(today: date | None = None,
+                carries_positions: bool = True) -> dict:
+    """{snapshot, days, stale, line} for the current book.
+    `carries_positions` is passed through to status_line -- see its docstring."""
     snap = book_snapshot_date()
     return {"snapshot": snap,
             "days": age_days(snap, today),
             "stale": is_stale(snap, today),
-            "line": status_line(snap, today)}
+            "line": status_line(snap, today, carries_positions)}
 
 
-def book_banner(today: date | None = None) -> str:
+def book_banner(today: date | None = None,
+                carries_positions: bool = True) -> str:
     """One-line banner for a text surface. Never empty — silence about the
-    book's age is the thing this module exists to prevent."""
-    return book_status(today)["line"]
+    book's age is the thing this module exists to prevent.
+
+    Pass carries_positions=False from a document that renders no position
+    figures (the EOD pack), so the warning describes that document."""
+    return book_status(today, carries_positions)["line"]

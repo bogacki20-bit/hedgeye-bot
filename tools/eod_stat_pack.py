@@ -411,11 +411,32 @@ def _header() -> tuple[list, str | None, bool]:
 # that silently reads n/a because the variable is called something else is the
 # same class of failure as the empty watchlist.
 FRED_ENV_NAMES = ("FRED_API_KEY", "FRED_KEY", "FRED_TOKEN", "FRED_API_TOKEN")
+# §1.2 SERIES DEFINITIONS — each one documented, because a spread is only
+# meaningful if you know what was subtracted from what.
+#
+# 2026-08-16: the pack printed BBB 0.98 against Hedgeye's 0.89. Cause found by
+# reading the code, not by guessing: BAMLC0A4CBBB is the ICE BofA BBB US
+# Corporate Index OPTION-ADJUSTED SPREAD (already a spread to the curve).
+# Hedgeye's slide is explicitly "US Corp BBB MINUS Treasury 10-Year" — a
+# different construction with a different denominatorless subtraction, so the
+# two can never agree. Replaced with the credit YIELD series and an explicit
+# subtraction of DGS10, which reproduces Hedgeye's definition.
+#
+# HY OAS keeps BAMLH0A0HYM2: that IS the standard HY OAS and matches Hedgeye's
+# construction. Its 2.71-vs-2.66 gap is therefore NOT a series mismatch and is
+# most likely an as-of difference (pack 8/16 vs deck 8/13 close) — recorded
+# here so the next reader does not re-litigate it. Verify against the golden
+# reference once a FRED key exists.
 FRED_SERIES = [
     ("2y UST",   "DGS2",           "%"),
     ("10y UST",  "DGS10",          "%"),
     ("HY OAS",   "BAMLH0A0HYM2",   "%"),
-    ("BBB OAS",  "BAMLC0A4CBBB",   "%"),
+]
+# Derived spreads: (label, minuend_series, subtrahend_series). Computed by
+# DATE-ALIGNED subtraction, never by index — the two series have different
+# holiday gaps and zipping them by position silently compares different days.
+FRED_SPREADS = [
+    ("BBB-10y", "BAMLC0A4CBBBEY", "DGS10"),   # BBB effective YIELD minus UST10Y
 ]
 FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
 # FRED keys are exactly 32 lowercase alphanumerics. Anything else 400s on EVERY
@@ -548,6 +569,20 @@ def format_rates_credit(rows, curve) -> str:
     return "\n".join(out)
 
 
+def spread_series(minuend, subtrahend) -> dict:
+    """level_changes for (minuend - subtrahend), aligned ON DATE.
+
+    Same discipline as curve_2_10: the two FRED series have different holiday
+    gaps, so zipping by index silently subtracts different days. Used for
+    BBB-minus-UST10Y, which is Hedgeye's construction (a raw BBB OAS is a
+    different number and will never reconcile to their slide)."""
+    if not minuend or not subtrahend:
+        return {}
+    sub = dict(subtrahend)
+    paired = [(d, v - sub[d]) for d, v in minuend if d in sub]
+    return level_changes(paired)
+
+
 def curve_2_10(two, ten) -> dict:
     """10y minus 2y, aligned on DATE not position — the two series have
     different holiday gaps, so zipping them by index silently compares
@@ -575,9 +610,16 @@ def _rates_credit_block() -> str:
                 f"variable and this section fills in with no code change.")
     _FRED_ERRORS.clear()
     try:
-        fetched = {sid: fred_series(sid, key) for _, sid, _ in FRED_SERIES}
+        wanted = {sid for _, sid, _ in FRED_SERIES}
+        for _, a, b in FRED_SPREADS:
+            wanted |= {a, b}
+        fetched = {sid: fred_series(sid, key) for sid in sorted(wanted)}
         rows = [(label, level_changes(fetched.get(sid) or []))
                 for label, sid, _ in FRED_SERIES]
+        # Derived spreads, date-aligned (see FRED_SPREADS).
+        for label, a, b in FRED_SPREADS:
+            rows.append((label, spread_series(fetched.get(a) or [],
+                                              fetched.get(b) or [])))
         curve = curve_2_10(fetched.get("DGS2") or [], fetched.get("DGS10") or [])
         empty = [label for label, d in rows if not d]
         block = format_rates_credit(rows, curve)
@@ -595,6 +637,53 @@ def _rates_credit_block() -> str:
         return f"RATES + CREDIT: unavailable ({e})"
 
 
+def _deployed_sha() -> str | None:
+    """The commit the RUNNING process was built from. The single most useful
+    field in the artifact table: on 2026-08-16 the first question asked was
+    'which build produced this', and nothing recorded it."""
+    import subprocess
+    try:
+        with __import__("db_pg").get_conn() as c:
+            cur = c.cursor()
+            cur.execute("SELECT value FROM bot_state WHERE key='bot_git_sha'")
+            r = cur.fetchone()
+            if r and r[0]:
+                return r[0]
+    except Exception:
+        pass
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                              text=True, timeout=5).stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
+    """Retain the artifact. NEVER raises: a failure to archive must not stop
+    the pack being delivered. Logs loudly instead, because an unarchived run is
+    an undiagnosable one."""
+    try:
+        import db_pg
+        with db_pg.get_conn() as c:
+            cur = c.cursor()
+            cur.execute(
+                """INSERT INTO eod_pack_artifacts
+                   (built_at_et, last_bar_date, bar_date_valid, block_reason,
+                    deployed_sha, symbols_ok, symbols_total, body)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (built_et, last_bar, valid, block_reason, _deployed_sha(),
+                 ok_n, total_n, body))
+            rid = cur.fetchone()[0]
+            c.commit()
+        log.info("eod pack archived as artifact %s (bar %s, valid=%s)",
+                 rid, last_bar, valid)
+        return rid
+    except Exception as e:
+        log.error("EOD PACK NOT ARCHIVED (%s) — this run will be "
+                  "undiagnosable if it turns out to be wrong", e)
+        return None
+
+
 def build_eod_pack() -> str:
     """Assemble the pack. Every section guarded; a failure prints in place."""
     parts, header_quad, quad_stale = _header()
@@ -610,19 +699,68 @@ def build_eod_pack() -> str:
     # H2: as-of stamp. The LAST BAR DATE, not the clock — a pack built at 09:00
     # Monday off Friday's closes is not stale by the clock and is stale by three
     # days of tape. Both are printed so the gap between them is visible.
-    last_bar = max((b["dates"][-1] for b in bars.values()
-                    if b.get("dates")), default=None)
-    parts.append(f"(price data: {got}/{len(need)} symbols · last bar "
-                 f"{last_bar or 'n/a'} · built {_now_et()})")
-    # Book age sits next to the tape as-of stamp deliberately: the pack carries
-    # TWO independent staleness axes (price bars and the broker book) and one
-    # being current says nothing about the other.
+    # Resolve the EQUITY session, not max() over every symbol. BTC-USD trades
+    # 24/7 and its weekend bar used to define the header date -- see
+    # trading_calendar.resolve_session_date for the full root cause.
+    from tools.trading_calendar import resolve_session_date
+    last_bar, off_consensus = resolve_session_date(bars)
+
+    # ── §1.1 TRADING-CALENDAR ASSERTION ────────────────────────────────────
+    # The bar date is now VALIDATED against an NYSE calendar before anything
+    # is printed. On 2026-08-16 this header read "last bar 2026-08-16" — a
+    # SUNDAY — so every "1D" field was Thursday->Friday while the header
+    # claimed otherwise. It failed silently and looked correct.
+    # On failure this returns a BLOCKING banner and NO data table: a pack that
+    # cannot say which session it covers must not publish numbers that imply
+    # one. DATA AS OF and BUILT are printed as separate, unambiguous facts.
+    from tools.trading_calendar import (validate_bar_date, duplicate_final_bar,
+                                        last_completed_session)
+    ok, why = validate_bar_date(last_bar)
+    dup, dup_detail = duplicate_final_bar(bars)
+    built = _now_et()
+    if not ok or dup:
+        reason = why if not ok else ("final bar is a duplicate: " + dup_detail)
+        return "\n".join([
+            "!! EOD PACK BLOCKED — THE BAR DATE FAILED VALIDATION.",
+            "   %s" % reason,
+            "   expected last completed session: %s" % last_completed_session(),
+            "   BUILT: %s" % built,
+            "",
+            "   No data table is printed. Every window in this pack ('1D',",
+            "   '1W', '1M') is defined relative to the last bar, so if the bar",
+            "   date is wrong every one of those labels is wrong too — and a",
+            "   table that looks right is worse than no table.",
+            "   duplicate-bar check: %s" % dup_detail,
+            "   symbols with data: %d/%d" % (got, len(need)),
+        ])
+        # Archive the FAILURE too -- a blocked run is exactly the one a future
+        # investigation needs to see.
+        _persist_pack(blocked, last_bar, False, reason, got, len(need), built)
+        return blocked
+    parts.append(f"DATA AS OF: {last_bar:%a %Y-%m-%d} close")
+    parts.append(f"BUILT:      {built}")
+    parts.append(f"(price data: {got}/{len(need)} symbols · bar date validated "
+                 f"against the NYSE calendar)")
+    if off_consensus:
+        # Named, never silent. A 24/7 instrument legitimately has a later bar;
+        # it just must not define the session. Anything ELSE in this list is
+        # lagging and worth knowing about.
+        parts.append(f"  note: {len(off_consensus)} symbol(s) off the session "
+                     f"date ({', '.join(off_consensus[:6])}"
+                     f"{' ...' if len(off_consensus) > 6 else ''}) — 24/7 or "
+                     f"lagging instruments; their data is still used, they do "
+                     f"not set the session")
+    # Book age. The pack carries TWO independent staleness axes (price bars and
+    # the broker book) and one being current says nothing about the other.
+    # NB the wording is scoped to what THIS document actually contains: the EOD
+    # pack renders no position, weight or fill figures (those are report.py), so
+    # a banner promising "figures below" would be crying wolf and would mask a
+    # real staleness event later.
     try:
         from tools.book_freshness import book_banner
-        parts.append(book_banner())
+        parts.append(book_banner(carries_positions=False))
     except Exception as e:
-        parts.append(f"!! BOOK AGE UNKNOWN ({e}) — position-derived figures "
-                     f"in this pack are unverified.")
+        parts.append(f"!! BOOK AGE UNKNOWN ({e})")
 
     def _rets(sym):
         b = bars.get(sym) or {}
@@ -678,7 +816,13 @@ def build_eod_pack() -> str:
     parts.append(_rates_credit_block())
     parts.append("VOL COMPLEX (VIX/VXN/RVX/VVIX/MOVE/GVZ/OVX) + IVOL: Phase 2")
     parts.append("CFTC positioning + FX realized-vol proxy: Phase 3")
-    return "\n".join(parts)
+    body = "\n".join(parts)
+    # §1.1b ARTIFACT RETENTION. Every pack persists with its build time, the
+    # RESOLVED bar date, the validation result and the DEPLOYED COMMIT SHA.
+    # The 2026-08-16 Sunday-bar bug was unfalsifiable purely because no such
+    # record existed; the next occurrence is answerable from one query.
+    _persist_pack(body, last_bar, True, None, got, len(need), built)
+    return body
 
 
 # ═══════════════════════ Telegram + schedule hooks ══════════════════════════
