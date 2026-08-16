@@ -103,7 +103,11 @@ def evaluate(*, ticker, side, asset_class, sector, add_dollars,
            "decision": None, "binding": None, "reason": None,
            "sector_pct": None, "position_pct": None,
            "book_sector_pct": None, "scope": ENFORCE_SCOPE,
-           "warn_pct": WARN_PCT, "reject_pct": REJECT_PCT}
+           "warn_pct": WARN_PCT, "reject_pct": REJECT_PCT,
+           # allowed_add: dollars that could still be added before the TIGHTER
+           # of the two ceilings rejects. 0.0 on any refusal. Callers use this
+           # to clamp a size rather than re-deriving the arithmetic.
+           "allowed_add": 0.0, "account_value": account_value}
 
     if not account_value or account_value <= 0:
         out.update(decision=REFUSE, binding="no_denominator",
@@ -137,6 +141,7 @@ def evaluate(*, ticker, side, asset_class, sector, add_dollars,
                               % (out["ticker"], asset_class))
             return out
         ceiling = account_value * pct / 100.0
+        out["allowed_add"] = max(0.0, ceiling - abs(float(current_position_value or 0.0)))
         if pos_after > ceiling:
             out.update(decision=REJECT, binding="asset_class_cap",
                        reason="%s is %s: %.1f%% of account after this trade, "
@@ -159,6 +164,9 @@ def evaluate(*, ticker, side, asset_class, sector, add_dollars,
     pos_pct_cap0 = doctrine_pct("equity", side)
     if bucket_kind == "broad":
         ceiling = account_value * pos_pct_cap0 / 100.0 if pos_pct_cap0 else None
+        if ceiling is not None:
+            out["allowed_add"] = max(
+                0.0, ceiling - abs(float(current_position_value or 0.0)))
         if ceiling is not None and pos_after > ceiling:
             out.update(decision=REJECT, binding="position_size",
                        reason="%s is broad-market (exempt from the "
@@ -198,6 +206,26 @@ def evaluate(*, ticker, side, asset_class, sector, add_dollars,
     pos_ceiling = account_value * pos_pct_cap / 100.0 if pos_pct_cap else None
     pos_breach = pos_ceiling is not None and pos_after > pos_ceiling
 
+    # Headroom under EACH ceiling; the tighter one is what can actually be
+    # added, and which one it is decides what the operator should fix.
+    _cur_pos = abs(float(current_position_value or 0.0))
+    _cur_sec = abs(float(current_sector_value or 0.0))
+    # RAW room can be NEGATIVE (already over). Comparing raw values is what
+    # makes "tighter" meaningful when BOTH ceilings are breached -- clamping to
+    # zero first would make every double-breach look like a tie.
+    _pos_room_raw = (account_value * pos_pct_cap / 100.0 - _cur_pos
+                     if pos_pct_cap else float("inf"))
+    _sec_room_raw = account_value * REJECT_PCT / 100.0 - _cur_sec
+    _pos_room = max(0.0, _pos_room_raw) if pos_pct_cap else float("inf")
+    _sec_room = max(0.0, _sec_room_raw)
+    out["allowed_add"] = min(_pos_room, _sec_room)
+    out["headroom_position"] = None if _pos_room == float("inf") else _pos_room
+    out["headroom_concentration"] = _sec_room
+    out["tighter_rule"] = ("position_size" if _pos_room_raw < _sec_room_raw
+                           else ("sector_concentration"
+                                 if bucket_kind != "country"
+                                 else "country_concentration"))
+
     conc_binding = ("country_concentration" if bucket_kind == "country"
                     else "sector_concentration")
     if out["sector_pct"] > REJECT_PCT:
@@ -216,13 +244,22 @@ def evaluate(*, ticker, side, asset_class, sector, add_dollars,
                           "what stopped this, not sector concentration."
                           % (out["ticker"], out["position_pct"], pos_pct_cap,
                              pos_ceiling, sector, out["sector_pct"], REJECT_PCT))
+    elif sector_dec == REJECT and pos_breach:
+        # BOTH ceilings breached. Report the TIGHTER one as binding but name
+        # both, so the operator knows fixing one will not unblock the trade.
+        tight = out["tighter_rule"]
+        out.update(decision=REJECT, binding=tight,
+                   reason="BOTH ceilings breached: %s %s at %.1f%% (limit "
+                          "%.0f%%) and position at %.1f%% (limit %.0f%%). "
+                          "Tighter rule is %s -- fixing only the other will "
+                          "not unblock this."
+                          % (grouping, bucket, out["sector_pct"], REJECT_PCT,
+                             out["position_pct"], pos_pct_cap, tight))
     elif sector_dec == REJECT:
         out.update(decision=REJECT, binding=sector_binding,
                    reason="%s %s would be %.1f%% of account, over the "
-                          "%.0f%% hard limit%s"
-                          % (grouping, bucket, out["sector_pct"], REJECT_PCT,
-                             " (per-position ceiling also breached)"
-                             if pos_breach else ""))
+                          "%.0f%% hard limit"
+                          % (grouping, bucket, out["sector_pct"], REJECT_PCT))
     elif sector_dec == WARN:
         out.update(decision=WARN, binding=sector_binding,
                    reason="%s %s would be %.1f%% of account, over the "
@@ -314,6 +351,33 @@ def check_trade(ticker, side="long", add_dollars=0.0, account=None) -> dict:
     return v
 
 
+def clamp_size(ticker, dollars, side="long", account=None) -> tuple:
+    """(allowed_dollars, verdict) — the LIVE-PATH entry point.
+
+    Applied ALONGSIDE doctrine.check_position_cap, never instead of it: the
+    caller keeps its doctrine clamp and then applies this one, so whichever
+    ceiling is tighter ends up binding. The verdict names which rule bound, so
+    a trade stopped by sector concentration never looks like one stopped by
+    position size — different problems, different fixes.
+
+    FAILS CLOSED: any error resolving the verdict returns 0 allowed with a
+    refusal, never the unclamped input.
+    """
+    try:
+        v = check_trade(ticker, side=side, add_dollars=dollars or 0.0,
+                        account=account)
+    except Exception as e:            # noqa: BLE001 - must not fail open
+        log.error("sector cap errored for %s (%s) — REFUSING, not passing "
+                  "the trade through unclamped", ticker, e)
+        return 0.0, {"ticker": (ticker or "").upper(), "decision": REFUSE,
+                     "binding": "cap_error", "reason": str(e),
+                     "allowed_add": 0.0}
+    d = v.get("decision")
+    if d in (REFUSE, REJECT):
+        return 0.0 if d == REFUSE else float(v.get("allowed_add") or 0.0), v
+    return float(dollars or 0.0), v
+
+
 def format_verdict(v: dict) -> str:
     """One ASCII line for an operator surface, including the book-wide figure."""
     tag = {ALLOW: "OK", WARN: "WARN", REJECT: "REJECT",
@@ -324,3 +388,70 @@ def format_verdict(v: dict) -> str:
                     "set sector_cap.ENFORCE_SCOPE='book' to gate on this)"
                     % (v["sector"], v["book_sector_pct"]))
     return "  ".join(bits)
+
+
+# ─────────────────────────── operator command ───────────────────────────
+
+SENTINEL = "CAP"
+
+
+def handle_cap_command(text, chat_id=None):
+    """Telegram/CLI hook: `CAP <TICKER> [dollars] [account]` -> pre-trade verdict.
+
+    Answers BEFORE you place the order, rather than only finding out when the
+    bot refuses. Returns None when the message is not a CAP command.
+    """
+    if not text:
+        return None
+    parts = str(text).strip().split()
+    if not parts or parts[0].upper() != SENTINEL:
+        return None
+    if len(parts) < 2:
+        return ("CAP <TICKER> [dollars] [account]\n"
+                "  e.g. CAP PSX 500        (default account = the one holding it)\n"
+                "       CAP OKTA 500 Individual")
+    ticker = parts[1].upper()
+    amount = 0.0
+    account = None
+    rest = parts[2:]
+    if rest:
+        try:
+            amount = float(str(rest[0]).replace("$", "").replace(",", ""))
+            rest = rest[1:]
+        except ValueError:
+            pass
+    if rest:
+        account = " ".join(rest)
+    try:
+        v = check_trade(ticker, side="long", add_dollars=amount, account=account)
+    except Exception as e:            # noqa: BLE001
+        return "CAP %s: could not evaluate (%s). Treat as REFUSED." % (ticker, e)
+
+    tag = {ALLOW: "OK", WARN: "WARN", REJECT: "REJECT",
+           REFUSE: "REFUSED"}.get(v.get("decision"), "?")
+    av = v.get("account_value") or 0.0
+    lines = ["CAP %s  add $%.0f  ->  %s" % (ticker, amount, tag)]
+    lines.append("  account      : %s ($%.2f incl cash)"
+                 % (v.get("account") or "?", av))
+    lines.append("  classified   : %s%s  [%s]"
+                 % (v.get("asset_class") or "?",
+                    (" / " + str(v.get("bucket"))) if v.get("bucket") else "",
+                    v.get("classification_basis") or "-"))
+    if v.get("sector_pct") is not None:
+        kind = ("country" if v.get("bucket_kind") == "country" else "sector")
+        cur = v["sector_pct"] - (100.0 * amount / av if av else 0.0)
+        lines.append("  %s %-14s current %.1f%%  ->  projected %.1f%%"
+                     % (kind, v.get("bucket") or "?", cur, v["sector_pct"]))
+        lines.append("  thresholds   : warn %.0f%%  reject %.0f%%"
+                     % (WARN_PCT, REJECT_PCT))
+    if v.get("position_pct") is not None:
+        lines.append("  position     : projected %.1f%% of account"
+                     % v["position_pct"])
+    lines.append("  binding rule : %s" % (v.get("binding") or "none"))
+    lines.append("  headroom     : $%.2f can still be added"
+                 % float(v.get("allowed_add") or 0.0))
+    lines.append("  %s" % (v.get("reason") or ""))
+    if v.get("book_sector_pct") is not None:
+        lines.append("  book-wide %s: %.1f%% (enforcement is per-ACCOUNT)"
+                     % (v.get("bucket") or "?", v["book_sector_pct"]))
+    return "\n".join(lines)

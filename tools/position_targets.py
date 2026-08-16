@@ -390,6 +390,14 @@ def set_cash_equivalent(ticker: str, flag: bool) -> str:
                          SET cash_equivalent = EXCLUDED.cash_equivalent""",
                     (ticker.upper(), 1 if flag else 0))
         c.commit()
+    # cash_equivalent is a classifier input (asset_class 'cash') and the cap
+    # memoises tags per process. This command is reachable from the long-running
+    # Telegram bot, so the memo must be dropped here too.
+    try:
+        from tools.asset_classifier import clear_cache
+        clear_cache()
+    except Exception:
+        pass
     return (f"✅ {ticker.upper()} flagged cash-equivalent — excluded from "
             f"fills/exposure, counts as parked cash." if flag else
             f"✅ {ticker.upper()} un-flagged — back to being a position.")

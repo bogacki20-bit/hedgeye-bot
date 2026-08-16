@@ -342,6 +342,7 @@ def _dispatch_message(token, chat_id, text):
     def _src():  from tools.source_registry import handle_sources_command; return handle_sources_command(text)
     def _wrap(): from tools.wrapper_links import handle_wrapper_command;  return handle_wrapper_command(text)
     def _tgt():  from tools.position_targets import handle_target_command; return handle_target_command(text)
+    def _cap():  from tools.sector_cap import handle_cap_command;         return handle_cap_command(text, chat_id)
     def _rpt():  from tools.report import handle_report_command;          return handle_report_command(text)
     def _dpk():  from tools.daypack import handle_daypack_command;        return handle_daypack_command(text)
     def _kp():   from tools.keith_pattern import handle_keith_command;    return handle_keith_command(text)
@@ -357,6 +358,7 @@ def _dispatch_message(token, chat_id, text):
                      ("quad", _quad), ("report", _rpt), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
+                     ("cap", _cap),
                      ("daypack", _dpk), ("keith", _kp), ("weekend", _wk),
                      ("eod", _eod),
                      ("scorecard", _sc)):

@@ -125,6 +125,38 @@ def size_for(conviction, account=None, *, ticker=None, side="long"):
         except Exception as e:
             log.debug("position-cap layer skipped for %s: %s", ticker, e)
 
+    # --- SECTOR CONCENTRATION layer (2026-08-16). Runs ALONGSIDE the doctrine
+    # cap above, not instead of it: doctrine has already clamped `dollars` to
+    # the per-position ceiling, and this clamps further to the concentration
+    # ceiling. Whichever is tighter therefore ends up binding, and the verdict
+    # records WHICH — a trade stopped by sector concentration must not read as
+    # one stopped by position size; they have different fixes.
+    #
+    # FAILS CLOSED, unlike the doctrine layer above (which fails open by
+    # design and is left as-is). clamp_size returns 0 allowed on any error.
+    if ticker and dollars:
+        from tools.sector_cap import clamp_size
+        allowed, verdict = clamp_size(ticker, dollars, side=side,
+                                      account=account)
+        debug["sector_cap"] = {
+            "decision": verdict.get("decision"),
+            "binding": verdict.get("binding"),
+            "bucket": verdict.get("bucket"),
+            "sector_pct": verdict.get("sector_pct"),
+            "allowed_add": verdict.get("allowed_add"),
+            "reason": verdict.get("reason"),
+        }
+        if allowed < dollars:
+            debug["capped_from"] = debug.get("capped_from", dollars)
+            debug["cap_reason"] = verdict.get("reason") or debug.get("cap_reason")
+            # binding rule is the one that actually produced the smaller number
+            debug["clamped_by"] = verdict.get("binding") or "sector_cap"
+            log.info("sector cap clamped %s: %s -> %s (%s)",
+                     ticker, dollars, allowed, verdict.get("binding"))
+            dollars = round(max(0.0, allowed), 2)
+        elif verdict.get("decision") == "warn":
+            debug["warning"] = verdict.get("reason")
+
     return dollars, debug
 
 

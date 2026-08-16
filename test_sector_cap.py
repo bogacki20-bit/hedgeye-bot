@@ -275,5 +275,77 @@ try:
 except UnresolvedAccountValue:
     check("closed account raises UnresolvedAccountValue", True, True)
 
+
+# ── 12. G5: THE WIRING — assert on the LIVE call sites, not the library ─────
+print("\n12. WIRING: both caps evaluate, the tighter binds, verdict names it:")
+from tools.sector_cap import clamp_size, handle_cap_command
+
+# 1. breaches BOTH -> the TIGHTER one binds, and BOTH are named.
+# "Tighter" = smaller RAW headroom (ceiling - current), which may be negative.
+# NOTE: the first version of this case used pos=7000/sector=13000, which is a
+# degenerate TIE (both -1000 of room) -- "tighter" is undefined there, so that
+# was a bad test case. These two are unambiguous in opposite directions.
+r = ev(current_position_value=9_000.0, current_sector_value=13_000.0)
+check("breaches both -> REJECT", r["decision"], REJECT)
+check("position room -3000 vs sector -1000 -> position_size is tighter",
+      r["binding"], "position_size")
+check("reason names BOTH ceilings", "BOTH ceilings breached" in r["reason"], True)
+check("reason warns that fixing one is not enough",
+      "will not unblock" in r["reason"], True)
+r = ev(current_position_value=6_500.0, current_sector_value=20_000.0)
+check("sector room -8000 vs position -500 -> sector is tighter",
+      r["binding"], "sector_concentration")
+check("verdict still reports the sector figure", round(r["sector_pct"], 1), 20.0)
+# 2. sector only
+r = ev(current_position_value=1_000.0, current_sector_value=12_500.0)
+check("sector only -> REJECT", r["decision"], REJECT)
+check("binding is sector_concentration", r["binding"], "sector_concentration")
+# 3. per-position only
+r = ev(current_position_value=6_500.0, current_sector_value=6_500.0)
+check("position only -> REJECT", r["decision"], REJECT)
+check("binding is position_size", r["binding"], "position_size")
+check("reason distinguishes it from concentration",
+      "POSITION SIZE" in r["reason"], True)
+
+print("\n13. LIVE PATH: recommender.size_for is actually gated:")
+import inspect
+import recommender as _rc
+_src = inspect.getsource(_rc.size_for)
+check("size_for calls the sector cap", "clamp_size" in _src, True)
+check("doctrine cap still present (alongside, not instead of)",
+      "check_position_cap" in _src, True)
+check("binding rule recorded", 'debug["clamped_by"]' in _src, True)
+import decision_engine as _de
+_dsrc = inspect.getsource(_de)
+check("decision_engine sizing is gated too", _dsrc.count("clamp_size") >= 2, True)
+
+print("\n14. PSX add is REJECTED through the WIRED path (needs DB):")
+try:
+    allowed, v = clamp_size("PSX", 500.0, side="long", account="Individual")
+    check("clamp_size allows 0 extra dollars", allowed, 0.0)
+    check("decision is REJECT", v["decision"], REJECT)
+    check("bound by sector concentration", v["binding"], "sector_concentration")
+    check("bucket is ENERGY", v["bucket"], "ENERGY")
+    # and the sizing function itself returns a clamped size
+    dollars, dbg = _rc.size_for("Adding", "Individual", ticker="PSX", side="long")
+    check("size_for returns 0 for PSX", float(dollars or 0.0), 0.0)
+    check("size_for names the binding rule", dbg.get("clamped_by"),
+          "sector_concentration")
+    check("size_for carries the cap verdict", "sector_cap" in dbg, True)
+    # contrast: a name with headroom is NOT clamped to zero
+    ok_d, ok_v = clamp_size("OKTA", 500.0, side="long", account="Individual")
+    check("OKTA is allowed", ok_d, 500.0)
+    check("OKTA decision", ok_v["decision"], ALLOW)
+    # the CAP command answers
+    out = handle_cap_command("CAP PSX 500")
+    check("CAP command returns a verdict", "REJECT" in out, True)
+    check("CAP names the sector", "ENERGY" in out, True)
+    check("CAP shows projected pct", "projected" in out, True)
+    check("CAP declines non-CAP text", handle_cap_command("SCREEN energy longs"),
+          None)
+except Exception as e:
+    print(f"  !! WIRED-PATH TEST COULD NOT RUN ({e}) — counted as FAILURE.")
+    FAIL += 1
+
 print("\n" + ("ALL PASS" if FAIL == 0 else f"{FAIL} FAILURE(S)"))
 sys.exit(1 if FAIL else 0)

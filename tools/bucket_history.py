@@ -180,6 +180,19 @@ def sync_buckets(mapping: dict, source_email_id=None, detect_removals=False,
                                      effective_date=effective_date)
             if t:
                 transitions.append(t)
+    # ticker_tags.hedgeye_group just changed, and the sector cap classifies from
+    # it through a per-process memo. The Telegram bot is long-running and can
+    # reach this via a PM upload (telegram_handler -> doc_ingest ->
+    # pm_parse.ingest_hook), so without this the cap would keep gating on the
+    # PREVIOUS roster's sectors for the life of that process.
+    try:
+        from tools.asset_classifier import clear_cache
+        clear_cache()
+        log.info("sync_buckets: cleared the classifier cache after a "
+                 "ticker_tags write")
+    except Exception as e:
+        log.warning("could not clear the classifier cache (%s) — sector "
+                    "classifications may be stale in this process", e)
     return {"transitions": len(transitions), "detail": transitions}
 
 

@@ -2575,6 +2575,18 @@ def decide_notifier(
         try:
             from recommender import size_from_bps
             dollars = size_from_bps(bps, account_value_usd)
+            # size_from_bps is pure bps arithmetic and applies NO cap. Until
+            # 2026-08-16 this path emitted an UNCAPPED dollar size straight into
+            # the alert -- it never called doctrine.check_position_cap either.
+            # Clamp to the concentration/position ceiling here. Fails closed.
+            if dollars and ticker:
+                from tools.sector_cap import clamp_size
+                _allowed, _v = clamp_size(ticker, dollars, side=side)
+                if _allowed < dollars:
+                    log.info("sector cap clamped %s in decision_engine: "
+                             "%s -> %s (%s)", ticker, dollars, _allowed,
+                             _v.get("binding"))
+                    dollars = round(max(0.0, _allowed), 2) or None
         except Exception:
             dollars = None
 
@@ -2836,7 +2848,28 @@ def _decide_legacy(
     # Compute the implied dollar size from bps for caller convenience
     from recommender import size_from_bps
     if decision.get("bps") in (50, 100):
-        decision["recommended_dollars"] = size_from_bps(decision["bps"], account_value_usd)
+        _d = size_from_bps(decision["bps"], account_value_usd)
+        # Same uncapped-path fix as the mid_range branch: this value is what
+        # proactive_scanner persists and surfaces, so it must respect the caps.
+        try:
+            if _d and decision.get("ticker"):
+                from tools.sector_cap import clamp_size
+                _allowed, _v = clamp_size(decision["ticker"], _d,
+                                          side=decision.get("side") or "long")
+                decision["cap_verdict"] = {"decision": _v.get("decision"),
+                                           "binding": _v.get("binding"),
+                                           "bucket": _v.get("bucket"),
+                                           "reason": _v.get("reason")}
+                if _allowed < _d:
+                    log.info("sector cap clamped %s: %s -> %s (%s)",
+                             decision["ticker"], _d, _allowed, _v.get("binding"))
+                    _d = round(max(0.0, _allowed), 2) or None
+        except Exception as _e:
+            log.error("sector cap failed for %s (%s) — withholding the size "
+                      "rather than emitting an uncapped one",
+                      decision.get("ticker"), _e)
+            _d = None
+        decision["recommended_dollars"] = _d
     else:
         decision["recommended_dollars"] = None
 
