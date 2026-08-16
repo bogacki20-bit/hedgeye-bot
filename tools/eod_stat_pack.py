@@ -801,6 +801,12 @@ def level_changes(obs) -> dict:
     # A series whose last N observations are all identical is FROZEN, not calm.
     tail = vals[-22:]
     out["frozen"] = len(tail) > 3 and max(tail) == min(tail)
+    if out["frozen"]:
+        # The EVIDENCE, not just the verdict. Five (date, value) pairs settle
+        # "wrong series ID" vs "stale at source" in one look, without a key.
+        out["obs_tail"] = " ".join("%s=%.2f" % (raw_dates[i], vals[i])
+                                   for i in range(max(0, len(vals) - 5),
+                                                  len(vals)))
     return out
 
 
@@ -810,10 +816,27 @@ def format_rates_credit(rows, curve) -> str:
     §2.1 template: PRIOR LEVELS are printed beside the deltas. Deltas alone
     cannot distinguish a flat series from a broken one — which is exactly the
     ambiguity that made HY OAS's +0/+0/+0 unreadable for two rounds."""
+    # PER-BLOCK WINDOW ANCHORS. This block resolves its windows from ITS OWN
+    # as-of (each FRED series' last observation), NOT from the pack's global
+    # price as-of -- level_changes calls asof_index without a ref, so the ref is
+    # that series' own dates[-1]. That was already true, but it was invisible:
+    # with only the returns tables printing an anchor line, a reader comparing
+    # a rate against the deck could not tell WHICH base date produced the
+    # delta, and a 2-3bp gap at 1M is indistinguishable from a one-session
+    # offset. Now each block states its own.
+    anchors = ""
+    for _lbl, _d in rows:
+        if _d and _d.get("last_date"):
+            anchors = ("  anchors (rates as-of %s): 1D=%s - 1W=%s - 1M=%s"
+                       % (_d.get("last_date"), _d.get("1D_date") or "n/a",
+                          _d.get("1W_date") or "n/a", _d.get("1M_date") or "n/a"))
+            break
     out = ["RATES + CREDIT (level %, changes in bp; prior levels shown)",
            "  windows: 1D=1 calendar day  1W=7  1M=28 (= Hedgeye's '4 Wks Ago')",
            f"{'series':<10}{'last':>8}{'1D ago':>8}{'1W ago':>8}{'1M ago':>8}"
            f"{'1D':>7}{'1W':>7}{'1M':>7}  as-of"]
+    if anchors:
+        out.insert(2, anchors)
 
     def _bp(v, w=7):
         return "n/a".rjust(w) if v is None else f"{v:+.0f}".rjust(w)
@@ -832,7 +855,9 @@ def format_rates_credit(rows, curve) -> str:
                    + "  " + str(d.get("last_date") or "?")
                    + ("  !! FROZEN — every observation in the last month is "
                       "identical; this is a STALE SERIES, not a calm one"
-                      if d.get("frozen") else ""))
+                      if d.get("frozen") else "")
+                   + ("  [obs tail: %s]" % d["obs_tail"]
+                      if d.get("frozen") and d.get("obs_tail") else ""))
     if curve:
         # The derived row must fill the SAME eight columns as every other row.
         # It previously emitted only four, so its DELTAS rendered underneath the
