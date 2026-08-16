@@ -47,7 +47,31 @@ FX_CODES = {"EUR", "GBP", "USD", "JPY", "CHF", "CAD", "AUD"}
 # Spot crypto symbols (ETF wrappers like IBIT/ETHA/SOLZ go through yfinance).
 CRYPTO_SPOT = {"BTC", "ETH", "BITCOIN", "AVAX", "SOL", "ADA", "XRP", "DOGE"}
 
-# yfinance sector names that the screener's canonical regexes don't catch.
+# GICS sector vocabulary for ticker_tags.gics_sector.
+#
+# 2026-08-16: this used to borrow tools.screener._SECTORS. That was safe only
+# while both tables happened to be GICS. SCREEN has now moved to the Position
+# Monitor's own 15 sectors (ticker_tags.hedgeye_group), so a shared table would
+# have made the TAGGER start writing PM names ("GLOBAL TECH") into gics_sector,
+# or None wherever no PM sector matched. These are two vocabularies for two
+# columns — a QUERY vocabulary and a WRITE vocabulary — and they are now
+# declared separately on purpose. Do not re-point this at the screener.
+GICS_SECTORS = [
+    (r"health\s*care|healthcare",                     "Health Care"),
+    (r"consumer\s+discretionary|discretionary",       "Consumer Discretionary"),
+    (r"consumer\s+staples|staples",                   "Consumer Staples"),
+    (r"communication(?:s)?(?:\s+services)?",          "Communication Services"),
+    (r"information\s+technology|technology|\btech\b", "Technology"),
+    (r"financials?|\bbanks?\b",                       "Financials"),
+    (r"industrials?",                                 "Industrials"),
+    (r"materials?",                                   "Materials"),
+    (r"\benergy\b",                                   "Energy"),
+    (r"utilit(?:ies|y)",                              "Utilities"),
+    (r"real\s+estate|\breits?\b",                     "Real Estate"),
+    (r"digital\s+assets?|crypto",                     "Digital Assets"),
+]
+
+# yfinance sector names that the GICS regexes above don't catch.
 YF_SECTOR_PREMAP = {
     "consumer cyclical":  "Consumer Discretionary",
     "consumer defensive": "Consumer Staples",
@@ -135,17 +159,18 @@ def classify_rule_based(ticker: str):
 
 
 def map_sector(text: str | None):
-    """yfinance sector/category text -> canonical gics_sector (screener
-    vocab) or None. Pre-maps the two yfinance names ('Consumer Cyclical' /
-    'Consumer Defensive') the canonical regexes don't match."""
+    """yfinance sector/category text -> canonical gics_sector, or None.
+    Pre-maps the two yfinance names ('Consumer Cyclical' / 'Consumer
+    Defensive') the GICS regexes don't match.
+
+    Uses GICS_SECTORS above, NOT the screener's table — see the note there."""
     if not text:
         return None
     pre = YF_SECTOR_PREMAP.get(text.strip().lower())
     if pre:
         return pre
-    from tools.screener import _SECTORS
     low = text.lower()
-    for pat, canon in _SECTORS:
+    for pat, canon in GICS_SECTORS:
         if re.search(pat, low):
             return canon
     return None

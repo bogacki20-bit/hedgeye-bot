@@ -44,6 +44,29 @@ _TICKER_RE = re.compile(r"^[A-Z0-9]{1,7}(?:[.\-\^][A-Z0-9]{1,4}){0,2}$")
 # stored roster, removal detection is refused (partial upload ≠ mass exit).
 REMOVAL_GUARD_FRACTION = 0.6
 
+# The Position Monitor's OWN 15 sectors — the canonical vocabulary, stored
+# UPPERCASE in ticker_tags.hedgeye_group. parse_position_monitor Title-cases
+# headers for readability ("Consumer Staples", "Global Tech") while GLL stays
+# an acronym, so every write and every comparison goes through pm_sector_key().
+#
+# This set is a GUARD, not documentation: sync_buckets refuses the whole ingest
+# if a parsed sector is not in it. Hedgeye adding a 16th sector, or a header
+# mis-read, must stop the load loudly — silently creating a 16th group would
+# mint a bucket no sector cap covers and nobody would see it appear.
+PM_SECTORS = frozenset({
+    "RESTAURANTS", "CONSUMER STAPLES", "CANNABIS", "GLL", "RETAIL",
+    "HEALTHCARE", "FINANCIALS", "DIGITAL ASSETS", "SMALL CAPS", "INDUSTRIALS",
+    "MATERIALS", "ENERGY", "SOFTWARE", "COMMUNICATIONS", "GLOBAL TECH",
+})
+
+
+def pm_sector_key(sector) -> str | None:
+    """Canonical storage form of a PM sector name, or None if blank.
+    Whitespace-collapsed and uppercased. Membership in PM_SECTORS is NOT
+    checked here — validation belongs to the caller so it can refuse loudly."""
+    s = re.sub(r"\s+", " ", str(sector or "").strip()).upper()
+    return s or None
+
 
 def _is_caps_header(line: str) -> bool:
     """ALL-CAPS line containing a letter — sector or bucket header shape."""
@@ -163,7 +186,7 @@ def ingest_hook(row_id, note_date, text) -> str:
     REPORT date, not today), return the CHANGES block for the upload reply.
     Removal detection only on full uploads (guard fraction)."""
     import db_pg
-    from tools.bucket_history import sync_buckets
+    from tools.bucket_history import sync_buckets, UnknownPMSector
 
     p = parse_position_monitor(text)
     eff = p["report_date"] or note_date
@@ -180,8 +203,15 @@ def ingest_hook(row_id, note_date, text) -> str:
         stored = cur.fetchone()[0]
     detect = stored == 0 or \
         len(p["mapping"]) >= REMOVAL_GUARD_FRACTION * stored
-    res = sync_buckets(p["mapping"], source_email_id=f"doc:{row_id}",
-                       detect_removals=detect, effective_date=eff)
+    # p["sectors"] rides along with the buckets now. Before 2026-08-16 it was
+    # parsed and thrown away, so the PM's own sector never reached the database
+    # and ticker_tags.hedgeye_group sat frozen at its one-time seed.
+    try:
+        res = sync_buckets(p["mapping"], source_email_id=f"doc:{row_id}",
+                           detect_removals=detect, effective_date=eff,
+                           sectors=p["sectors"])
+    except UnknownPMSector as e:
+        return "🛑 PM sync REFUSED — %s" % e
     reply = diff_summary(res["detail"], len(p["mapping"]), eff,
                          removals_skipped=not detect)
     if p["warnings"]:

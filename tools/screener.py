@@ -37,22 +37,84 @@ SENTINEL = "SCREEN"
 CORR_MIN_N = 20        # min overlapping daily returns to report a correlation
 _PENDING_TTL = 600.0   # 10 min — pending SCREEN state per chat (in-memory)
 
-# NL sector phrases -> canonical gics_sector (longest/most-specific first).
+# NL sector phrases -> canonical ticker_tags.hedgeye_group (the Position
+# Monitor's OWN 15 sectors). 2026-08-16: SCREEN moved off gics_sector, which was
+# a data-provider taxonomy (standard GICS) that Hedgeye does not publish against.
+# hedgeye_group IS Hedgeye's own sector, maintained by the PM ingest.
+#
+# ORDER IS LOAD-BEARING. parse_query takes the FIRST pattern that matches, so
+# every multi-word name must sit above any single word that appears inside it.
+# The bug this prevents: `\btech\b` used to match inside "GLOBAL TECH", setting
+# sector=Technology and leaving 'global' as an unrecognized leftover — the same
+# shape as the "financials signal strength" double-consume. _spans_overlap does
+# NOT catch it (it only guards source-vs-sector), so the ordering below plus the
+# whole-phrase anchors are the guard. _assert_sector_order() enforces it at
+# import so a future edit cannot silently reintroduce the collision.
 _SECTORS = [
-    (r"health\s*care|healthcare",                    "Health Care"),
-    (r"consumer\s+discretionary|discretionary",      "Consumer Discretionary"),
-    (r"consumer\s+staples|staples",                  "Consumer Staples"),
-    (r"communication(?:s)?(?:\s+services)?",         "Communication Services"),
-    (r"information\s+technology|technology|\btech\b", "Technology"),
-    (r"financials?|\bbanks?\b",                      "Financials"),
-    (r"industrials?",                                 "Industrials"),
-    (r"materials?",                                   "Materials"),
-    (r"\benergy\b",                                   "Energy"),
-    (r"utilit(?:ies|y)",                              "Utilities"),
-    (r"real\s+estate|\breits?\b",                     "Real Estate"),
-    (r"digital\s+assets?|crypto",                     "Digital Assets"),
+    # --- multi-word names FIRST, longest phrase first ---
+    (r"consumer\s+staples|\bstaples\b",               "CONSUMER STAPLES"),
+    (r"digital\s+assets?|\bcrypto\b",                 "DIGITAL ASSETS"),
+    (r"global\s+tech(?:nology)?",                     "GLOBAL TECH"),
+    (r"small\s+caps?|smallcaps?",                     "SMALL CAPS"),
+    # GLL is an acronym with no natural-language form. Hedgeye means Gaming,
+    # Lodging & Leisure; a user will type one of those words, not "GLL".
+    (r"gaming\s*,?\s*lodging\s*,?\s*(?:and\s+|&\s*)?leisure"
+     r"|\bgll\b|\bgaming\b|\blodging\b|\bleisure\b",  "GLL"),
+    # --- single-word names ---
+    (r"restaurants?",                                 "RESTAURANTS"),
+    (r"cannabis",                                     "CANNABIS"),
+    (r"retail(?:ers?)?",                              "RETAIL"),
+    # "health care" (two words) is the GICS spelling of the PM's HEALTHCARE.
+    # Same sector, different spelling — an alias, not a retired name.
+    (r"health\s*care|healthcare",                     "HEALTHCARE"),
+    (r"financials?|\bbanks?\b",                       "FINANCIALS"),
+    (r"industrials?",                                 "INDUSTRIALS"),
+    (r"materials?",                                   "MATERIALS"),
+    (r"\benergy\b",                                   "ENERGY"),
+    (r"software",                                     "SOFTWARE"),
+    # likewise "communication services" is GICS's spelling of COMMUNICATIONS.
+    (r"communications?(?:\s+services)?",              "COMMUNICATIONS"),
 ]
 _SECTOR_NAMES = [canon for _, canon in _SECTORS]
+
+# GICS sector names with NO Position Monitor equivalent. Hedgeye does not
+# publish a sector by these names, so a screen for one can never match a row.
+# They are matched ONLY so the reply can say that explicitly — see
+# tools/screener._retired_guard. Never silently return zero rows for these:
+# "0 matches" reads as "nothing in that sector", which is a wrong conclusion
+# presented as an answer.
+#
+# NOT listed here: "health care" and "communication services". Those are GICS
+# SPELLINGS of live PM sectors (HEALTHCARE, COMMUNICATIONS) and resolve above.
+_RETIRED_SECTORS = [
+    (r"consumer\s+discretionary|\bdiscretionary\b", "Consumer Discretionary"),
+    (r"information\s+technology|technology|\btech\b", "Technology"),
+    (r"utilit(?:ies|y)",                             "Utilities"),
+    (r"real\s+estate|\breits?\b",                    "Real Estate"),
+]
+
+
+def _assert_sector_order() -> None:
+    """A single-word sector pattern must never match inside a multi-word sector
+    NAME. Runs at import: the GLOBAL TECH collision was invisible until it
+    silently mis-filed a query, so it is checked mechanically, not by review."""
+    names = {c: n for n, c in ((r"consumer staples", "CONSUMER STAPLES"),
+                               (r"digital assets", "DIGITAL ASSETS"),
+                               (r"global tech", "GLOBAL TECH"),
+                               (r"small caps", "SMALL CAPS"),
+                               (r"gaming lodging leisure", "GLL"))}
+    for canon, phrase in names.items():
+        for pat, other in _SECTORS:
+            if other == canon:
+                break            # reached its own entry first -> correct order
+            if re.search(pat, phrase):
+                raise AssertionError(
+                    "_SECTORS order bug: %r matches inside %r, so %r would win "
+                    "over %s. Move the multi-word entry above it."
+                    % (pat, phrase, other, canon))
+
+
+_assert_sector_order()
 
 _NEAR_BOTTOM = r"bottom of (?:the )?range|near (?:the )?(?:low|bottom)|close to (?:the )?(?:low|bottom)"
 _NEAR_TOP    = r"top of (?:the )?range|near (?:the )?(?:high|top)|close to (?:the )?(?:high|top)"
@@ -147,7 +209,8 @@ def parse_query(text: str) -> dict:
     s = " " + (text or "").lower() + " "
     q: dict = {"sector": None, "direction": None, "near": None, "momentum": False,
                "held": False, "show_gated": False, "source": None, "cloud": None,
-               "everything": False, "unrecognized": [], "raw": (text or "").strip()}
+               "everything": False, "unrecognized": [], "retired_sector": None,
+               "raw": (text or "").strip()}
     consumed: list = []   # (start, end) spans of matched screen tokens
 
     # Source lens (etf pro / keiths / portfolio solutions / …). Consumed here so its
@@ -179,6 +242,17 @@ def parse_query(text: str) -> dict:
             q["sector"] = canon
             consumed.append(hit.span())
             break
+    # A GICS name with no PM equivalent. Recorded (and its span consumed, so it
+    # does not also surface as an unrecognized token) purely so the caller can
+    # REFUSE by name instead of running a query guaranteed to return nothing.
+    if not q["sector"]:
+        for pat, old in _RETIRED_SECTORS:
+            hit = next((m for m in re.finditer(pat, s)
+                        if not _spans_overlap(m.span(), consumed)), None)
+            if hit:
+                q["retired_sector"] = old
+                consumed.append(hit.span())
+                break
     m = re.search(r"\bshorts?\b", s)
     if m:
         q["direction"] = "shorts"; consumed.append(m.span())
@@ -297,6 +371,20 @@ def _token_guard(unknown) -> str:
     return f"🔎 Didn't recognize {toks}.\n{_CMD_HINT}"
 
 
+def _retired_guard(old_name) -> str:
+    """Refuse a GICS sector Hedgeye does not publish, BY NAME.
+
+    Never run the query. Before 2026-08-16 these parsed cleanly, executed, and
+    rendered '0 matches — emptied by: tag match (sector+bucket)' with the dead
+    name echoed as an applied filter. A reader takes that as "nothing in that
+    sector right now". It actually means "that sector does not exist here", and
+    the two conclusions lead opposite ways. If the answer is knowable before the
+    query, say it instead of running the query."""
+    return (f"🔎 '{old_name}' is not a Hedgeye sector — SCREEN now uses the "
+            f"Position Monitor's own 15, so there is no such roster to search "
+            f"(this is NOT an empty result).\n{_CMD_HINT}")
+
+
 def _orphan_hint() -> str:
     return ("🔎 That's a SCREEN modifier, but no screen is active (or it expired). "
             "Start one first, e.g. `SCREEN energy longs` — then follow-ups like "
@@ -393,7 +481,8 @@ def _ivpd_pct_for(tickers, window=60) -> dict:
     return out
 
 
-_SLICE_COLS = ("SELECT ticker, subsector, hedgeye_bucket_0629, range_pos, momentum_ok, "
+_SLICE_COLS = ("SELECT ticker, subsector, hedgeye_bucket_0629, hedgeye_group, "
+               "range_pos, momentum_ok, "
                "momentum_dir, divergence, hurst, iv, rv, ivpd, trend_dir, trend_source, "
                "held, has_range FROM v_screener")
 
@@ -412,9 +501,25 @@ def _fetch_tag_slice(sector, buckets):
     sql = _SLICE_COLS + " WHERE hedgeye_bucket_0629 = ANY(%s)"
     args = [buckets]
     if sector:
-        sql += " AND gics_sector = %s"
+        sql += " AND hedgeye_group = %s"
         args.append(sector)
     return _rows(sql, args)
+
+
+def sector_blind_spot(where_sql, args=None) -> int:
+    """How many rows of a lens have NO PM sector, and so cannot appear in ANY
+    sector-filtered screen of it.
+
+    `hedgeye_group = %s` is SQL equality, which never matches NULL. A name that
+    is not on the Position Monitor is therefore invisible to a sector screen —
+    not filtered out, UNREACHABLE. Reporting a bounded result as if it were
+    complete coverage is the failure this exists to prevent, so run_screen_q
+    prints this count on every sector-filtered screen."""
+    sql = ("SELECT count(*) FROM v_screener WHERE hedgeye_group IS NULL AND "
+           + where_sql)
+    rows = _rows(sql.replace("SELECT count(*)", "SELECT count(*) AS n", 1),
+                 args or [])
+    return int(rows[0]["n"]) if rows else 0
 
 
 def _fetch_book_slice(sector):
@@ -422,12 +527,12 @@ def _fetch_book_slice(sector):
     snapshot — cash/zero-qty already excluded in the view), NOT bucket-filtered, so
     untagged holdings (sector ETFs like XLV) are included. Direction is enforced
     downstream by the mandatory TREND gate, not by bucket. Sector filter still applies
-    where a name is tagged (untagged ETFs have NULL sector and drop out of a sector
-    screen, as intended)."""
+    where a name is tagged (names with no PM sector have NULL hedgeye_group and
+    drop out of a sector screen — surfaced by sector_blind_spot, never silent)."""
     sql = _SLICE_COLS + " WHERE held = true"
     args = []
     if sector:
-        sql += " AND gics_sector = %s"
+        sql += " AND hedgeye_group = %s"
         args.append(sector)
     return _rows(sql, args)
 
@@ -441,7 +546,7 @@ def _fetch_everything_slice(sector):
     sql = _SLICE_COLS + " WHERE has_range = true"
     args = []
     if sector:
-        sql += " AND gics_sector = %s"
+        sql += " AND hedgeye_group = %s"
         args.append(sector)
     return _rows(sql, args)
 
@@ -479,7 +584,7 @@ SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
             WHEN lm.trend_signal IN ('trendBullish','trendBearish','trendNeutral') THEN 'mfr' END AS trend_source,
        (h.ticker IS NOT NULL) AS held,
        (lm.range_low IS NOT NULL) AS has_range,
-       tt.gics_sector
+       tt.gics_sector, tt.hedgeye_group
 FROM mem m
 LEFT JOIN ticker_tags    tt ON tt.ticker = m.ticker
 LEFT JOIN latest_mfr     lm ON lm.ticker = m.ticker
@@ -497,14 +602,15 @@ def _reg_members(tag) -> set:
 def _fetch_source_slice(members, sector):
     """The 'source=' universe: every member of the source, joined to v_screener's
     computed columns (range/trend/tags where they exist). Members not in ticker_tags/
-    book still appear (untagged '—', un-ranged -> DARK). Sector filter drops untagged
-    names (they have no gics_sector), matching the book-universe behavior."""
+    book still appear (untagged '—', un-ranged -> DARK). Sector filter drops names
+    with no PM sector (NULL hedgeye_group), matching the book-universe behavior —
+    the funnel's own base count shows how many were dropped."""
     if not members:
         return []
     sql = _SOURCE_SLICE_SQL
     args = {"members": sorted(members)}
     if sector:
-        sql += " WHERE tt.gics_sector = %(sector)s"
+        sql += " WHERE tt.hedgeye_group = %(sector)s"
         args["sector"] = sector
     return _rows(sql, args)
 
@@ -1055,6 +1161,37 @@ def run_screen_q(q: dict) -> str:
         head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
 
     lines = [head, ""]
+    # SECTOR BLIND SPOT. A sector filter is SQL equality on hedgeye_group, which
+    # cannot match NULL, so every name absent from the Position Monitor is
+    # unreachable — not zero-matching, invisible. Say so on the screen itself:
+    # a bounded result that reads as complete coverage is a wrong answer
+    # presented confidently.
+    if q["sector"]:
+        try:
+            if book_mode or q["held"]:
+                blind = sector_blind_spot("held = true")
+                scope = "held names"
+            elif q.get("everything"):
+                blind = sector_blind_spot("has_range = true")
+                scope = "enrolled names"
+            elif src and src != "posmon":
+                blind = None      # source lens: reported via its own funnel
+                scope = ""
+            else:
+                blind = sector_blind_spot("hedgeye_bucket_0629 = ANY(%s)",
+                                          [buckets])
+                scope = "roster names"
+            if blind:
+                lines.append(
+                    f"ℹ️ {blind} {scope} in this lens have NO Position Monitor "
+                    f"sector and cannot appear in ANY sector screen. This list "
+                    f"is not the whole universe.")
+                lines.append("")
+        except Exception as e:
+            log.warning("sector blind-spot count failed: %s", e)
+            lines.append("⚠️ could not determine how many names lack a PM sector "
+                         "— treat this list as incomplete.")
+            lines.append("")
     if result:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
         lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
@@ -1195,6 +1332,11 @@ def _maybe_attach(result, q):
 def _resolve(q: dict, chat_id):
     """Token-guard, ask-for-direction (storing pending), or execute. The reply is
     always the acknowledgment — a follow-up is never acked without running."""
+    # Retired sector first: it is a MORE specific answer than "didn't recognize",
+    # and it must beat the direction prompt too — asking for longs/shorts on a
+    # sector that cannot exist just defers the same false zero by one message.
+    if q.get("retired_sector"):
+        return _retired_guard(q["retired_sector"])
     if q.get("unrecognized"):
         return _token_guard(q["unrecognized"])
     if not q.get("direction"):
@@ -1210,6 +1352,8 @@ def _resolve(q: dict, chat_id):
 def run_screen(text: str) -> str:
     """Convenience one-shot (no chat/pending) — used by tests and CLI."""
     q = parse_query(text)
+    if q.get("retired_sector"):
+        return _retired_guard(q["retired_sector"])
     if q.get("unrecognized"):
         return _token_guard(q["unrecognized"])
     if not q.get("direction"):
