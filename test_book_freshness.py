@@ -34,11 +34,23 @@ TODAY = date(2026, 8, 16)
 print("1. age and the 2-day threshold:")
 check("threshold is 2 days", STALE_AFTER_DAYS, 2)
 check("same day -> 0", age_days(date(2026, 8, 16), TODAY), 0)
-check("9 days", age_days(date(2026, 8, 7), TODAY), 9)
+# 2026-08-16: age is now TRADING days, not calendar days -- a position only
+# changes on a session, and a Sunday-stamped "0d old" book was meaningless.
+# Fri 2026-08-07 -> Sun 2026-08-16 is 9 calendar days but 5 sessions
+# (Aug 10, 11, 12, 13, 14).
+check("9 calendar days = 5 trading days", age_days(date(2026, 8, 7), TODAY), 5)
+check("Fri book read Sunday = 0 sessions",
+      age_days(date(2026, 8, 14), TODAY), 0)
+check("Fri book read Monday = 1 session",
+      age_days(date(2026, 8, 14), date(2026, 8, 17)), 1)
 check("None -> None", age_days(None, TODAY), None)
 check("0d not stale", is_stale(date(2026, 8, 16), TODAY), False)
-check("2d not stale (weekend)", is_stale(date(2026, 8, 14), TODAY), False)
-check("3d IS stale", is_stale(date(2026, 8, 13), TODAY), True)
+check("Fri book on Sunday not stale", is_stale(date(2026, 8, 14), TODAY), False)
+# Thu 8/13 -> Sun 8/16 is 1 session (Fri), so it is FRESH under trading-day
+# semantics. The stale case needs a real multi-session gap.
+check("Thu book on Sunday = 1 session, NOT stale",
+      is_stale(date(2026, 8, 13), TODAY), False)
+check("3 SESSIONS is stale", is_stale(date(2026, 8, 11), TODAY), True)
 check("9d IS stale", is_stale(date(2026, 8, 7), TODAY), True)
 check("UNKNOWN date is STALE, not fresh", is_stale(None, TODAY), True)
 
@@ -46,8 +58,8 @@ check("UNKNOWN date is STALE, not fresh", is_stale(None, TODAY), True)
 print("\n2. inline note:")
 check("fresh -> None", stale_note(date(2026, 8, 15), TODAY), None)
 check("2d -> None", stale_note(date(2026, 8, 14), TODAY), None)
-check("9d -> note", stale_note(date(2026, 8, 7), TODAY),
-      "book 9 days old (2026-08-07)")
+check("5-session note", stale_note(date(2026, 8, 7), TODAY),
+      "book 5 days old (2026-08-07)")
 check("None -> UNKNOWN note", stale_note(None, TODAY), "book date UNKNOWN")
 
 # ── 3. status_line ALWAYS states the date ───────────────────────────────────
@@ -59,7 +71,8 @@ check("fresh states the date", "2026-08-15" in fresh, True)
 check("fresh has no false alarm", "STALE" in fresh, False)
 check("stale states the date", "2026-08-07" in stale, True)
 check("stale shouts", stale.startswith("!! STALE BOOK"), True)
-check("stale gives the day count", "9 days old" in stale, True)
+check("stale gives the session count", "5 days old" in stale, True)
+check("no literal '%%' leaks into the operator's text", "%%" in stale, False)
 check("stale says the figures are NOT today", "NOT today" in stale, True)
 check("stale names the remedy", "_daily_upload.py" in stale, True)
 check("unknown shouts too", unk.startswith("!! BOOK DATE UNKNOWN"), True)

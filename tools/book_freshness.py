@@ -30,11 +30,33 @@ STALE_AFTER_DAYS = 2
 
 
 def age_days(snapshot: date | None, today: date | None = None) -> int | None:
-    """Whole days between the book snapshot and `today`. None if unknown."""
+    """TRADING days between the book snapshot and `today`. None if unknown.
+
+    2026-08-16: this counted CALENDAR days, so a Friday book read on Sunday
+    showed "2d old" and a Sunday-stamped book showed "0d old" — a timestamp
+    on a day the market never opened. Positions only change on sessions, so
+    the age that matters is sessions elapsed. Same principle as the bar-date
+    fix: do not let a non-session date masquerade as one.
+
+    Falls back to calendar days if the calendar module is unavailable, and says
+    so via the caller rather than silently changing units.
+    """
     if snapshot is None:
         return None
     t = today or date.today()
-    return (t - snapshot).days
+    if t <= snapshot:
+        return 0
+    try:
+        from tools.trading_calendar import is_trading_day
+    except Exception:
+        return (t - snapshot).days
+    from datetime import timedelta
+    n, c = 0, snapshot
+    while c < t:
+        c += timedelta(days=1)
+        if is_trading_day(c):
+            n += 1
+    return n
 
 
 def is_stale(snapshot: date | None, today: date | None = None) -> bool:
@@ -82,7 +104,9 @@ def status_line(snapshot: date | None, today: date | None = None,
     d = age_days(snapshot, today)
     if d is not None and d <= STALE_AFTER_DAYS:
         return "BOOK as of %s (%dd old)" % (snapshot, d)
-    tail = ("positions, weights and %% figures below are from that date, NOT "
+    # NB single '%': this string is CONCATENATED, not %-formatted, so a '%%'
+    # here renders literally as '%%' in the operator's output.
+    tail = ("positions, weights and % figures below are from that date, NOT "
             "today. Re-run _daily_upload.py after exporting from Fidelity."
             if carries_positions else
             "this document renders NO position or weight figures, so nothing "

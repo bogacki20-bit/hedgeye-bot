@@ -206,5 +206,101 @@ check("archives the BLOCKED run too", "_persist_pack(blocked" in src, True)
 check("artifact records the deployed sha",
       "_deployed_sha" in inspect.getsource(eod), True)
 
+
+# ── 10. CORRELATION DATE ALIGNMENT — the SECOND defect from the same cause ──
+print("\n10. a 24/7 series must not be paired positionally against equities:")
+from tools.eod_stat_pack import align_on_dates, corr_over
+from datetime import timedelta as _td
+
+# equities: weekdays only. crypto: every day. Same nominal length.
+eq_d, cr_d, eq_c, cr_c = [], [], [], []
+d = date(2026, 1, 1)
+px = 100.0
+while len(cr_d) < 200:
+    px += 0.5
+    cr_d.append(d); cr_c.append(px)
+    if d.weekday() < 5:
+        eq_d.append(d); eq_c.append(px)
+    d += _td(days=1)
+check("crypto has more bars than equities", len(cr_d) > len(eq_d), True)
+ca, cb = align_on_dates(eq_c, eq_d, cr_c, cr_d)
+check("aligned lengths match", len(ca), len(cb))
+check("aligned length == the equity grid", len(ca), len(eq_c))
+check("no dates passed -> unchanged (back-compat)",
+      align_on_dates(eq_c, None, cr_c, None), (eq_c, cr_c))
+check("empty intersection -> empty",
+      align_on_dates([1.0], [date(2020, 1, 1)], [2.0], [date(2021, 1, 1)]),
+      ([], []))
+
+# Isolate ALIGNMENT as the only variable. The 24/7 series carries weekend BARS
+# but no weekend MOVEMENT, so on the shared weekday grid its returns are
+# identical to the equity's. Date-aligned must therefore be exactly 1.0, and
+# anything less is purely the pairing being wrong.
+# (My first version of this fixture let the crypto move on weekends and then
+# asserted ~1.0. That was a bad assertion, not a bug: after alignment a Fri->Mon
+# crypto return legitimately CONTAINS the weekend, so it is genuinely a
+# different number. It measured 0.806, which is correct behaviour.)
+import random as _rnd
+_rnd.seed(7)
+eqd, eqc = [], [100.0]
+crd, crc = [], []
+dd, px = date(2026, 1, 1), 100.0
+while len(crd) < 300:
+    if dd.weekday() < 5:                      # equities move on weekdays only
+        px *= 1 + _rnd.uniform(-1, 1) / 100
+        eqd.append(dd)
+        if len(eqd) > 1:
+            eqc.append(px)
+    crd.append(dd)                            # crypto has a bar EVERY day ...
+    crc.append(px)                            # ... but is flat over weekends
+    dd += _td(days=1)
+eqc = eqc[:len(eqd)]
+aligned = corr_over(eqc, crc, 90, eqd, crd)
+positional = corr_over(eqc, crc, 90)
+check("same weekday returns -> aligned corr is 1.0",
+      aligned is not None and aligned > 0.999, True)
+check("positional pairing destroys it",
+      positional is not None and positional < 0.9, True)
+print("     aligned %.3f vs positional %.3f" % (aligned, positional))
+
+# same-grid pairs must be untouched by the change
+check("same date grid -> alignment is a no-op",
+      round(corr_over(eqc, eqc, 30, eqd, eqd) or 0, 6),
+      round(corr_over(eqc, eqc, 30) or 0, 6))
+
+import inspect as _i
+_src = _i.getsource(eod.build_eod_pack)
+check("pack passes dates into corr_over", "corr_over(ac, rc, w, ad, rd)" in _src,
+      True)
+
+# ── 11. book age counts TRADING days ────────────────────────────────────────
+print("\n11. book age in trading days:")
+from tools.book_freshness import age_days as _age
+check("Fri book read Sunday = 0 sessions", _age(date(2026, 8, 14), date(2026, 8, 16)), 0)
+check("Fri book read Monday = 1 session", _age(date(2026, 8, 14), date(2026, 8, 17)), 1)
+check("Fri 8/7 read Sun 8/16 = 5 sessions", _age(date(2026, 8, 7), date(2026, 8, 16)), 5)
+check("same day = 0", _age(date(2026, 8, 14), date(2026, 8, 14)), 0)
+check("None -> None", _age(None, date(2026, 8, 16)), None)
+from tools.book_freshness import is_stale as _stale
+check("Fri book on Sunday is NOT stale", _stale(date(2026, 8, 14), date(2026, 8, 16)), False)
+check("a 5-session-old book IS stale", _stale(date(2026, 8, 7), date(2026, 8, 16)), True)
+
+# ── 12. §2.1 prior levels are rendered (the HY diagnostic) ─────────────────
+print("\n12. prior levels beside deltas (makes flat-vs-broken visible):")
+obs_flat = [("2026-07-01", 2.71)] * 30
+lc = eod.level_changes(obs_flat)
+check("a frozen series is FLAGGED", lc["frozen"], True)
+check("its deltas are genuinely zero", (lc["1D"], lc["1W"], lc["1M"]), (0.0, 0.0, 0.0))
+check("prior levels are carried", lc["1M_level"], 2.71)
+check("last observation date carried", lc["last_date"], "2026-07-01")
+obs_live = [("2026-07-%02d" % (i + 1), 2.60 + i * 0.01) for i in range(30)]
+lc2 = eod.level_changes(obs_live)
+check("a live series is NOT flagged frozen", lc2["frozen"], False)
+rendered = eod.format_rates_credit([("HY OAS", lc)], {})
+check("FROZEN warning reaches the output", "FROZEN" in rendered, True)
+check("prior-level columns rendered", "4W ago" in rendered, True)
+check("live series shows no FROZEN warning",
+      "FROZEN" in eod.format_rates_credit([("BBB-10y", lc2)], {}), False)
+
 print("\n" + ("ALL PASS" if FAIL == 0 else f"{FAIL} FAILURE(S)"))
 sys.exit(1 if FAIL else 0)

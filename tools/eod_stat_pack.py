@@ -229,8 +229,40 @@ def pearson(xs, ys) -> float | None:
     return sxy / math.sqrt(sxx * syy)
 
 
-def corr_over(a_closes, b_closes, window) -> float | None:
-    """Correlation of daily returns over the last `window` trading days."""
+def align_on_dates(a_closes, a_dates, b_closes, b_dates) -> tuple:
+    """(closes_a, closes_b) restricted to the DATE INTERSECTION of the two.
+
+    2026-08-16, the SECOND defect from the same 24/7 asymmetry. The bar-date
+    bug (a Sunday BTC bar defining the header) was one consequence; this is the
+    other, and fixing the header did not fix it.
+
+    corr_over used to take `ra[-n:]` and `rb[-n:]` — aligned BY POSITION from
+    the end. Bitcoin trades 7 days a week and equities 5, so the two series
+    walk different calendars. Measured on the live frame:
+        SPY's last 90 returns span 2026-04-07 .. 2026-08-14
+        BTC's last 90 returns span 2026-05-18 .. 2026-08-16
+    Those are different periods, so every BTC correlation was pairing Monday's
+    equity return against Saturday's crypto return and drifting further apart
+    the longer the window. The error reached +0.41 at 180D. A control on two
+    equity series (identical date grid) moves +0.00 at every window, which is
+    what proves the cause is the calendar and not the maths.
+    """
+    if not (a_dates and b_dates):
+        return a_closes, b_closes
+    da = dict(zip(a_dates, a_closes or []))
+    db = dict(zip(b_dates, b_closes or []))
+    common = sorted(set(da) & set(db))
+    return [da[d] for d in common], [db[d] for d in common]
+
+
+def corr_over(a_closes, b_closes, window, a_dates=None, b_dates=None):
+    """Correlation of daily returns over the last `window` SHARED sessions.
+
+    Pass dates whenever you have them. Without them this falls back to
+    positional alignment, which is only safe when both series are known to sit
+    on the same date grid — see align_on_dates for why that matters.
+    """
+    a_closes, b_closes = align_on_dates(a_closes, a_dates, b_closes, b_dates)
     ra, rb = daily_returns(a_closes), daily_returns(b_closes)
     n = min(len(ra), len(rb), window)
     if n < 3:
@@ -534,33 +566,73 @@ def fred_series(series_id, key, days=400) -> list:
 
 
 def level_changes(obs) -> dict:
-    """{'last','1D','1W','1M'} — LEVEL changes in basis points, not percent
-    returns. A yield going 4.10 -> 4.20 is +10bp; calling that '+2.4%' is the
-    kind of number that reads fine and means nothing."""
+    """{'last','1D','1W','1M', + prior levels and dates} — LEVEL changes in
+    basis points, not percent returns. A yield going 4.10 -> 4.20 is +10bp;
+    calling that '+2.4%' is the kind of number that reads fine and means
+    nothing.
+
+    PRIOR LEVELS AND THEIR DATES ARE RETURNED (2026-08-16). HY OAS printed
+    +0/+0/+0 across all three windows while BBB-10y, rendered by this SAME
+    function and the SAME formatter, printed +0/+2/-1. So the arithmetic and
+    the formatting demonstrably work and the zeros are SPECIFIC TO THAT SERIES:
+    it is flat or frozen at source. That could not be diagnosed from the pack
+    because the pack printed only the deltas — with the prior LEVELS beside
+    them, "flat series" and "broken delta" are distinguishable on sight.
+    This is also §2.1's requirement, which is why §2.1 is diagnostic and not
+    cosmetic.
+    OBS_DATE is carried too: a frozen series shows as a stale last-observation
+    date, which is the check that needs no FRED key to interpret.
+    """
     if not obs:
         return {}
     vals = [v for _, v in obs]
+    dates = [d for d, _ in obs]
     last = vals[-1]
-    out = {"last": last}
+    out = {"last": last, "last_date": dates[-1] if dates else None,
+           "n_obs": len(vals)}
     for lbl, n in (("1D", 1), ("1W", 5), ("1M", 21)):
-        out[lbl] = (last - vals[-1 - n]) * 100 if len(vals) > n else None
+        if len(vals) > n:
+            out[lbl] = (last - vals[-1 - n]) * 100
+            out[lbl + "_level"] = vals[-1 - n]
+            out[lbl + "_date"] = dates[-1 - n]
+        else:
+            out[lbl] = None
+            out[lbl + "_level"] = None
+            out[lbl + "_date"] = None
+    # A series whose last N observations are all identical is FROZEN, not calm.
+    tail = vals[-22:]
+    out["frozen"] = len(tail) > 3 and max(tail) == min(tail)
     return out
 
 
 def format_rates_credit(rows, curve) -> str:
-    """rows: [(label, {last,1D,1W,1M})]. Levels in %, changes in bp."""
-    out = ["RATES + CREDIT (level %, changes in bp)",
-           f"{'series':<10}{'last':>8}{'1D':>8}{'1W':>8}{'1M':>8}"]
+    """rows: [(label, {last,1D,1W,1M,...})]. Levels in %, changes in bp.
 
-    def _bp(v):
-        return "n/a".rjust(8) if v is None else f"{v:+.0f}".rjust(8)
+    §2.1 template: PRIOR LEVELS are printed beside the deltas. Deltas alone
+    cannot distinguish a flat series from a broken one — which is exactly the
+    ambiguity that made HY OAS's +0/+0/+0 unreadable for two rounds."""
+    out = ["RATES + CREDIT (level %, changes in bp; prior levels shown)",
+           f"{'series':<10}{'last':>8}{'1D ago':>8}{'1W ago':>8}{'4W ago':>8}"
+           f"{'1D':>7}{'1W':>7}{'4W':>7}  as-of"]
+
+    def _bp(v, w=7):
+        return "n/a".rjust(w) if v is None else f"{v:+.0f}".rjust(w)
+
+    def _lv(v, w=8):
+        return "n/a".rjust(w) if v is None else f"{v:.2f}".rjust(w)
 
     for label, d in rows:
         if not d:
             out.append(f"{label:<10}" + "n/a (no observations)".rjust(8))
             continue
         out.append(f"{label:<10}{d['last']:>8.2f}"
-                   + _bp(d.get("1D")) + _bp(d.get("1W")) + _bp(d.get("1M")))
+                   + _lv(d.get("1D_level")) + _lv(d.get("1W_level"))
+                   + _lv(d.get("1M_level"))
+                   + _bp(d.get("1D")) + _bp(d.get("1W")) + _bp(d.get("1M"))
+                   + "  " + str(d.get("last_date") or "?")
+                   + ("  !! FROZEN — every observation in the last month is "
+                      "identical; this is a STALE SERIES, not a calm one"
+                      if d.get("frozen") else ""))
     if curve:
         out.append(f"{'2-10 curve':<10}{curve['last']:>8.2f}"
                    + _bp(curve.get("1D")) + _bp(curve.get("1W"))
@@ -798,14 +870,20 @@ def build_eod_pack() -> str:
     try:
         blocks = []
         for alabel, asym in CORR_ANCHORS:
-            ac = (bars.get(asym) or {}).get("closes")
+            ab = bars.get(asym) or {}
+            ac, ad = ab.get("closes"), ab.get("dates")
             rows = []
             for rlabel, rsym in CORR_ROWS:
                 if rsym == asym:
                     continue                      # corr(x,x) = 1, no information
-                rc = (bars.get(rsym) or {}).get("closes")
+                rb_ = bars.get(rsym) or {}
+                rc, rd = rb_.get("closes"), rb_.get("dates")
+                # DATES ARE PASSED. Without them a 24/7 instrument (BTC-USD) is
+                # paired positionally against 5-day equities and the two series
+                # drift onto different calendars — see align_on_dates.
                 rows.append((f"{rlabel} ({rsym})",
-                             {w: corr_over(ac, rc, w) for w in CORR_WINDOWS}))
+                             {w: corr_over(ac, rc, w, ad, rd)
+                              for w in CORR_WINDOWS}))
             blocks.append((alabel, asym, rows))
         parts.append("")
         parts.append(format_correlations(blocks))
