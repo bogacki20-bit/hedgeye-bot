@@ -298,11 +298,52 @@ def classify_from(ticker, instrument=None, subsector=None, hedgeye_group=None,
                 "bucket_kind": bucket_kind, "bucket": bucket}
 
 
+_TAG_CACHE: dict = {}
+
+
+def prime_cache(tickers=None) -> int:
+    """Load ticker_tags for many names in ONE query.
+
+    The cap classifies the WHOLE book to compute a sector exposure, and it does
+    that on every check. Without this, one check_trade was ~60 sequential
+    round trips; the F6 run took minutes. Called automatically by classify().
+    """
+    import db_pg
+    try:
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            if tickers:
+                cur.execute("SELECT upper(ticker), instrument, subsector, "
+                            "hedgeye_group, exposure, cash_equivalent "
+                            "FROM ticker_tags WHERE upper(ticker)=ANY(%s)",
+                            (sorted({str(t).strip().upper() for t in tickers}),))
+            else:
+                cur.execute("SELECT upper(ticker), instrument, subsector, "
+                            "hedgeye_group, exposure, cash_equivalent "
+                            "FROM ticker_tags")
+            for tk, ins, ss, hg, exp, ce in cur.fetchall():
+                _TAG_CACHE[tk] = (ins, ss, hg, exp, ce)
+    except Exception as e:
+        log.warning("asset_classifier: cache prime failed (%s)", e)
+    return len(_TAG_CACHE)
+
+
+def clear_cache() -> None:
+    """Drop the memo. Call after a ticker_tags write (e.g. a PM ingest)."""
+    _TAG_CACHE.clear()
+
+
 def classify(ticker: str) -> dict:
-    """DB-backed. {asset_class, sector, basis, sector_basis}."""
+    """DB-backed. {asset_class, sector, basis, sector_basis, bucket_kind,
+    bucket}. Tag lookups are memoised — see prime_cache."""
     t = (ticker or "").strip().upper()
     from tools.doctrine import asset_class_for
-    ins, ss, hg, exp, ce = _tags(t)
+    if not _TAG_CACHE:
+        prime_cache()
+    if t in _TAG_CACHE:
+        ins, ss, hg, exp, ce = _TAG_CACHE[t]
+    else:
+        ins, ss, hg, exp, ce = _tags(t)
+        _TAG_CACHE[t] = (ins, ss, hg, exp, ce)
     return classify_from(t, instrument=ins, subsector=ss, hedgeye_group=hg,
                          exposure=exp, cash_equivalent=ce,
                          doctrine_class=asset_class_for(t))
