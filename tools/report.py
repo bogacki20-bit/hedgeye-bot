@@ -139,8 +139,17 @@ def conc_clusters(positions) -> dict:
 
     Two honest residual buckets replace the old lying 'untagged':
       • 'no-tags' — the name is ABSENT from ticker_tags (genuinely unknown).
-      • 'no-gics' — the name HAS a row but no grouping axis fired (it IS
+      • 'no-sector' — the name HAS a row but no grouping axis fired (it IS
         tagged — instrument etc. — just not on a sector/theme axis).
+        Renamed from 'no-gics' on 2026-08-16: the sector axis is now
+        ticker_tags.hedgeye_group (Hedgeye's own 15 Position Monitor sectors),
+        so a bucket labelled 'no-gics' would have told the operator the wrong
+        thing about which taxonomy was missing.
+
+    SECTOR AXIS (2026-08-16). tags[0] is whatever sector the CALLER supplies;
+    this function is taxonomy-agnostic. build_report_v4 now supplies
+    hedgeye_group, matching SCREEN (89ce30e). It previously supplied
+    gics_sector, so CONC and SCREEN grouped by two different taxonomies.
 
     ETFs now cluster on commodity_linked -> 'commodity', the non-GICS exposure
     axis ('-proxy' folded in, so commodity-proxy joins 'commodity'), and
@@ -176,12 +185,12 @@ def conc_clusters(positions) -> dict:
                       .replace("-proxy", "")))   # commodity-proxy -> commodity
         if inverse:
             keys.add("inverse")
-        for k in (keys or {"no-gics"}):
+        for k in (keys or {"no-sector"}):
             add(k, w)
     return out
 
 
-_CONC_TRAILING = ("no-gics", "no-tags")     # honest residuals, shown last
+_CONC_TRAILING = ("no-sector", "no-tags")   # honest residuals, shown last
 
 
 def conc_line(clusters, top_n=3) -> str:
@@ -358,6 +367,15 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         lines.append(f"REPORT {VERSION} {today} [{kind}] · rp=range pos 0-1 · "
                      f"⚠=trend-against 📉=dip/rip · fill=% of target "
                      f"(<40 STARTER · <80 BUILDING · ≤110 FULL · >110 OVER)")
+        # BOOK AGE, stated ALWAYS. Everything below that touches positions,
+        # weights, fills or CONC is computed from this snapshot — see
+        # tools/book_freshness for why this is never silent.
+        try:
+            from tools.book_freshness import book_banner
+            lines.append(book_banner(today))
+        except Exception as e:
+            lines.append(f"!! BOOK AGE UNKNOWN ({e}) — treat every position "
+                         f"figure below as unverified.")
         delta_idx = len(lines)          # Δ line inserted here after assembly
         try:
             mq, qq = _quad_for(cur, today)
@@ -529,7 +547,11 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         # ── P3 CONC ──
         try:
             if ctx:
-                cur.execute("""SELECT ticker, gics_sector, rate_sensitive,
+                # hedgeye_group, NOT gics_sector (2026-08-16). SCREEN moved to
+                # Hedgeye's own 15 PM sectors in 89ce30e; CONC grouping by the
+                # provider taxonomy meant the concentration line and a sector
+                # screen answered "how much ENERGY do I have" differently.
+                cur.execute("""SELECT ticker, hedgeye_group, rate_sensitive,
                                       duration_char, commodity_linked,
                                       exposure, inverse
                                FROM ticker_tags WHERE ticker = ANY(%s)""",

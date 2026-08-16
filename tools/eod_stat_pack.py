@@ -614,6 +614,15 @@ def build_eod_pack() -> str:
                     if b.get("dates")), default=None)
     parts.append(f"(price data: {got}/{len(need)} symbols · last bar "
                  f"{last_bar or 'n/a'} · built {_now_et()})")
+    # Book age sits next to the tape as-of stamp deliberately: the pack carries
+    # TWO independent staleness axes (price bars and the broker book) and one
+    # being current says nothing about the other.
+    try:
+        from tools.book_freshness import book_banner
+        parts.append(book_banner())
+    except Exception as e:
+        parts.append(f"!! BOOK AGE UNKNOWN ({e}) — position-derived figures "
+                     f"in this pack are unverified.")
 
     def _rets(sym):
         b = bars.get(sym) or {}

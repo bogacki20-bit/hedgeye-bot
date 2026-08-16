@@ -1161,6 +1161,17 @@ def run_screen_q(q: dict) -> str:
         head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
 
     lines = [head, ""]
+    # BOOK AGE. Any screen that reads the book — book mode, an in-book filter,
+    # or the `held` marker on ordinary rows — is answering from the last broker
+    # export, which is operator-uploaded and goes stale silently.
+    if book_mode or q["held"]:
+        try:
+            from tools.book_freshness import book_banner
+            lines.append(book_banner())
+            lines.append("")
+        except Exception as e:
+            lines.append(f"⚠️ BOOK AGE UNKNOWN ({e}) — holdings below unverified.")
+            lines.append("")
     # SECTOR BLIND SPOT. A sector filter is SQL equality on hedgeye_group, which
     # cannot match NULL, so every name absent from the Position Monitor is
     # unreachable — not zero-matching, invisible. Say so on the screen itself:

@@ -79,7 +79,9 @@ def test_conc_clusters_overlap_and_untagged():
     assert c["broad-market"] == [1, 3.0]       # SH's underlying
     assert c["inverse"] == [1, 3.0]            # SH's geared flag
     assert c["legacy_row"] == [1, 2.0]         # 3-tuple padded, still clusters
-    assert c["no-gics"] == [1, 1.0]            # has a row, no grouping axis
+    assert c["no-sector"] == [1, 1.0]          # has a row, no grouping axis
+    assert "no-gics" not in c                  # renamed 2026-08-16 when the
+                                               # sector axis became hedgeye_group
     assert c["no-tags"] == [1, 2.0]            # absent from ticker_tags
     assert "untagged" not in c                 # the lying label is gone
 
@@ -87,10 +89,10 @@ def test_conc_clusters_overlap_and_untagged():
 def test_conc_line_top3_and_top_cluster():
     line = conc_line({"rate_sensitive": [8, 22.4], "healthcare": [6, 17.8],
                       "commodity": [5, 12.0], "tech": [2, 3.0],
-                      "no-gics": [1, 1.5], "no-tags": [1, 0.8]})
+                      "no-sector": [1, 1.5], "no-tags": [1, 0.8]})
     assert line.startswith("CONC: rate_sensitive 8pos/22.4%w · "
                            "healthcare 6pos/17.8%w · commodity 5pos/12.0%w")
-    assert "no-gics 1pos/1.5%w" in line
+    assert "no-sector 1pos/1.5%w" in line
     assert "no-tags 1pos/0.8%w" in line
     assert "top_cluster: rate_sensitive" in line
     assert "tech" not in line                       # only top 3 + residuals
