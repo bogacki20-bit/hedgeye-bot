@@ -358,6 +358,39 @@ def fmt_corr(v, width=6) -> str:
     return f"{v:+.2f}".rjust(width)
 
 
+def window_anchor_line(closes, dates, label="windows") -> str:
+    """The RESOLVED base date for every window, printed under the returns tables.
+
+    Third time this lesson has paid: print the INPUTS, not just the outputs.
+    Prior levels made the frozen HY series obvious on sight; the per-row as-of
+    column made the FRED/price split visible; and without these anchors a
+    base-date SHIFT is indistinguishable from data CORRUPTION -- which cost two
+    builds of argument over whether the indexing fix was a regression.
+
+    Uses SPY (or whatever series is passed) as the reference grid: every symbol
+    resolves against the same calendar, so one line covers the table.
+    """
+    if not dates:
+        return "%s: unavailable (no dates)" % label
+    bits = []
+    for lbl, days_back in WINDOW_DAYS:
+        i = asof_index(dates, days_back)
+        bits.append("%s=%s" % (lbl, dates[i].strftime("%m-%d") if i is not None
+                               else "n/a"))
+    ytd_base = None
+    yr = dates[-1].year
+    for d in dates:
+        if d.year < yr:
+            ytd_base = d
+        else:
+            break
+    bits.append("YTD=%s" % (ytd_base.strftime("%m-%d") if ytd_base else "n/a"))
+    return ("%s (as-of %s): " % (label, dates[-1]) + " - ".join(bits)
+            + "\n  definition: 1D=1 calendar day back, 1W=7, 1M=28 "
+              "(= Hedgeye's '4 Wks Ago'), 3M=91, 6M=182; each resolves to the "
+              "last session ON OR BEFORE that date")
+
+
 def format_factor_board(rows) -> str:
     """rows: [(name, long, short, reads_as, spread_dict, long_dict, short_dict)].
     Spread headline with each leg's own trailing returns beneath it — operator
@@ -716,15 +749,51 @@ def level_changes(obs) -> dict:
     if not obs:
         return {}
     vals = [v for _, v in obs]
-    dates = [d for d, _ in obs]
+    raw_dates = [d for d, _ in obs]
+    # FRED dates arrive as ISO strings; index by DATE like everything else.
+    # If they are NOT parseable, say so and fall back to row offsets rather
+    # than raising -- but flag it, because a silent fallback to row offsets is
+    # precisely the bug this indexing change exists to remove.
+    from datetime import date as _date
+    dates, parse_ok = [], True
+    for d in raw_dates:
+        if isinstance(d, _date):
+            dates.append(d)
+            continue
+        try:
+            dates.append(_date.fromisoformat(str(d)[:10]))
+        except ValueError:
+            parse_ok = False
+            break
     last = vals[-1]
-    out = {"last": last, "last_date": dates[-1] if dates else None,
+    out = {"last": last, "last_date": raw_dates[-1] if raw_dates else None,
            "n_obs": len(vals)}
-    for lbl, n in (("1D", 1), ("1W", 5), ("1M", 21)):
-        if len(vals) > n:
-            out[lbl] = (last - vals[-1 - n]) * 100
-            out[lbl + "_level"] = vals[-1 - n]
-            out[lbl + "_date"] = dates[-1 - n]
+    # DATE-INDEXED, not row-offset. This was the last row offset left in the
+    # pack: FRED series drop holidays, so "21 observations back" was a moving
+    # calendar target for exactly the same reason the price windows were.
+    # The offsets are the SAME calendar days the price tables use, so "1M" now
+    # means one thing in this document instead of two.
+    out["date_parse_failed"] = not parse_ok
+    if not parse_ok:
+        log.error("level_changes: observation dates are not ISO — falling back "
+                  "to ROW OFFSETS, which are not deterministic. Windows below "
+                  "are approximate.")
+    for lbl, days_back in WINDOW_DAYS[:3]:          # 1D=1, 1W=7, 1M=28
+        if not parse_ok:                            # degraded, and it says so
+            n = {1: 1, 7: 5, 28: 21}[days_back]
+            i = len(vals) - 1 - n if len(vals) > n else None
+            if i is not None:
+                out[lbl] = (last - vals[i]) * 100
+                out[lbl + "_level"] = vals[i]
+                out[lbl + "_date"] = raw_dates[i]
+            else:
+                out[lbl] = out[lbl + "_level"] = out[lbl + "_date"] = None
+            continue
+        i = asof_index(dates, days_back)
+        if i is not None and i < len(vals) - 1:
+            out[lbl] = (last - vals[i]) * 100
+            out[lbl + "_level"] = vals[i]
+            out[lbl + "_date"] = raw_dates[i]
         else:
             out[lbl] = None
             out[lbl + "_level"] = None
@@ -742,8 +811,9 @@ def format_rates_credit(rows, curve) -> str:
     cannot distinguish a flat series from a broken one — which is exactly the
     ambiguity that made HY OAS's +0/+0/+0 unreadable for two rounds."""
     out = ["RATES + CREDIT (level %, changes in bp; prior levels shown)",
-           f"{'series':<10}{'last':>8}{'1D ago':>8}{'1W ago':>8}{'4W ago':>8}"
-           f"{'1D':>7}{'1W':>7}{'4W':>7}  as-of"]
+           "  windows: 1D=1 calendar day  1W=7  1M=28 (= Hedgeye's '4 Wks Ago')",
+           f"{'series':<10}{'last':>8}{'1D ago':>8}{'1W ago':>8}{'1M ago':>8}"
+           f"{'1D':>7}{'1W':>7}{'1M':>7}  as-of"]
 
     def _bp(v, w=7):
         return "n/a".rjust(w) if v is None else f"{v:+.0f}".rjust(w)
@@ -1002,6 +1072,12 @@ def build_eod_pack() -> str:
             rows.append((name, lng, sht, reads, spread_row(lr, sr), lr, sr))
         parts.append("")
         parts.append(format_factor_board(rows))
+        # RESOLVED window base dates. Without these a base-date SHIFT and data
+        # CORRUPTION look identical in the output — exactly the ambiguity that
+        # cost two builds of argument.
+        _ref = bars.get(BENCH) or {}
+        parts.append("  " + window_anchor_line(_ref.get("closes"),
+                                               _ref.get("dates")))
     except Exception as e:
         parts.append(f"\nFACTOR BOARD: unavailable ({e})")
 

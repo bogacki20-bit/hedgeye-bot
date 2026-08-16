@@ -287,18 +287,22 @@ check("a 5-session-old book IS stale", _stale(date(2026, 8, 7), date(2026, 8, 16
 
 # ── 12. §2.1 prior levels are rendered (the HY diagnostic) ─────────────────
 print("\n12. prior levels beside deltas (makes flat-vs-broken visible):")
-obs_flat = [("2026-07-01", 2.71)] * 30
+# DISTINCT dates, CONSTANT value -- that is what a frozen series looks like.
+# The first version of this fixture repeated one date 30 times, which is not a
+# real FRED shape and which date-indexing correctly refuses to resolve.
+obs_flat = [((date(2026, 7, 1) + _td(days=i)).isoformat(), 2.71)
+            for i in range(40)]
 lc = eod.level_changes(obs_flat)
 check("a frozen series is FLAGGED", lc["frozen"], True)
 check("its deltas are genuinely zero", (lc["1D"], lc["1W"], lc["1M"]), (0.0, 0.0, 0.0))
 check("prior levels are carried", lc["1M_level"], 2.71)
-check("last observation date carried", lc["last_date"], "2026-07-01")
+check("last observation date carried", lc["last_date"], "2026-08-09")
 obs_live = [("2026-07-%02d" % (i + 1), 2.60 + i * 0.01) for i in range(30)]
 lc2 = eod.level_changes(obs_live)
 check("a live series is NOT flagged frozen", lc2["frozen"], False)
 rendered = eod.format_rates_credit([("HY OAS", lc)], {})
 check("FROZEN warning reaches the output", "FROZEN" in rendered, True)
-check("prior-level columns rendered", "4W ago" in rendered, True)
+check("prior-level columns rendered", "1M ago" in rendered, True)
 check("live series shows no FROZEN warning",
       "FROZEN" in eod.format_rates_credit([("BBB-10y", lc2)], {}), False)
 
@@ -382,18 +386,16 @@ print("\n15. two builds for the same as-of are byte-identical:")
 
 
 def _data_only(txt):
-    """Strip the two lines that are SUPPOSED to differ between builds: the
-    build clock, and the provenance note saying whether bars were fetched or
-    replayed. Everything else must match exactly."""
-    out = []
-    for ln in (txt or "").splitlines():
-        if ln.startswith("BUILT:"):
-            continue
-        if "bars fetched and banked" in ln or "bars REPLAYED from store" in ln:
-            ln = re.sub(r"bars (fetched and banked|REPLAYED from store)",
-                        "bars <provenance>", ln)
-        out.append(ln)
-    return "\n".join(out)
+    """Strip the ONLY line that is legitimately allowed to differ between two
+    builds: the build clock. Everything else -- including the fetch-vs-replay
+    provenance note -- must match, because once bars are banked BOTH runs
+    replay and the note is identical too.
+
+    Tightened 2026-08-16: an earlier version also normalised the provenance
+    line, which would have hidden a build that silently refetched instead of
+    replaying. That is the exact failure this test exists to catch."""
+    return "\n".join(ln for ln in (txt or "").splitlines()
+                     if not ln.startswith("BUILT:"))
 
 
 try:
@@ -401,10 +403,15 @@ try:
     import db_pg as _db
     _db._load_dotenv_fallback()
     from tools.eod_stat_pack import build_eod_pack
-    b1 = build_eod_pack()
+    build_eod_pack()                    # ensure bars are banked for this as-of
+    b1 = build_eod_pack()               # then TWO REPLAY builds, as required
     b2 = build_eod_pack()
     d1, d2 = _data_only(b1), _data_only(b2)
-    check("every DATA line is identical across builds", d1 == d2, True)
+    check("BOTH builds replayed from the store",
+          ("REPLAYED from store" in b1, "REPLAYED from store" in b2),
+          (True, True))
+    check("two replay builds are byte-identical apart from the clock",
+          d1 == d2, True)
     if d1 != d2:
         for i, (x, y) in enumerate(zip(d1.splitlines(), d2.splitlines())):
             if x != y:
@@ -412,8 +419,11 @@ try:
                 break
     check("the build clock IS allowed to differ",
           "BUILT:" in b1 and "BUILT:" in b2, True)
-    check("second build REPLAYED rather than refetched",
-          "REPLAYED from store" in b2, True)
+    # the resolved window anchors must be present and dated
+    check("window anchors are printed", "windows (as-of" in b1, True)
+    check("the window definition is stated", "definition:" in b1, True)
+    check("anchors name a real session, not a row count",
+          "1M=" in b1 and "resolves to the last session" in b1, True)
 except Exception as _e:
     print("  !! DETERMINISM TEST COULD NOT RUN (%s) — counted as FAILURE." % _e)
     FAIL += 1
