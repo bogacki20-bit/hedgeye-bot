@@ -794,6 +794,15 @@ def level_changes(obs) -> dict:
             out[lbl] = (last - vals[i]) * 100
             out[lbl + "_level"] = vals[i]
             out[lbl + "_date"] = raw_dates[i]
+            # The NEXT observation after the resolved anchor. Hedgeye may
+            # anchor lookbacks on the PUBLICATION date (08-14) while levels
+            # come from the prior close (08-13), which would put their
+            # "4 Wks Ago" one session later than ours. Printing both sides of
+            # the boundary lets one build discriminate that from a resolution
+            # bug, instead of a round trip per hypothesis.
+            if i + 1 < len(vals):
+                out[lbl + "_next_date"] = raw_dates[i + 1]
+                out[lbl + "_next_level"] = vals[i + 1]
         else:
             out[lbl] = None
             out[lbl + "_level"] = None
@@ -801,6 +810,13 @@ def level_changes(obs) -> dict:
     # A series whose last N observations are all identical is FROZEN, not calm.
     tail = vals[-22:]
     out["frozen"] = len(tail) > 3 and max(tail) == min(tail)
+    # The observation dates FRED actually returned, always -- not only when
+    # frozen. This answers "is the pack taking the second-newest observation?"
+    # directly: if the newest date printed here IS the session and the pack
+    # still selects an older one, that is an off-by-one; if the newest date
+    # returned is itself a session behind, FRED had not published yet and the
+    # pack is correct. Print the input.
+    out["date_tail"] = " ".join(str(d) for d in raw_dates[-6:])
     if out["frozen"]:
         # The EVIDENCE, not just the verdict. Five (date, value) pairs settle
         # "wrong series ID" vs "stale at source" in one look, without a key.
@@ -830,6 +846,13 @@ def format_rates_credit(rows, curve) -> str:
             anchors = ("  anchors (rates as-of %s): 1D=%s - 1W=%s - 1M=%s"
                        % (_d.get("last_date"), _d.get("1D_date") or "n/a",
                           _d.get("1W_date") or "n/a", _d.get("1M_date") or "n/a"))
+            if _d.get("1M_next_date"):
+                anchors += ("\n  1M boundary [%s]: resolved %s=%.2f - next obs "
+                            "%s=%.2f  (if the deck matches the NEXT one, it "
+                            "anchors lookbacks on the publication date, not the "
+                            "close -- a convention difference, not a bug)"
+                            % (_lbl, _d.get("1M_date"), _d.get("1M_level"),
+                               _d.get("1M_next_date"), _d.get("1M_next_level")))
             break
     out = ["RATES + CREDIT (level %, changes in bp; prior levels shown)",
            "  windows: 1D=1 calendar day  1W=7  1M=28 (= Hedgeye's '4 Wks Ago')",
@@ -837,6 +860,12 @@ def format_rates_credit(rows, curve) -> str:
            f"{'1D':>7}{'1W':>7}{'1M':>7}  as-of"]
     if anchors:
         out.insert(2, anchors)
+    for _lbl, _d in rows:
+        if _d and _d.get("date_tail"):
+            out.insert(3, "  %s observations returned (last 6): %s  -> selected "
+                          "%s as 'last'"
+                       % (_lbl, _d["date_tail"], _d.get("last_date")))
+            break
 
     def _bp(v, w=7):
         return "n/a".rjust(w) if v is None else f"{v:+.0f}".rjust(w)
@@ -1054,6 +1083,7 @@ def build_eod_pack() -> str:
         # investigation needs to see.
         _persist_pack(blocked, last_bar, False, reason, got, len(need), built)
         return blocked
+    asof_line_idx = len(parts)
     parts.append(f"DATA AS OF: {last_bar:%a %Y-%m-%d} close")
     parts.append(f"BUILT:      {built}")
     parts.append(f"(price data: {got}/{len(need)} symbols · bar date validated "
@@ -1144,7 +1174,21 @@ def build_eod_pack() -> str:
         parts.append(f"\nCORRELATIONS: unavailable ({e})")
 
     parts.append("")
-    parts.append(_rates_credit_block())
+    _rc = _rates_credit_block()
+    parts.append(_rc)
+    # HEADER-LEVEL AS-OF SPLIT. The pack mixes a price session with a
+    # rates/credit session, and until now only the rates block said so -- a
+    # reader on a phone would never scroll far enough to find out. Silently
+    # mixing two sessions in one document is the same class of problem as the
+    # original Sunday bar, so it is stated at the top or not at all.
+    _m = re.search(r"anchors \(rates as-of ([0-9]{4}-[0-9]{2}-[0-9]{2})\)", _rc)
+    if _m and _m.group(1) != str(last_bar):
+        parts[asof_line_idx] = (
+            "DATA AS OF: prices %s close - rates/credit %s   << TWO SESSIONS"
+            % (last_bar.strftime("%a %Y-%m-%d"), _m.group(1)))
+    elif _m:
+        parts[asof_line_idx] = ("DATA AS OF: %s close (prices and rates/credit "
+                                "both)" % last_bar.strftime("%a %Y-%m-%d"))
     parts.append("VOL COMPLEX (VIX/VXN/RVX/VVIX/MOVE/GVZ/OVX) + IVOL: Phase 2")
     parts.append("CFTC positioning + FX realized-vol proxy: Phase 3")
     body = "\n".join(parts)
