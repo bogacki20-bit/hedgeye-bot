@@ -544,7 +544,7 @@ def _now_et() -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M (local)")
 
 
-def _header() -> tuple[list, str | None, bool]:
+def _header(asof=None) -> tuple[list, str | None, bool]:
     """Quad + VIX, from the same doctrine REPORT and WEEKEND use.
 
     Returns (lines, monthly_quad). The Quad is handed back rather than only
@@ -594,7 +594,9 @@ def _header() -> tuple[list, str | None, bool]:
         mq, stale = None, True
     try:
         from tools.vol_regime import regime_line
-        lines.append(regime_line())
+        # Pass the RESOLVED SESSION, not the wall clock -- see regime_line's
+        # docstring for the 2026-08-17 VVIX phase flip this prevents.
+        lines.append(regime_line(asof))
     except Exception as e:
         lines.append(f"VOL: unavailable ({e})")
     return lines, mq, stale
@@ -846,26 +848,42 @@ def format_rates_credit(rows, curve) -> str:
             anchors = ("  anchors (rates as-of %s): 1D=%s - 1W=%s - 1M=%s"
                        % (_d.get("last_date"), _d.get("1D_date") or "n/a",
                           _d.get("1W_date") or "n/a", _d.get("1M_date") or "n/a"))
-            if _d.get("1M_next_date"):
-                anchors += ("\n  1M boundary [%s]: resolved %s=%.2f - next obs "
-                            "%s=%.2f  (if the deck matches the NEXT one, it "
-                            "anchors lookbacks on the publication date, not the "
-                            "close -- a convention difference, not a bug)"
-                            % (_lbl, _d.get("1M_date"), _d.get("1M_level"),
-                               _d.get("1M_next_date"), _d.get("1M_next_level")))
             break
+    # RESOLVED 2026-08-17 by this very line: the deck anchors lookbacks on its
+    # PUBLICATION date, the bot on the data close, so the bot's 1M base sits one
+    # session earlier (2y 07-16=4.16 vs 07-17=4.18 against the deck's 4.19).
+    # DECISION ON RECORD: KEEP close-anchoring. Measuring a lookback from the
+    # data you actually have is the defensible convention; matching someone
+    # else's publication schedule is not. The boundary line therefore stays
+    # PERMANENTLY and covers EVERY series, so the convention gap is visible in
+    # the document instead of being something a reader has to remember.
+    for _lbl, _d in rows:
+        if _d and _d.get("1M_next_date"):
+            anchors += ("\n  1M boundary [%-10s]: close-anchored %s=%.2f - "
+                        "publication-anchored %s=%.2f"
+                        % (_lbl, _d.get("1M_date"), _d.get("1M_level"),
+                           _d.get("1M_next_date"), _d.get("1M_next_level")))
+    if anchors:
+        anchors += ("\n  convention: this pack anchors lookbacks on the DATA "
+                    "CLOSE. Hedgeye anchors on PUBLICATION date, so their MoM "
+                    "matches the right-hand value above. Expect a one-session "
+                    "offset against the deck and validate on that column.")
     out = ["RATES + CREDIT (level %, changes in bp; prior levels shown)",
            "  windows: 1D=1 calendar day  1W=7  1M=28 (= Hedgeye's '4 Wks Ago')",
            f"{'series':<10}{'last':>8}{'1D ago':>8}{'1W ago':>8}{'1M ago':>8}"
            f"{'1D':>7}{'1W':>7}{'1M':>7}  as-of"]
     if anchors:
         out.insert(2, anchors)
+    # EVERY series gets its observations line. The 2y line settled the anchoring
+    # question in one build; HY OAS needs the same to settle flat-at-source vs
+    # wrong-series-ID.
+    _obs = []
     for _lbl, _d in rows:
         if _d and _d.get("date_tail"):
-            out.insert(3, "  %s observations returned (last 6): %s  -> selected "
-                          "%s as 'last'"
-                       % (_lbl, _d["date_tail"], _d.get("last_date")))
-            break
+            _obs.append("  %-10s obs returned (last 6): %s  -> selected %s"
+                        % (_lbl, _d["date_tail"], _d.get("last_date")))
+    for _i, _ln in enumerate(_obs):
+        out.insert(3 + _i, _ln)
 
     def _bp(v, w=7):
         return "n/a".rjust(w) if v is None else f"{v:+.0f}".rjust(w)
@@ -1022,7 +1040,8 @@ def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
 
 def build_eod_pack() -> str:
     """Assemble the pack. Every section guarded; a failure prints in place."""
-    parts, header_quad, quad_stale = _header()
+    from tools.trading_calendar import last_completed_session as _lcs
+    parts, header_quad, quad_stale = _header(_lcs())
 
     need = {BENCH}
     for _, lng, sht, _ in FACTORS:

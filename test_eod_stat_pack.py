@@ -570,8 +570,15 @@ def test_build_eod_pack_threads_staleness_into_the_section():
     """
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "tools", "eod_stat_pack.py"), encoding="utf-8").read()
-    assert "parts, header_quad, quad_stale = _header()" in src, \
+    # 2026-08-17: _header now takes the RESOLVED SESSION so the vol block stops
+    # anchoring on the wall clock (see vol_regime.regime_line). The call is
+    # therefore _header(_lcs()), not _header(). The GUARD here is that the
+    # staleness flag is UNPACKED rather than hardcoded -- pin that, not the
+    # argument list, or every future argument change looks like a regression.
+    assert "parts, header_quad, quad_stale = _header(" in src, \
         "build_eod_pack must unpack the staleness flag from _header"
+    assert "_header()" not in src.replace("def _header()", ""), \
+        "_header must be called WITH the resolved session, not the wall clock"
     assert "stale=quad_stale" in src, \
         "quad_tape_block must receive _header's flag, not a literal"
 

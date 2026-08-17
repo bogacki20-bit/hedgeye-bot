@@ -169,13 +169,26 @@ def write_for_date(d: date, dry_run: bool = False) -> dict:
 
 def regime_line(d: date | None = None) -> str:
     """One-line current regime for REPORT/alert headers, e.g.
-    'VOL: VIX BEAR@0.31 compressing · MOVE BULL@0.72 widening · …'"""
+    'VOL: VIX BEAR@0.31 compressing · MOVE BULL@0.72 widening · …'
+
+    `d` is the AS-OF the caller is reporting on. Pass the resolved trading
+    session, not the wall clock.
+
+    2026-08-17: defaulting to date.today() made this block anchor on the BUILD
+    DATE while every other block anchors on the data session. Two builds ten
+    hours apart printed VVIX 87.48 [75.197-97.508] rp=0.5505 in both -- byte
+    identical inputs -- and phase 'steady' then 'compressing', because
+    vol_regime_daily had gained an as_of=2026-08-17 row whose phase is computed
+    against a different ~3-session comparison bar. Same class as the rates
+    anchor: a window resolved from the clock rather than from the data.
+    The default remains today() for callers that genuinely mean "now", but the
+    EOD pack passes its resolved session."""
     import db_pg
     d = d or date.today()
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """SELECT DISTINCT ON (index_name) index_name, trend, range_pos, phase,
-                      price, range_low, range_high
+                      price, range_low, range_high, as_of
                FROM vol_regime_daily WHERE as_of <= %s
                ORDER BY index_name, as_of DESC""", (d,))
         rows = cur.fetchall()
@@ -183,12 +196,16 @@ def regime_line(d: date | None = None) -> str:
         return "VOL: no regime data"
     short = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT", None: "?"}
     parts = []
-    for name, tr, rp, ph, price, range_low, range_high in sorted(rows):
+    for name, tr, rp, ph, price, range_low, range_high, _as_of in sorted(rows):
         lvl = f"{float(price):.1f}" if price is not None else "?"
         rng = f" [{float(range_low):.1f}-{float(range_high):.1f}]" if (range_low is not None and range_high is not None) else ""
         rp_s = f" rp={float(rp):.2f}" if rp is not None else ""
         parts.append(f"{name} {lvl}{rng}{rp_s} {short.get(tr,'?')} {ph}")
-    return "VOL: " + " · ".join(parts)
+    # State which regime rows were used. Without this, a phase that changes
+    # while price/range/rp stay identical is unexplainable from the output.
+    used = sorted({str(r[7]) for r in rows if len(r) > 7 and r[7]})
+    stamp = (" (regime as-of %s)" % ", ".join(used)) if used else ""
+    return "VOL: " + " · ".join(parts) + stamp
 
 
 def backfill(dry_run: bool = False) -> dict:
