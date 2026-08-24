@@ -1,0 +1,197 @@
+RUN REPORT 2026-08-23  (weekend bug-fix scope, REPORT v4 brief)
+===============================================================
+branch: master. Changes are LOCAL + one DB view migration applied.
+NOT committed, NOT pushed, NOT deployed - the Railway service still runs
+the old code until you commit and `railway up`. The DB-side fixes
+(v_screener migration 077, vol_regime_daily repair) are live already.
+
+THE SHARED ROOT CAUSE - CONFIRMED
+  Your hypothesis was right. #1's three symptoms, #3, and #4 are all the
+  same defect class: THE WRITE LANDS CORRECTLY, THE READ LOOKS ELSEWHERE.
+    - QUAD 'OK' confirm  -> bot_state.quad_last_confirmed_at
+      header read        -> max(quad_regime_history.effective_at)
+      History only gets a row on a VALUE CHANGE, so 'last confirm' really
+      meant 'last change' (8/02). Your 8/17 OK was stored and ignored.
+    - hdg ranges         -> hedgeye_risk_ranges.buy_trade/sell_trade (daily,
+                            upsert works, data verified present)
+      report bands read  -> mfr_snapshots only. The hierarchy was never
+      implemented on the read path: v_screener's hedgeye CTE selected the
+      trend WORD only. 'hdg' labels on rows were the trend source, never
+      the band source.
+    - OutBucket trends   -> hedgeye_signal_changes (parsed correctly since
+                            forever: XLU out_bucket BEARISH 7/31 was there)
+      trend gate read    -> latest hedgeye_risk_ranges row, no age bound.
+      XLU froze at 7/30 BULLISH and beat the correct value in COALESCE.
+      A purpose-built staleness gate exists in db_pg (RR_MAX_AGE_DAYS) -
+      this path simply never called it.
+    - vol divergence     -> same table, two anchors. Stat pack anchors on
+      last_completed_session (ET, correct). Report anchored on
+      date.today() = UTC wall clock, AND the nightly writer stamped rows
+      with the UTC date at 00:02 UTC = 20:02 ET, so the '8/21' row was
+      built from THURSDAY-EVENING data. The report's VIX 16.0 [11.7-15.9]
+      rp=1.03 was a phantom: Thursday band + overnight futures-flip price.
+      THE PACK WAS THE CORRECT ONE. Not a live-vs-close design choice.
+
+FIXES APPLIED
+  #1a QUAD (tools/quad_regime.py: last_quad_confirm(); wired into
+      tools/report.py x2, tools/eod_stat_pack.py)
+      'Last confirm' = GREATEST(history change, OK-confirm stamp).
+      Header now reads 2026-08-17 (verified live). Staleness logic gets
+      the same value, so the pack's AWAIT-CONFIRM guard also honors OKs.
+  #1c VOL (tools/report.py, main.py)
+      Report now calls regime_line(last_completed_session()) - same anchor
+      as the pack. Writer now labels rows with the completed ET session,
+      not the UTC date. DATA REPAIR: deleted 21 mislabeled/phantom rows
+      (as_of 8/21 built from Thu data; 8/22, 8/23 describe no session) and
+      recomputed 8/21 from the real Friday snapshots. Both outputs now
+      print VIX 15.5 [13.9-16.6] rp=0.58 for 8/21 - consistent with
+      Hedgeye's own 8/21 VIX signal [13.90-16.54].
+      Residual (reported, not fixed): vol_regime_daily is still frozen-on-
+      first-write (ON CONFLICT DO NOTHING) and mfr_snapshots mutates all
+      day underneath it; per-date instrument resolution can still flip
+      ^VIX/VX_F between adjacent dates.
+  #1b + #4 RANGES & TREND (migrations/077_screener_hdg_bands_outbucket.sql
+      - APPLIED to the live DB - and the same logic mirrored in
+      tools/screener.py _SOURCE_SLICE_SQL, which report/book paths use)
+      - trend: newest-by-signal_date across the active RR table AND
+        hedgeye_signal_changes (out_bucket + trend_change). No age cutoff
+        on trend - OutBucket tags are live until changed (they re-publish
+        as trend_change rows: URA/XAR/DRAM all fired 8/21).
+      - bands: a FRESH hdg band (signal_date within 7 calendar days) now
+        overrides the mfr band in range_low/high/range_pos; stale hdg
+        bands fall back to mfr instead of freezing (the trend bug's
+        lesson applied to bands). New column band_source = hdg|mfr.
+      - has_range keeps meaning 'MFR coverage' - DARK/enrollment surfaces
+        unchanged.
+      - tools/report.py _rp_series (SECTOR FLOW / RANGE DYNAMICS /
+        DOLLAR+BONDS) joins hedgeye_risk_ranges per (ticker, date) -
+        keith_pattern's proven join - so hdg bands override per session.
+      VERIFIED LIVE: XLU trend_dir=BEARISH (was BULLISH), XAR BEARISH,
+      ORCL BEARISH, MSFT band_source=hdg. The XLU(S) short no longer
+      flags trend-against; ZG(S) still does and that is CORRECT (no
+      Hedgeye row exists for ZG; live MFR says trendBullish).
+  #3 DOLLAR (tools/report.py)
+      Finding: the mfr bands DID recompute daily - no cadence bug. They
+      are short-horizon vol bands that re-center on price, so rp mean-
+      reverts to ~0.5 by construction and can NEVER register a cycle low.
+      Also the 8/21 report's UUP (0.31) and UDN (0.45) came from two
+      different code paths reading two different vintages (exact inverses
+      must sum to ~1.0; they summed to 0.76).
+      Fix: DOLLAR+BONDS now appends the authoritative signal your ingest
+      already had: 'USD:0.20-hdg[98.24-99.91]BEAR' from hedgeye_risk_ranges
+      (fresh-only). Your independent 8/21 numbers reproduce exactly.
+  #2 RATES (tools/report.py - new line after DOLLAR+BONDS)
+      'RATES: 2Y 4.17% (yf 2026-08-21) hdg[4.13-4.25] rp=0.33 NEUT - 10Y
+      4.74% (yf 2026-08-21) hdg[4.64-4.74] rp=0.98 BULL'
+      Live via yfinance at build: 10Y=^TNX, 2Y=2YY=F (CBOT 2Y yield
+      future). NOTE: the repo's existing UST2Y mapping (^IRX) is the
+      13-week bill - it reads 3.70 vs the real 2Y 4.19 and would have been
+      50bp wrong; I did NOT change that shared mapping, the report uses
+      2YY=F directly. Each yield is stamped with its own bar date so a
+      pre-market build reads as prior close, not a fake live print.
+      Falls back to the hdg prior close (labeled) if yfinance is down.
+  #5b BACKLOG VALIDATION (tools/enrollment.py)
+      Finding first: the backlog path does ZERO string manipulation - the
+      garbage originates upstream (parser_signal_strength splits RPI.L
+      into RPI + L; pm_parse accepts pure-numeric OCR tokens; unparseable
+      Fidelity option strings stored raw as underlyings) and the backlog
+      printed table contents verbatim. KNOWN_UNCOVERABLE is a blocklist,
+      not a validator ('THIS IS A BAND-AID' - its own comment).
+      Fix per your spec: shape gate (instrument-shaped, must contain a
+      letter - suffixed forms RPI.L/005930.KS/ES_F all pass) then ONE
+      batched yfinance resolution. Unresolvable -> dropped, logged, listed
+      in a labeled line, counted in the head line ('dropped N
+      unresolvable') - never printed in the paste line. Fails OPEN below a
+      60% resolution rate (feed degradation is not evidence against the
+      symbols - same philosophy as the watchlist guard). Applied to the
+      weekly backlog, the on-demand command, AND the nightly to-add (it
+      pastes into MFR too); an all-dropped night notifies instead of
+      going silent.
+      LIVE RESULT: 14 dropped from the real backlog - APPL ATZ BUXXX FIO
+      GLASF MAG7 MORRIS SS WIDEST WTUM + 4 FX pairs (CAD/USD EUR/USD
+      GBP/USD USD/YEN). MORRIS/WIDEST/MAG7/BUXXX/APPL are exactly your
+      malformed class. The FX pairs are real Hedgeye instruments that
+      cannot paste into MFR under those names - if you enroll them by
+      alias, park them in KNOWN_UNCOVERABLE to stop the listing.
+  #5a BACKLOG HELD-TAGGING (tools/enrollment.py)
+      Tagged, not excluded - a held name absent from MFR still needs
+      enrollment for coverage. Same fill math as CANDIDATES
+      (position_targets.compute_fills): tagged inline 'ICOP(bk,pa,ps,held
+      133%fill)' plus a summary line 'already held (sized positions, not
+      new ideas): IAUI(91%fill) ICOP(133%fill) JEDI(66%fill) TBT(11%fill)'.
+      Paste line unchanged (held names still belong in MFR enrollment).
+
+TESTS
+  8 new tests in test_mfr_backlog_guard.py (shape gate, quote gate,
+  fail-open floor, held tagging, paste-line purity, wiring assertions).
+  Suites run clean: mfr_backlog_guard, screener, report_v4, eod_stat_pack,
+  quad_tape, book_alerts, book_direction, position_targets,
+  trading_calendar, weekend, side_blocks, report_now, staleness_guard.
+  One pre-existing stub in test_eod_stat_pack fed a datetime where
+  bot_state holds text; last_quad_confirm accepts both.
+
+SECOND PASS (same day) - responses to the four review notes
+  NOTE 1 (QUAD layer): the write IS landing - verified both paths in the
+    live DB. Every 'QUAD:' set appended a same-day quad_regime_history row
+    (8/02, 7/31, 7/25, 7/21, all source=manual_telegram); the OK reply
+    stamped bot_state.quad_last_confirmed_at=2026-08-17. The staleness was
+    purely read-side: the header read ONLY history, which gains rows only
+    on value changes. The fix is read-side arbitration (later of the two
+    stores), not parse hardening. Caveat worth knowing: quad_confirm counts
+    an OK only while a ping is pending - an unsolicited OK is deliberately
+    ignored - and the 8/23 ping is currently unanswered.
+  NOTE 2 (bundling): new test_hdg_read_paths.py - 10 tests, three
+    independent sections (A: QUAD arbitration incl. stubbed set-command and
+    OK-newer cases; B: band overlay; C: OutBucket trend), so a regression
+    names the exact issue. The design asymmetry is itself asserted: bands
+    carry a 7-day freshness bound, trend deliberately carries none.
+  NOTE 3 (#5b untouched?): it was implemented in the first pass -
+    tools/enrollment.py +210 lines is the validation gate; live run dropped
+    the 14 garbage names (MORRIS WIDEST MAG7 BUXXX APPL ...) with the count
+    in the head line. See the #5b section above and the 8 first-pass tests.
+  NOTE 4 (labeling vs normalizing): the live-vs-prior-close theory was
+    REFUTED, not confirmed - neither output pulls live vol; both read the
+    same frozen vol_regime_daily table, and the report's 'live-looking'
+    8/21 numbers were a Thursday-evening row mislabeled by a UTC wall-clock
+    date stamp. The divergence was a phantom, not information, which is why
+    the anchor was unified. Per the note, the anchor is now EXPLICIT in
+    both outputs anyway - regime_line prints
+    '(anchor: 2026-08-21 session close - stored daily rows, not live)'
+    so nobody has to re-derive this. If a genuinely-live vol view is
+    wanted, that is a new feature (report_now has live prices but no vol
+    block today).
+
+ACCEPTANCE TESTS - all run, results
+  QUAD confirm current-after-set ... PASS (set path appends NOW() row,
+    header reads it; arbitration unit-tested both directions)
+  hdg overwrite spot checks ........ MSFT 474/510 hdg PASS - XLV 168/176
+    hdg PASS - SPX 7610/7835 stored correctly in hedgeye_risk_ranges but
+    SPX is not in the v_screener universe (ticker_tags UNION held book, by
+    design), so no view row exists to display it
+  OutBucket trend gate ............. ALL 10 PASS (XLU BEAR, XLF/XLE/XLK/
+    XLRE/XLP BULL, XAR/ORCL BEAR, XLY/URA NEUT); XLU(S) no longer flagged
+  Dollar same-session rp ........... PASS - DOLLAR+BONDS now prices the
+    five proxies LIVE against the stored (hdg-overlaid) band per build,
+    unclamped so a band break prints rp<0/>1 the session it happens; line
+    is labeled '(live px vs stored bands)' with a fallback label when the
+    live fetch fails. Plus the authoritative USD:hdg entry from pass one.
+  Yields current-session ........... PASS (RATES: 2Y 4.17% / 10Y 4.74%,
+    yf-stamped 2026-08-21 = last completed session, no FRED)
+  Backlog .......................... PASS all three clauses (zero
+    unresolvable printed; 'dropped 14 unresolvable' in head line; held
+    tagged 'held N%fill' matching CANDIDATES)
+  Vol anchor labels ................ PASS - both outputs, explicit
+    '(anchor: <date> session close - stored daily rows, not live)'
+
+NOT DONE / YOUR CALL
+  - Deploy: code fixes are inert on Railway until commit + railway up.
+  - FRED_API_KEY whitespace on Railway: untouched (env change, flagged
+    out-of-scope). Only tools/eod_stat_pack.py reads it today.
+  - hdg upper-bound inflation (MSFT/AMZN/NVDA): NOT investigated per the
+    brief - but note the hierarchy fix WIDENS its blast radius: hdg bands
+    now win wherever fresh, so inflated uppers now depress rp in the
+    report too, not just decision_engine. Worth pulling forward.
+  - Fill% per-account vs total AUM, Fidelity same-session fill lag:
+    untouched.
+  - vol_regime_daily freeze-on-first-write + instrument flip: reported
+    above, untouched.
