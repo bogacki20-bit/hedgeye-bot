@@ -237,9 +237,16 @@ if __name__ == "__main__":
                         # fact row per index per day. Guarded; loud in the log.
                         try:
                             from tools.vol_regime import write_for_date, regime_line
-                            from datetime import datetime as _dtm, timezone as _tz
-                            vs = write_for_date(_dtm.now(_tz.utc).date())   # UTC: one row per index per day
-                            log.info("vol_regime: %s â€” %s", vs, regime_line())
+                            from tools.trading_calendar import last_completed_session
+                            # Label the row with the ET session the data belongs
+                            # to. This loop fires ~00:02 UTC = ~20:02 ET, so the
+                            # UTC date is one calendar day AHEAD of the session
+                            # whose snapshots are being classified — rows were
+                            # landing under tomorrow's date and the report's
+                            # "as-of" read served them as tomorrow's regime.
+                            _sess = last_completed_session()
+                            vs = write_for_date(_sess)
+                            log.info("vol_regime: %s â€” %s", vs, regime_line(_sess))
                         except Exception as e:
                             log.warning("vol_regime nightly write failed: %s", e)
                         # EOD REPORT row (queue 4): stored snapshots ARE the

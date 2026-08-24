@@ -562,15 +562,44 @@ WITH mem AS (SELECT DISTINCT unnest(%(members)s::text[]) AS ticker),
                (full_payload->>'ivpd')::numeric AS ivpd
         FROM mfr_snapshots WHERE ticker = ANY(%(members)s)
         ORDER BY ticker, snapshot_date DESC),
-     hedgeye_trend AS (
-        SELECT DISTINCT ON (ticker) ticker, trend FROM hedgeye_risk_ranges
+     hedgeye_rr AS (
+        SELECT DISTINCT ON (ticker) ticker, trend, buy_trade, sell_trade, signal_date
+        FROM hedgeye_risk_ranges
         WHERE ticker = ANY(%(members)s) ORDER BY ticker, signal_date DESC),
+     hedgeye_chg AS (
+        SELECT DISTINCT ON (ticker) ticker, new_state AS trend, signal_date
+        FROM hedgeye_signal_changes
+        WHERE ticker = ANY(%(members)s)
+          AND change_type IN ('out_bucket', 'trend_change')
+          AND new_state IN ('BULLISH', 'BEARISH', 'NEUTRAL')
+        ORDER BY ticker, signal_date DESC, parsed_at DESC),
+     hedgeye_trend AS (
+        -- Newest wins across the active RR table and the OutBucket/change
+        -- feed. A name parked in the #OutBucket stops appearing in the main
+        -- table, so its last main-table row must NOT be served forever —
+        -- the out_bucket/trend_change row is the live tag (migration 077).
+        SELECT ticker,
+               CASE WHEN ch.signal_date IS NOT NULL
+                     AND (rr.signal_date IS NULL OR ch.signal_date >= rr.signal_date)
+                    THEN ch.trend ELSE rr.trend END AS trend
+        FROM hedgeye_rr rr
+        FULL OUTER JOIN hedgeye_chg ch USING (ticker)),
+     hdg_band AS (
+        -- Source hierarchy: a FRESH hdg band overrides mfr. Stale hdg bands
+        -- (name left the rotation) fall back to mfr instead of freezing.
+        SELECT ticker, buy_trade AS range_low, sell_trade AS range_high
+        FROM hedgeye_rr
+        WHERE buy_trade IS NOT NULL AND sell_trade IS NOT NULL
+          AND sell_trade > buy_trade
+          AND signal_date >= CURRENT_DATE - 7),
      held AS (
         SELECT DISTINCT underlying AS ticker FROM book_positions
         WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
           AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0)
 SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
-       (lm.price - lm.range_low) / NULLIF(lm.range_high - lm.range_low, 0) AS range_pos,
+       (lm.price - COALESCE(hb.range_low, lm.range_low))
+         / NULLIF(COALESCE(hb.range_high, lm.range_high)
+                  - COALESCE(hb.range_low, lm.range_low), 0) AS range_pos,
        (lm.momentum_signal = 'momentumBullish') AS momentum_ok,
        CASE lm.momentum_signal WHEN 'momentumBullish' THEN 'BULLISH'
             WHEN 'momentumBearish' THEN 'BEARISH' WHEN 'momentumNeutral' THEN 'NEUTRAL'
@@ -582,6 +611,8 @@ SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
             WHEN 'trendBearish' THEN 'BEARISH' WHEN 'trendNeutral' THEN 'NEUTRAL' END) AS trend_dir,
        CASE WHEN ht.trend IS NOT NULL THEN 'hedgeye'
             WHEN lm.trend_signal IN ('trendBullish','trendBearish','trendNeutral') THEN 'mfr' END AS trend_source,
+       CASE WHEN hb.ticker IS NOT NULL THEN 'hdg'
+            WHEN lm.range_low IS NOT NULL THEN 'mfr' END AS band_source,
        (h.ticker IS NOT NULL) AS held,
        (lm.range_low IS NOT NULL) AS has_range,
        tt.gics_sector, tt.hedgeye_group
@@ -589,6 +620,7 @@ FROM mem m
 LEFT JOIN ticker_tags    tt ON tt.ticker = m.ticker
 LEFT JOIN latest_mfr     lm ON lm.ticker = m.ticker
 LEFT JOIN hedgeye_trend  ht ON ht.ticker = m.ticker
+LEFT JOIN hdg_band       hb ON hb.ticker = m.ticker
 LEFT JOIN held           h  ON h.ticker  = m.ticker
 """
 

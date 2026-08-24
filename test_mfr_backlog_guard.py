@@ -512,6 +512,109 @@ def test_tags_never_contaminate_the_paste_line():
 
 
 
+# ───────────────── symbol validation gate (2026-08-23 malformed-ticker fix) ─
+# History: the backlog emitted garbage strings (MORRIS, WIDEST, MAG7, BUXXX,
+# APPL) — upstream parser artifacts stored in roster tables and passed through
+# verbatim. The gate: shape check, then a live-quote probe; dropped symbols are
+# counted in the head line and listed, never printed in the paste line. The
+# probe is injected here so these tests stay offline.
+
+def _validate_with_probe(symbols, probe):
+    from tools import enrollment as e
+    orig = e._live_quote_probe
+    e._live_quote_probe = probe
+    try:
+        return e.validate_backlog_symbols(symbols)
+    finally:
+        e._live_quote_probe = orig
+
+
+def test_malformed_symbols_are_shape_dropped_before_any_quote_call():
+    calls = []
+    def probe(syms):
+        calls.append(sorted(syms))
+        return set(syms)
+    r = _validate_with_probe(
+        ["AAPL", "100.00", "2513", "USD/YEN", "-XLV260717C230", "MSFT"], probe)
+    assert r["kept"] == ["AAPL", "MSFT"], r
+    assert sorted(r["dropped_shape"]) == ["-XLV260717C230", "100.00", "2513",
+                                          "USD/YEN"]
+    assert calls == [["AAPL", "MSFT"]], "shape-dropped names must not be quoted"
+
+
+def test_suffixed_and_futures_forms_pass_the_shape_gate():
+    from tools.enrollment import _symbol_shape_ok
+    for good in ("RPI.L", "005930.KS", "1913.HK", "ADS.DE", "VOLV-B.ST",
+                 "ES_F", "FESB_F", "BRK-B"):
+        assert _symbol_shape_ok(good), good
+    for bad in ("2513", "100.00", "USD/YEN", "", "-XLV260717C230",
+                "TOOLONGNAME.XX"):
+        assert not _symbol_shape_ok(bad), bad
+
+
+def test_unresolvable_symbols_are_dropped_and_listed():
+    r = _validate_with_probe(["AAPL", "MORRIS", "WIDEST", "MSFT", "MAG7",
+                              "GOOG", "AMZN", "NVDA", "META", "TSLA"],
+                             lambda syms: set(syms) - {"MORRIS", "WIDEST",
+                                                       "MAG7"})
+    assert "MORRIS" not in r["kept"] and "MAG7" not in r["kept"]
+    assert sorted(r["dropped_quote"]) == ["MAG7", "MORRIS", "WIDEST"]
+    assert r["note"] == ""
+
+
+def test_quote_gate_fails_open_when_the_feed_is_degraded():
+    """Resolving under QUOTE_RATE_FLOOR means the FEED is broken, not the
+    symbols — dropping half the backlog on a rate-limit would be the same
+    confident lie the watchlist guard exists to prevent."""
+    r = _validate_with_probe(["AAPL", "MSFT", "GOOG", "AMZN", "NVDA"],
+                             lambda syms: {"AAPL"})   # 20% < floor
+    assert sorted(r["kept"]) == ["AAPL", "AMZN", "GOOG", "MSFT", "NVDA"]
+    assert r["dropped_quote"] == []
+    assert "FAILED OPEN" in r["note"]
+
+
+def test_probe_exception_fails_open_with_a_note():
+    def probe(syms):
+        raise RuntimeError("rate limited")
+    r = _validate_with_probe(["AAPL", "MSFT"], probe)
+    assert r["kept"] == ["AAPL", "MSFT"]
+    assert "rate limited" in r["note"]
+
+
+def test_held_names_are_tagged_with_fill_in_the_tagged_view():
+    out = tagged_list(["AAPL", "PANW"], {"keiths": {"AAPL", "PANW"}},
+                      held_fills={"PANW": 53.4})
+    assert "PANW(kt,held 53%fill)" in out, out
+    assert "AAPL(kt)" in out
+    # held with unknown fill still marked, never crashes
+    out = tagged_list(["PANW"], {}, held_fills={"PANW": None})
+    assert "PANW(?,held)" in out, out
+
+
+def test_dropped_symbols_never_reach_the_paste_line():
+    """compile_backlog paste line = kept only; the dropped list is a separate
+    labeled line plus a count in the head line."""
+    src = _src("tools/enrollment.py")
+    assert "dropped {len(dropped)} " in src or "dropped {len(dropped)}" in src \
+        or "dropped " in src.split("def handle_backlog_command")[1].split(
+            "── paste this line")[0], "head line must carry the dropped count"
+    body = src.split("def handle_backlog_command")[1]
+    assert "_validation_lines" in body, \
+        "backlog command must render the dropped/held evidence lines"
+    wk = src.split("def run_weekly_backlog")[1].split("def handle_backlog")[0]
+    assert "_validation_lines" in wk, "weekly sweep must render them too"
+
+
+def test_compile_backlog_routes_through_the_validation_gate():
+    src = _src("tools/enrollment.py")
+    body = src.split("def compile_backlog")[1].split("def run_weekly_backlog")[0]
+    assert "validate_backlog_symbols" in body
+    assert "held_fill_map" in body
+    nightly = src.split("def compile_to_add")[1].split("def run_nightly")[0]
+    assert "validate_backlog_symbols" in nightly, \
+        "the nightly to-add pastes into MFR too — same gate"
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0

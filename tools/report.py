@@ -38,18 +38,71 @@ _MACRO = ["UUP", "TLT", "SHY", "LQD", "HYG"]
 
 
 def _rp_series(cur, tickers, days=10) -> dict:
-    """{ticker: [(date, rp, lo, hi), ...] ascending} computed in Python."""
+    """{ticker: [(date, rp, lo, hi), ...] ascending} computed in Python.
+
+    Source hierarchy: a Hedgeye risk range published for the same session
+    overrides the MFR band for that date (same per-date join keith_pattern
+    uses). The join predicate guarantees both hdg bounds are present and
+    ordered, so the COALESCE pair can never mix feeds."""
     cur.execute(
-        """SELECT ticker, snapshot_date, price, range_low, range_high
-           FROM mfr_snapshots
-           WHERE ticker = ANY(%s) AND snapshot_date >= CURRENT_DATE - %s
-           ORDER BY ticker, snapshot_date""", (tickers, days))
+        """SELECT m.ticker, m.snapshot_date, m.price,
+                  COALESCE(r.buy_trade,  m.range_low)  AS range_low,
+                  COALESCE(r.sell_trade, m.range_high) AS range_high
+           FROM mfr_snapshots m
+           LEFT JOIN hedgeye_risk_ranges r
+                  ON r.ticker = m.ticker AND r.signal_date = m.snapshot_date
+                 AND r.buy_trade IS NOT NULL AND r.sell_trade IS NOT NULL
+                 AND r.sell_trade > r.buy_trade
+           WHERE m.ticker = ANY(%s) AND m.snapshot_date >= CURRENT_DATE - %s
+           ORDER BY m.ticker, m.snapshot_date""", (tickers, days))
     out: dict = {}
     for t, d, px, lo, hi in cur.fetchall():
         if px is None or lo is None or hi is None or float(hi) <= float(lo):
             continue
         rp = (float(px) - float(lo)) / (float(hi) - float(lo))
         out.setdefault(t, []).append((d, round(rp, 3), float(lo), float(hi)))
+    return out
+
+
+def _hdg_latest(cur, ticker, max_age_days=7):
+    """Latest FRESH hedgeye_risk_ranges row for a non-ETF instrument the MFR
+    feed can't proxy (USD index, UST yields). Returns
+    (signal_date, trend, low, high, prev_close) or None."""
+    cur.execute(
+        """SELECT signal_date, trend, buy_trade, sell_trade, prev_close
+           FROM hedgeye_risk_ranges
+           WHERE ticker = %s AND buy_trade IS NOT NULL
+             AND sell_trade IS NOT NULL AND sell_trade > buy_trade
+             AND signal_date >= CURRENT_DATE - %s
+           ORDER BY signal_date DESC LIMIT 1""", (ticker, max_age_days))
+    return cur.fetchone()
+
+
+# Live yields for the RATES line. yfinance, not FRED — FRED lags ~2 sessions
+# (the stat pack documents that lag; the report wants the tape). ^IRX is NOT
+# the 2Y (13-week bill, ~50bp off); 2YY=F is the CBOT 2Y yield future and
+# tracks the actual 2Y.
+_YIELD_SYMBOLS = [("2Y", "2YY=F"), ("10Y", "^TNX")]
+
+
+def _live_yields():
+    """[(label, yield_pct, bar_date_str), ...] — last daily close per symbol,
+    stamped with its own bar date so a pre-market build reads honestly as the
+    prior close rather than claiming a live print. Failures drop the symbol."""
+    out = []
+    try:
+        import yfinance as yf
+    except Exception:
+        return out
+    for label, sym in _YIELD_SYMBOLS:
+        try:
+            h = yf.Ticker(sym).history(period="5d", interval="1d")
+            if h is None or h.empty:
+                continue
+            out.append((label, float(h["Close"].iloc[-1]),
+                        str(h.index[-1])[:10]))
+        except Exception:
+            continue
     return out
 
 
@@ -378,16 +431,24 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
                          f"figure below as unverified.")
         delta_idx = len(lines)          # Δ line inserted here after assembly
         try:
+            from tools.quad_regime import last_quad_confirm, market_date
             mq, qq = _quad_for(cur, today)
-            cur.execute("SELECT max(effective_at) FROM quad_regime_history")
-            conf = cur.fetchone()[0]
+            conf = last_quad_confirm(cur)
+            conf_d = market_date(conf)
             lines.append(f"QUAD: monthly={mq or '?'} quarterly={qq or '?'} "
-                         f"(last confirm {str(conf)[:10] if conf else 'NONE'})")
+                         f"(last confirm {conf_d if conf_d else 'NONE'})")
         except Exception as e:
             lines.append(f"QUAD: unavailable ({e})")
         try:
+            # Session-anchored, matching the EOD stat pack. regime_line() with
+            # no argument resolves date.today() — UTC on Railway — which read
+            # the vol_regime_daily row for a session that had not happened yet
+            # (built from the PRIOR evening's data, labelled a day ahead). The
+            # two outputs then printed different bands for the same instruments
+            # on the same date.
             from tools.vol_regime import regime_line
-            lines.append(regime_line())
+            from tools.trading_calendar import last_completed_session
+            lines.append(regime_line(last_completed_session()))
         except Exception as e:
             lines.append(f"VOL: unavailable ({e})")
 
@@ -421,18 +482,81 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
                                                 key=lambda kv: -len(kv[1])))
             lines.append("RANGE DYNAMICS (vs 3d — HH/HL asc, LH/LL desc, "
                          "HH/LL widening, LH/HL compressing): " + (rd or "no data"))
+            # Live price against the stored (hdg-overlaid) band, so a break
+            # through the band edge shows the SAME SESSION it happens —
+            # unclamped, rp<0 / rp>1 is the break itself. The stored-snapshot
+            # rp only moved when an email-triggered refresh rewrote the row,
+            # which is how 8/21 printed UUP mid-range on a USD cycle low.
+            live_px, live_used = {}, False
+            try:
+                from tools.report_now import batch_live_prices, live_rp
+                live_px, _miss = batch_live_prices(list(_MACRO))
+            except Exception:
+                pass
             macro = []
             for t in _MACRO:
                 now_rp, past_rp = _now_and_3d(ser.get(t, []))
+                srs = ser.get(t, [])
+                if srs and t in live_px:
+                    lrp = live_rp(live_px[t], srs[-1][2], srs[-1][3])
+                    if lrp is not None:
+                        now_rp, live_used = round(lrp, 3), True
                 if now_rp is None:
                     continue
                 d = (now_rp - past_rp) if past_rp is not None else None
                 macro.append(f"{t}:{now_rp:.2f}"
                              + (f"({'+' if d >= 0 else ''}{d:.2f})"
                                 if d is not None else "(?)"))
-            lines.append("DOLLAR+BONDS: " + (" ".join(macro) or "no data"))
+            # The Hedgeye USD-index range is the authoritative dollar signal;
+            # the UUP/UDN proxies above ride MFR's short-horizon band, which
+            # re-centers on price daily and therefore reads mid-range even
+            # through a cycle-low break (8/21: UUP rp 0.31 while the USD index
+            # sat at rp 0.20 on new cycle lows, BEARISH).
+            usd = _hdg_latest(cur, "USD")
+            if usd:
+                _, utr, ulo, uhi, upc = usd
+                if upc is not None:
+                    urp = (float(upc) - float(ulo)) / (float(uhi) - float(ulo))
+                    macro.append(f"USD:{urp:.2f}·hdg[{float(ulo):g}-"
+                                 f"{float(uhi):g}]{(utr or '?')[:4]}")
+            _db_lbl = ("DOLLAR+BONDS (live px vs stored bands): " if live_used
+                       else "DOLLAR+BONDS (stored close, live px unavailable): ")
+            lines.append(_db_lbl + (" ".join(macro) or "no data"))
         except Exception as e:
             lines.append(f"SECTOR FLOW/RANGE/MACRO: unavailable ({e})")
+
+        # ── rates: live 2Y/10Y (yfinance) against the Hedgeye yield ranges ──
+        # The upload previously carried only proxies (UUP/TLT/SHY/LQD/HYG);
+        # actual yields existed nowhere in it, and the stat pack's are
+        # FRED-sourced two sessions behind.
+        try:
+            parts = []
+            hdg_rr = {t: _hdg_latest(cur, t) for t in ("UST2Y", "UST10Y")}
+            for label, y, bar_d in _live_yields():
+                seg = f"{label} {y:.2f}% (yf {bar_d})"
+                rr = hdg_rr.get(f"UST{label}")
+                if rr:
+                    _, rtr, rlo, rhi, _pc = rr
+                    rrp = (y - float(rlo)) / (float(rhi) - float(rlo))
+                    seg += (f" hdg[{float(rlo):.2f}-{float(rhi):.2f}] "
+                            f"rp={rrp:.2f} {(rtr or '?')[:4]}")
+                parts.append(seg)
+            if not parts:      # yfinance down — fall back to hdg prior close
+                for label in ("2Y", "10Y"):
+                    rr = hdg_rr.get(f"UST{label}")
+                    if rr:
+                        rd, rtr, rlo, rhi, pc = rr
+                        if pc is not None:
+                            parts.append(f"{label} {float(pc):.2f}% "
+                                         f"(hdg-prev {rd}) hdg[{float(rlo):.2f}"
+                                         f"-{float(rhi):.2f}] {(rtr or '?')[:4]}")
+            if parts:
+                lines.append("RATES: " + " · ".join(parts))
+            else:
+                lines.append("RATES: n/a (yfinance and hedgeye ranges both "
+                             "unavailable)")
+        except Exception as e:
+            lines.append(f"RATES: unavailable ({e})")
 
         # ── RS / grid (companion to sector flow) ──
         try:
@@ -672,15 +796,16 @@ def build_report_legacy(kind: str = "on-demand") -> str:
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         # ── header: date · quad (+confirm date) · vol line ──
         today = date.today()
+        from tools.quad_regime import last_quad_confirm, market_date
         mq, qq = _quad_for(cur, today)
-        cur.execute("SELECT max(effective_at) FROM quad_regime_history")
-        conf = cur.fetchone()[0]
+        conf_d = market_date(last_quad_confirm(cur))
         lines.append(f"REPORT {today} [{kind}]")
         lines.append(f"QUAD: monthly={mq or '?'} quarterly={qq or '?'} "
-                     f"(last confirm {str(conf)[:10] if conf else 'NONE'})")
+                     f"(last confirm {conf_d if conf_d else 'NONE'})")
         try:
             from tools.vol_regime import regime_line
-            lines.append(regime_line())
+            from tools.trading_calendar import last_completed_session
+            lines.append(regime_line(last_completed_session()))
         except Exception as e:
             lines.append(f"VOL: unavailable ({e})")
 

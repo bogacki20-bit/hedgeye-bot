@@ -179,6 +179,45 @@ def quad_staleness(effective_at, asof=None) -> dict:
     return out
 
 
+def last_quad_confirm(cur):
+    """The most recent moment a human vouched for the current Quad, from BOTH
+    stores that can hold one.
+
+    A quad confirmation has two write paths that land in different places:
+      * a value change (QUAD:/CONFIRM bridge, set_quads rotation) appends to
+        quad_regime_history.effective_at;
+      * the daily 'OK' reply to the 6am ping stamps ONLY
+        bot_state['quad_last_confirmed_at'] (tools/quad_confirm.py) — it does
+        not append history because the value did not change.
+    Every report header used to read only the first store, so weeks of OK
+    confirmations were invisible and the header decayed to the last VALUE
+    change. 'Last confirm' must mean the later of the two.
+
+    Returns a timestamptz or None. Never raises on a malformed bot_state value
+    — an unparseable stamp falls back to the history timestamp alone.
+    """
+    cur.execute("SELECT max(effective_at) FROM quad_regime_history")
+    hist = cur.fetchone()[0]
+    cur.execute("SELECT value FROM bot_state WHERE key = 'quad_last_confirmed_at'")
+    row = cur.fetchone()
+    val = row[0] if row else None
+    ok = None
+    if isinstance(val, datetime):
+        ok = val
+    elif isinstance(val, str) and val.strip():
+        try:
+            ok = datetime.fromisoformat(val.strip().replace("Z", "+00:00"))
+        except ValueError:
+            ok = None
+    if hist is not None and ok is not None:
+        # Both stores stamp tz-aware (history is TIMESTAMPTZ, quad_confirm
+        # writes an aware isoformat), but guard the naive case anyway.
+        if ok.tzinfo is None:
+            ok = ok.replace(tzinfo=timezone.utc)
+        return max(hist, ok)
+    return hist if hist is not None else ok
+
+
 # ─────────────────────────── canonical read ──────────────────────────
 
 def current_quad_regime() -> dict[str, Optional[str]]:

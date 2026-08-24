@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re as _re
 from datetime import date, datetime
 
 log = logging.getLogger(__name__)
@@ -286,10 +287,14 @@ TAG_LEGEND = ("ep=ETF Pro · ps=PortSol · ii=Ideas · kt=Keith's · ss=SigStr �
               "ha=HedgAI · mo=MOMO · rl=Retail")
 
 
-def tagged_list(backlog, per_source) -> str:
+def tagged_list(backlog, per_source, held_fills=None) -> str:
     """Pure. 'AAPL(rr,pm) BBRE(bk) BEEN(ss)' — every ticker carries the feed(s)
     that put it on the backlog, so an unfamiliar name explains itself in place
     rather than in a separate block.
+
+    held_fills ({ticker: fill_pct_or_None}) appends 'held N%fill' to a name
+    already in the book, so a held position is never read as a new idea —
+    same annotation the report's CANDIDATES block carries.
 
     NOT pasteable — the tags are inside the token. The untagged list is printed
     separately for that; a tagged list pasted into MFR would enroll nothing."""
@@ -297,8 +302,15 @@ def tagged_list(backlog, per_source) -> str:
     for tag, members in (per_source or {}).items():
         for t in members:
             origin.setdefault(t, set()).add(SRC_TAG.get(tag, tag))
-    return " ".join(
-        f"{t}({','.join(sorted(origin.get(t, {'?'})))})" for t in backlog)
+    held_fills = held_fills or {}
+    parts = []
+    for t in backlog:
+        tags = sorted(origin.get(t, {"?"}))
+        if t in held_fills:
+            f = held_fills[t]
+            tags.append(f"held {f:.0f}%fill" if f is not None else "held")
+        parts.append(f"{t}({','.join(tags)})")
+    return " ".join(parts)
 
 
 def origin_summary(backlog, per_source, top=6) -> list:
@@ -372,10 +384,13 @@ def compile_to_add(day=None, force=False) -> dict:
         per_source[src.name] = s
         added |= s
     active = active_watchlist(force=force)
-    to_add = sorted((added - active) - set(KNOWN_UNCOVERABLE))
-    return {"day": str(day), "to_add": to_add,
-            "per_source": {k: sorted(v) for k, v in per_source.items()},
-            "added_count": len(added), "active_count": len(active)}
+    raw = sorted((added - active) - set(KNOWN_UNCOVERABLE))
+    v = validate_backlog_symbols(raw)   # same gate as the backlog — the nightly
+    return {"day": str(day), "to_add": v["kept"],   # paste line feeds MFR too
+            "per_source": {k: sorted(v2) for k, v2 in per_source.items()},
+            "added_count": len(added), "active_count": len(active),
+            "dropped": sorted(v["dropped_shape"] + v["dropped_quote"]),
+            "validation_note": v["note"]}
 
 
 def run_nightly() -> str:
@@ -394,10 +409,27 @@ def run_nightly() -> str:
         _notify_blocked("Nightly MFR to-add", str(e))
         return f"blocked:watchlist-unavailable ({e})"
     if not r["to_add"]:
+        if r.get("dropped"):
+            # Every name today failed validation — that IS the story. Staying
+            # quiet here would make the gate a silent shredder.
+            try:
+                from notifier import send_telegram
+                send_telegram("MFR to-add",
+                              f"🗑 MFR to-add: all {len(r['dropped'])} of "
+                              f"today's names failed validation (malformed or "
+                              f"no live quote): " + " ".join(r["dropped"]),
+                              priority=1)
+            except Exception as e:
+                log.warning("mfr to-add drop notice failed: %s", e)
         _set_state(LAST_SENT_KEY, today)  # mark done so we stay quiet the rest of the night
-        return "skip:nothing-to-add"
+        return ("skip:all-dropped-by-validation" if r.get("dropped")
+                else "skip:nothing-to-add")
     prov = ", ".join(f"{k}={len(v)}" for k, v in r["per_source"].items() if v)
-    msg = (f"🆕 MFR to-add ({len(r['to_add'])}) [{prov}]:\n" + " ".join(r["to_add"])
+    msg = (f"🆕 MFR to-add ({len(r['to_add'])} · dropped "
+           f"{len(r.get('dropped', []))} unresolvable) [{prov}]:\n"
+           + " ".join(r["to_add"])
+           + (("\n🗑 dropped: " + " ".join(r["dropped"])) if r.get("dropped") else "")
+           + ((f"\n⚠️ {r['validation_note']}") if r.get("validation_note") else "")
            + "\n(paste into MFR → Activate Assets)")
     try:
         from notifier import send_telegram
@@ -436,6 +468,139 @@ def _load_seen() -> dict:
         return {}
 
 
+# ─────────────────────────── symbol validation (backlog gate) ───────────────
+# The backlog is a pass-through: whatever the source tables hold is what gets
+# printed, and several upstream parsers can seed garbage (suffix fragments
+# like 'RPI'/'L' from a split on '.', pure-numeric OCR tokens, raw Fidelity
+# option strings stored as underlyings). KNOWN_UNCOVERABLE is a hand-curated
+# band-aid that only blocks garbage AFTER someone saw it. This gate is the
+# structural fix: a symbol prints only if it is shaped like an instrument AND
+# resolves against a live quote source. Dropped symbols are logged and
+# counted in the output — never silently discarded, never printed.
+
+# Instrument shape: 1-7 alnum chars, up to two suffix groups joined by . _ -
+# (RPI.L, 005930.KS, ES_F, VOLV-B.ST), and at least one letter somewhere —
+# a pure-numeric token ('2513', '100.00') is an OCR artifact, not a ticker.
+_SYMBOL_SHAPE_RE = _re.compile(r"^[A-Z0-9]{1,7}(?:[._\-][A-Z0-9]{1,4}){0,2}$")
+
+# Below this fraction of successful quote lookups the feed itself is judged
+# degraded and the quote gate FAILS OPEN (shape gate still applies): dropping
+# half the backlog because yfinance rate-limited us would be a confident lie,
+# the same failure mode the watchlist guard exists to prevent.
+QUOTE_RATE_FLOOR = 0.60
+
+
+def _symbol_shape_ok(t: str) -> bool:
+    return bool(_SYMBOL_SHAPE_RE.match(t)) and bool(_re.search(r"[A-Z]", t))
+
+
+def _yf_symbol_for(t: str) -> str:
+    """Backlog symbol -> yfinance symbol. Uses the shared alias map, plus the
+    stored futures form X_F -> X=F."""
+    try:
+        from yfinance_client import _resolve_yf_symbol
+        s = _resolve_yf_symbol(t)
+    except Exception:
+        s = t
+    if s == t and t.endswith("_F"):
+        s = t[:-2] + "=F"
+    return s
+
+
+def _live_quote_probe(symbols) -> set:
+    """One batched yfinance download; returns the subset of `symbols` that came
+    back with at least one real close. Raises on total feed failure so the
+    caller can fail open. Module-level so tests can monkeypatch it."""
+    import yfinance as yf
+    m = {t: _yf_symbol_for(t) for t in symbols}
+    data = yf.download(sorted(set(m.values())), period="5d", interval="1d",
+                       group_by="ticker", progress=False, threads=True)
+    if data is None or data.empty:
+        raise RuntimeError("yfinance returned no data for the whole batch")
+    ok = set()
+    for t, s in m.items():
+        try:
+            closes = data[s]["Close"] if len(set(m.values())) > 1 else data["Close"]
+            if closes.dropna().shape[0] > 0:
+                ok.add(t)
+        except Exception:
+            pass
+    return ok
+
+
+def validate_backlog_symbols(symbols) -> dict:
+    """Gate a backlog list. Returns {kept, dropped_shape, dropped_quote, note}.
+    note != '' means the quote gate could not run (or was overridden by the
+    degradation floor) and the list is shape-checked only."""
+    kept, dropped_shape = [], []
+    for t in symbols:
+        (kept if _symbol_shape_ok(t) else dropped_shape).append(t)
+    for t in dropped_shape:
+        log.warning("backlog validation: dropped malformed symbol %r", t)
+    dropped_quote, note = [], ""
+    if kept:
+        try:
+            ok = _live_quote_probe(kept)
+            if len(ok) < QUOTE_RATE_FLOOR * len(kept):
+                note = (f"quote feed degraded ({len(ok)}/{len(kept)} resolved) "
+                        f"— quote gate FAILED OPEN, list is shape-checked only")
+                log.warning("backlog validation: %s", note)
+            else:
+                dropped_quote = [t for t in kept if t not in ok]
+                kept = [t for t in kept if t in ok]
+                for t in dropped_quote:
+                    log.warning("backlog validation: dropped unresolvable "
+                                "symbol %r (no live quote)", t)
+        except Exception as e:
+            note = f"live resolution unavailable ({e}) — list is shape-checked only"
+            log.warning("backlog validation: %s", note)
+    return {"kept": kept, "dropped_shape": dropped_shape,
+            "dropped_quote": dropped_quote, "note": note}
+
+
+def _validation_lines(r) -> list:
+    """The dropped/degraded evidence lines both emitters share. Empty list when
+    nothing was dropped and the quote gate ran clean — the count in the head
+    line already says 'dropped 0'."""
+    out = []
+    dropped = r.get("dropped", [])
+    if dropped:
+        out.append("🗑 dropped (not resolvable as instruments — logged, never "
+                   "pasteable): " + " ".join(dropped))
+    if r.get("validation_note"):
+        out.append(f"⚠️ {r['validation_note']}")
+    hf = r.get("held_fills") or {}
+    if hf:
+        out.append("📗 already held (sized positions, not new ideas): "
+                   + " ".join(f"{t}({hf[t]:.0f}%fill)" if hf[t] is not None
+                              else t for t in sorted(hf)))
+    return out
+
+
+def held_fill_map(tickers) -> dict:
+    """{ticker: fill_pct_or_None} for the subset of `tickers` currently in the
+    book (latest Fidelity snapshot = source of truth). Same fill math as the
+    report's CANDIDATES block (tools.position_targets.compute_fills). Never
+    raises — an unreadable book yields {} and the backlog goes out untagged
+    rather than not at all."""
+    if not tickers:
+        return {}
+    try:
+        import db_pg
+        from tools.book_direction import book_sides
+        from tools.position_targets import compute_fills
+        sides = book_sides()
+        want = set(tickers) & set(sides)
+        if not want:
+            return {}
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            agg = compute_fills(cur, sides).get("agg", {})
+        return {t: (agg.get(t) or {}).get("fill") for t in want}
+    except Exception as e:
+        log.warning("backlog held-fill lookup failed: %s", e)
+        return {}
+
+
 def compile_backlog(force=False) -> dict:
     """ALL current members across EVERY signal source (tools.source_registry:
     etfpro / portsol / ideas / keiths / sigstr / posmon / book) that are NOT active in
@@ -457,10 +622,15 @@ def compile_backlog(force=False) -> dict:
     fu = enrollment_universe()
     full = fu["universe"]
     active = active_watchlist(force=force)
-    to_add = sorted((full - active) - set(KNOWN_UNCOVERABLE) - set(PARKED_FOR_SOURCE))
+    raw = sorted((full - active) - set(KNOWN_UNCOVERABLE) - set(PARKED_FOR_SOURCE))
+    v = validate_backlog_symbols(raw)
+    to_add = v["kept"]
     return {"to_add": to_add, "per_source": fu["per_source"],
             "full_count": len(full), "active_count": len(active),
-            "forced": bool(force)}
+            "forced": bool(force),
+            "dropped": sorted(v["dropped_shape"] + v["dropped_quote"]),
+            "validation_note": v["note"],
+            "held_fills": held_fill_map(to_add)}
 
 
 def run_weekly_backlog() -> str:
@@ -487,9 +657,13 @@ def run_weekly_backlog() -> str:
         return "skip:backlog-clear"
     persisted = [t for t in to_add if new_seen[t] >= PERSIST_WEEKS]
     lines = [f"🧹 MFR backlog ({len(to_add)} of {r['full_count']} universe · "
-             f"{r['active_count']} already active) — roster names not yet active:",
-             tagged_list(to_add, r["per_source"]), TAG_LEGEND]
+             f"{r['active_count']} already active · dropped "
+             f"{len(r.get('dropped', []))} unresolvable) — roster names not "
+             f"yet active:",
+             tagged_list(to_add, r["per_source"], r.get("held_fills")),
+             TAG_LEGEND]
     lines += origin_summary(to_add, r["per_source"])
+    lines += _validation_lines(r)
     lines.append("── paste this line (no tags) ──")
     lines.append(" ".join(to_add))          # COMPLETE list — the paste target
     if persisted:
@@ -591,19 +765,25 @@ def handle_backlog_command(text: str):
                 + dark_footer())
     seen = _load_seen()
     persisted = [t for t in to_add if int(seen.get(t, 0)) >= PERSIST_WEEKS]
+    dropped = r.get("dropped", [])
     head = (f"🧹 MFR backlog ({len(to_add)} of {r['full_count']} universe · "
-            f"{r['active_count']} already active)"
+            f"{r['active_count']} already active · dropped {len(dropped)} "
+            f"unresolvable)"
             + (" ⚠FORCED — guard bypassed" if force else ""))
     if why:
         # Detail view: names per feed. Lossy above the per-group cap, so it does
         # NOT claim to be a paste list — plain MFR BACKLOG is.
         lines = [head + " — which feed put each name here:"]
         lines += provenance_lines(to_add, r["per_source"])
+        lines += _validation_lines(r)
         lines.append("(explanatory view — paste from plain MFR BACKLOG, "
                      "which prints the complete list)")
         return "\n".join(lines) + dark_footer()
-    lines = [head + ":", tagged_list(to_add, r["per_source"]), TAG_LEGEND]
+    lines = [head + ":",
+             tagged_list(to_add, r["per_source"], r.get("held_fills")),
+             TAG_LEGEND]
     lines += origin_summary(to_add, r["per_source"])
+    lines += _validation_lines(r)
     lines.append("── paste this line (no tags) ──")
     lines.append(" ".join(to_add))          # COMPLETE list — the paste target
     if persisted:

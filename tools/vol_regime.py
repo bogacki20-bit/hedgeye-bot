@@ -201,10 +201,17 @@ def regime_line(d: date | None = None) -> str:
         rng = f" [{float(range_low):.1f}-{float(range_high):.1f}]" if (range_low is not None and range_high is not None) else ""
         rp_s = f" rp={float(rp):.2f}" if rp is not None else ""
         parts.append(f"{name} {lvl}{rng}{rp_s} {short.get(tr,'?')} {ph}")
-    # State which regime rows were used. Without this, a phase that changes
-    # while price/range/rp stay identical is unexplainable from the output.
+    # State which regime rows were used AND what the anchor is. Without the
+    # date, a phase that changes while price/range/rp stay identical is
+    # unexplainable from the output. Without the anchor semantics, a reader
+    # cannot tell whether these are live prints or session-close facts —
+    # 2026-08-23: the report and the stat pack printed different VIX bands
+    # for the same date and it took a write-path audit to establish that
+    # NEITHER was live (both read this frozen daily table; one was anchored
+    # on the wall clock). The label now says so explicitly in every output.
     used = sorted({str(r[7]) for r in rows if len(r) > 7 and r[7]})
-    stamp = (" (regime as-of %s)" % ", ".join(used)) if used else ""
+    stamp = ((" (anchor: %s session close — stored daily rows, not live)"
+              % ", ".join(used)) if used else "")
     return "VOL: " + " · ".join(parts) + stamp
 
 

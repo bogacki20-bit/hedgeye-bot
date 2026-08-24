@@ -565,12 +565,12 @@ def _header(asof=None) -> tuple[list, str | None, bool]:
     try:
         import db_pg
         from tools.ps_flow import _quad_for
-        from tools.quad_regime import quad_staleness, today_market
+        from tools.quad_regime import (quad_staleness, today_market,
+                                       last_quad_confirm)
         today = today_market()
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             _mq, qq = _quad_for(cur, today)
-            cur.execute("SELECT max(effective_at) FROM quad_regime_history")
-            conf = cur.fetchone()[0]
+            conf = last_quad_confirm(cur)
         st = quad_staleness(conf, today)
         lines.append(f"QUAD: monthly={_mq or '?'} quarterly={qq or '?'} "
                      f"(last confirm {st['confirmed_on'] or 'NONE'})")
