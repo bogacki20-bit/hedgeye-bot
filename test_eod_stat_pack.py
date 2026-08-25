@@ -667,6 +667,22 @@ def test_split_pack_splits_at_block_boundaries_and_loses_nothing():
         "a pack under the cap must ship as one file"
 
 
+def test_dirty_tree_stamp_true_dirty_false_clean():
+    """079 regression: a dirty tree records True (with the tracked count), a
+    clean tree records False, and an unanswerable git records None/None —
+    NULL is 'could not have known', never a guessed False."""
+    from tools.eod_stat_pack import tree_state_from_porcelain as ts
+    assert ts("", "") == (False, 0), "clean tree -> (False, 0)"
+    assert ts(" M tools/pm_parse.py\n?? scratch.py\n",
+              " M tools/pm_parse.py\n") == (True, 1)
+    # untracked-only dirt is still dirt (untracked .py can be load-bearing),
+    # but the tracked count says zero tracked modifications
+    assert ts("?? tools/rs_corr.py\n", "") == (True, 0)
+    assert ts(None, None) == (None, None), "git unavailable -> NULL, not False"
+    assert ts(" M a.py\n M b.py\n M c.py\n", " M a.py\n M b.py\n M c.py\n") \
+        == (True, 3)
+
+
 def test_blocked_pack_persists_exactly_once():
     """D8 regression: the blocked path used to have _persist_pack AFTER a
     return (unreachable, `blocked` undefined) — a blocked run was never

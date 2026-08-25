@@ -1099,10 +1099,54 @@ def _deployed_sha() -> str | None:
         return None
 
 
+def tree_state_from_porcelain(full_out, tracked_out) -> tuple:
+    """Pure. (dirty_tree, dirty_tracked_n) from the outputs of
+    `git status --porcelain` and `git status --porcelain --untracked-files=no`.
+
+    Empty full output = CLEAN. Untracked files count as dirty on purpose:
+    untracked .py files in this repo are imported by running code (tools/
+    rs_corr.py was load-bearing while untracked), so "no tracked mods" is not
+    "the commit is what ran". The tracked count separates the two cases."""
+    if full_out is None:
+        return None, None
+    dirty = bool(full_out.strip())
+    if tracked_out is None:
+        return dirty, None
+    n = len([ln for ln in tracked_out.splitlines() if ln.strip()])
+    return dirty, n
+
+
+def _tree_state() -> tuple:
+    """(dirty_tree, dirty_tracked_n) of the tree this process runs from, or
+    (None, None) when git cannot answer — NULL means 'could not have known',
+    the same value every pre-079 row carries. Never raises."""
+    import subprocess
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        full = subprocess.run(["git", "status", "--porcelain"],
+                              capture_output=True, text=True, timeout=10,
+                              cwd=repo)
+        tracked = subprocess.run(["git", "status", "--porcelain",
+                                  "--untracked-files=no"],
+                                 capture_output=True, text=True, timeout=10,
+                                 cwd=repo)
+        return tree_state_from_porcelain(
+            full.stdout if full.returncode == 0 else None,
+            tracked.stdout if tracked.returncode == 0 else None)
+    except Exception:
+        return None, None
+
+
 def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
     """Retain the artifact. NEVER raises: a failure to archive must not stop
     the pack being delivered. Logs loudly instead, because an unarchived run is
-    an undiagnosable one."""
+    an undiagnosable one.
+
+    dirty_tree (079): whether the WORKING TREE differed from HEAD at build
+    time. The sha alone cannot say that — a pack built from a dirty tree
+    stamps a clean-looking sha (the 2026-08-25 audit found eight such packs,
+    all classified ON-MASTER)."""
+    dirty, dirty_n = _tree_state()
     try:
         import db_pg
         with db_pg.get_conn() as c:
@@ -1110,14 +1154,15 @@ def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
             cur.execute(
                 """INSERT INTO eod_pack_artifacts
                    (built_at_et, last_bar_date, bar_date_valid, block_reason,
-                    deployed_sha, symbols_ok, symbols_total, body)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    deployed_sha, symbols_ok, symbols_total, body,
+                    dirty_tree, dirty_tracked_n)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (built_et, last_bar, valid, block_reason, _deployed_sha(),
-                 ok_n, total_n, body))
+                 ok_n, total_n, body, dirty, dirty_n))
             rid = cur.fetchone()[0]
             c.commit()
-        log.info("eod pack archived as artifact %s (bar %s, valid=%s)",
-                 rid, last_bar, valid)
+        log.info("eod pack archived as artifact %s (bar %s, valid=%s, "
+                 "dirty_tree=%s)", rid, last_bar, valid, dirty)
         return rid
     except Exception as e:
         log.error("EOD PACK NOT ARCHIVED (%s) — this run will be "
