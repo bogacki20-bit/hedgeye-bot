@@ -583,6 +583,126 @@ def test_build_eod_pack_threads_staleness_into_the_section():
         "quad_tape_block must receive _header's flag, not a literal"
 
 
+# ───────────────── the macro grind (D1-D6, 2026-08-24) ─────────────────────
+
+from tools.eod_stat_pack import (COMMODITIES, CRYPTO, DOLLAR_FX,   # noqa: E402
+                                 DURATION_CREDIT, GROUP_COLS, INTERNATIONAL,
+                                 MACRO_GROUPS, SPLIT_AT, SUB_INDUSTRY,
+                                 format_group_block, full_returns_row,
+                                 relative_row, split_pack)
+
+
+def _block_asserts(title, symbols, bench):
+    """A missing symbol renders n/a (never 0.0), never disappears, and the
+    coverage footer counts only symbols with at least one real number."""
+    rows = [(s, {}, None) for s in symbols]           # nothing has bars
+    rows[0] = (symbols[0], {"1D": 0.012}, {c: None for c in GROUP_COLS}
+               if bench else None)                    # exactly one covered
+    out = format_group_block(title, rows, bench)
+    for s in symbols:
+        assert s in out, f"{title}: {s} vanished from its own block"
+    line0 = next(ln for ln in out.split("\n") if ln.startswith(symbols[1]))
+    assert "n/a" in line0 and "+0.0%" not in line0, \
+        f"{title}: a missing symbol must read n/a, never 0.0: {line0!r}"
+    assert f"coverage: 1/{len(symbols)} symbols" in out, out.split("\n")[-1]
+
+
+def test_commodities_block_missing_symbol_is_na():
+    _block_asserts("COMMODITIES", COMMODITIES, "DBC")
+
+
+def test_crypto_block_missing_symbol_is_na():
+    _block_asserts("CRYPTO", CRYPTO, None)
+
+
+def test_dollar_fx_block_missing_symbol_is_na():
+    _block_asserts("DOLLAR + FX", DOLLAR_FX, "UUP")
+
+
+def test_international_block_missing_symbol_is_na():
+    _block_asserts("INTERNATIONAL", INTERNATIONAL, "SPY")
+
+
+def test_duration_credit_block_missing_symbol_is_na():
+    _block_asserts("DURATION + CREDIT", DURATION_CREDIT, None)
+
+
+def test_sub_industry_block_missing_symbol_is_na():
+    _block_asserts("SUB-INDUSTRY + THEME", SUB_INDUSTRY, "SPY")
+
+
+def test_whole_block_missing_still_renders():
+    """An entire ticker list with no bars must still produce a block (every
+    row n/a, coverage 0/N) — the pack assembles around it rather than dying."""
+    for title, syms, bench, _ in MACRO_GROUPS:
+        out = format_group_block(title, [(s, {}, None) for s in syms], bench)
+        assert f"coverage: 0/{len(syms)} symbols" in out, title
+        assert "0.0" not in out, f"{title}: phantom zeros in an empty block"
+
+
+def test_full_returns_row_has_the_group_columns():
+    row = full_returns_row([], [])
+    assert set(GROUP_COLS) <= set(row), row.keys()
+    assert all(row[c] is None for c in GROUP_COLS), \
+        "no bars must mean None everywhere, never 0.0"
+
+
+def test_relative_row_drops_a_leg_rather_than_guessing():
+    ab = {c: 0.02 for c in GROUP_COLS}
+    bench = dict(ab, **{"1W": None})
+    rel = relative_row(ab, bench)
+    assert rel["1D"] == 0.0 and rel["1W"] is None
+
+
+def test_split_pack_splits_at_block_boundaries_and_loses_nothing():
+    blocks = [f"BLOCK {i}\n" + ("x" * 9_000) for i in range(6)]
+    body = "\n\n".join(blocks)
+    parts = split_pack(body, cap=20_000)
+    assert len(parts) >= 2
+    assert all(len(p) <= 20_000 for p in parts)
+    assert "\n\n".join(parts) == body, "a split must lose nothing"
+    for p in parts:
+        assert p.startswith("BLOCK"), "every part must start on a boundary"
+    assert split_pack(body, cap=len(body) + 1) == [body], \
+        "a pack under the cap must ship as one file"
+
+
+def test_blocked_pack_persists_exactly_once():
+    """D8 regression: the blocked path used to have _persist_pack AFTER a
+    return (unreachable, `blocked` undefined) — a blocked run was never
+    archived, which is exactly the unfalsifiability the 8/16 Sunday-bar bug
+    had. The banner must persist exactly once, with valid=False."""
+    import tools.eod_stat_pack as esp
+    import tools.trading_calendar as tc
+
+    calls = []
+    saved = (esp._header, esp._bars_from_store, esp._persist_pack,
+             tc.resolve_session_date, tc.validate_bar_date,
+             tc.duplicate_final_bar, tc.last_completed_session)
+    try:
+        esp._header = lambda asof=None: (["HDR"], None, True)
+        esp._bars_from_store = lambda a, s: {
+            sym: {"closes": [1.0], "dates": [dt.date(2026, 8, 22)]}
+            for sym in s}
+        esp._persist_pack = lambda body, lb, valid, reason, ok, tot, built: \
+            calls.append({"valid": valid, "reason": reason, "body": body})
+        tc.resolve_session_date = lambda bars: (dt.date(2026, 8, 22), [])
+        tc.validate_bar_date = lambda d: (False, "test: Saturday bar")
+        tc.duplicate_final_bar = lambda bars: (False, "")
+        tc.last_completed_session = lambda: dt.date(2026, 8, 21)
+        out = esp.build_eod_pack()
+    finally:
+        (esp._header, esp._bars_from_store, esp._persist_pack,
+         tc.resolve_session_date, tc.validate_bar_date,
+         tc.duplicate_final_bar, tc.last_completed_session) = saved
+
+    assert "EOD PACK BLOCKED" in out
+    assert len(calls) == 1, f"blocked pack must persist exactly once: {calls}"
+    assert calls[0]["valid"] is False
+    assert "Saturday bar" in calls[0]["reason"]
+    assert calls[0]["body"] == out, "the archived body must be the banner"
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0

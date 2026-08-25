@@ -78,6 +78,12 @@ def _send_message(token, chat_id, text):
     (log status + response body) but never raise — one bad chunk must not abort the
     listener loop. Dict replies {document_name, document_text, caption} are
     sent as file attachments via sendDocument."""
+    if isinstance(text, list):
+        # Multi-document reply (EOD pack split above SPLIT_AT). Sent in order;
+        # each item goes through the same dict/str handling below.
+        for item in text:
+            _send_message(token, chat_id, item)
+        return
     if isinstance(text, dict) and "document_text" in text:
         _send_document(token, chat_id, text.get("document_name", "report.txt"),
                        text["document_text"], text.get("caption", ""))
@@ -339,6 +345,7 @@ def _dispatch_message(token, chat_id, text):
     def _qc():   from tools.quad_confirm import handle_quad_confirm_reply; return handle_quad_confirm_reply(text)
     def _mv():   from tools.bucket_history import handle_moves_command;   return handle_moves_command(text)
     def _bl():   from tools.enrollment import handle_backlog_command;     return handle_backlog_command(text)
+    def _cov():  from tools.mfr_coverage import handle_coverage_command;  return handle_coverage_command(text)
     def _src():  from tools.source_registry import handle_sources_command; return handle_sources_command(text)
     def _wrap(): from tools.wrapper_links import handle_wrapper_command;  return handle_wrapper_command(text)
     def _tgt():  from tools.position_targets import handle_target_command; return handle_target_command(text)
@@ -357,6 +364,7 @@ def _dispatch_message(token, chat_id, text):
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
                      ("quad", _quad), ("report", _rpt), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
+                     ("coverage", _cov),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
                      ("cap", _cap),
                      ("daypack", _dpk), ("keith", _kp), ("weekend", _wk),

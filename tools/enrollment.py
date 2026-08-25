@@ -399,6 +399,14 @@ def run_nightly() -> str:
     today = str(_today_et())
     if _get_state(LAST_SENT_KEY) == today:
         return "skip:already-sent-today"
+    # One mfr_backlog_snapshots row per day (078) so MFR COVERAGE can print a
+    # delta against yesterday even on days the operator never asks. Best-effort
+    # — the to-add batch must go out whether or not the snapshot lands.
+    try:
+        from tools.mfr_coverage import record_daily_snapshot
+        log.info("backlog snapshot: %s", record_daily_snapshot())
+    except Exception as e:
+        log.warning("backlog snapshot failed: %s", e)
     try:
         r = compile_to_add()
     except WatchlistUnavailable as e:
@@ -513,7 +521,10 @@ def _live_quote_probe(symbols) -> set:
     caller can fail open. Module-level so tests can monkeypatch it."""
     import yfinance as yf
     m = {t: _yf_symbol_for(t) for t in symbols}
-    data = yf.download(sorted(set(m.values())), period="5d", interval="1d",
+    # 1mo, not 5d: thin OTC names (GRUSF) can miss a week of prints and were
+    # false-dropped by the shorter window. One real close in a month is proof
+    # of existence, which is all this gate asks.
+    data = yf.download(sorted(set(m.values())), period="1mo", interval="1d",
                        group_by="ticker", progress=False, threads=True)
     if data is None or data.empty:
         raise RuntimeError("yfinance returned no data for the whole batch")

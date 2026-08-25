@@ -105,9 +105,15 @@ def detect(rows: list, delta: float = BOOK_DIP_DELTA,
 
 # ─────────────────────────── data assembly ───────────────────────────
 
-def _book_rows() -> list:
+def _book_rows(*, include_dark: bool = False) -> list:
     """Holdings with adjusted trend (screener's own COALESCE + BTCQ + wrapper
-    inversion), current rp, and 5-day rp extremes from mfr_snapshots."""
+    inversion), current rp, and 5-day rp extremes from mfr_snapshots.
+
+    include_dark=False (the default, and every alert path): held names with
+    no MFR coverage are DROPPED — nothing to judge, nothing to alert on.
+    include_dark=True (listings: BOOK RP, MFR COVERAGE): those names are
+    emitted with rp_now/rp_5d_max/rp_5d_min None and "dark": True, because a
+    book listing that hides what it cannot range answers the wrong question."""
     from tools.book_direction import book_sides
     from tools.screener import (_fetch_source_slice, _apply_btcquant_trend,
                                 _apply_wrapper_trend)
@@ -140,7 +146,15 @@ def _book_rows() -> list:
     for t in held:
         r = by_t.get(t)
         if not r:
-            continue                    # no MFR coverage — DARK, nothing to judge
+            # no MFR coverage — DARK. Nothing to judge for ALERTS (default);
+            # listings ask for these rows explicitly via include_dark.
+            if include_dark:
+                rows.append({"ticker": t,
+                             "side": sides[t].get("raw_side") or sides[t]["side"],
+                             "trend_dir": None, "rp_now": None,
+                             "rp_5d_max": None, "rp_5d_min": None,
+                             "wrap": None, "dark": True})
+            continue
         hi, lo = ext.get(t, (None, None))
         wrap = None
         if r.get("_wrap"):

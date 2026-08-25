@@ -76,6 +76,48 @@ RET_WINDOWS = [("1D", 1), ("1W", 5), ("1M", 21), ("3M", 63), ("6M", 126)]
 
 LOOKBACK_DAYS = 400          # enough for 180D corr and a full YTD
 
+# ── the full macro grind (2026-08-24, operator chose the widest option) ─────
+# Six ticker groups so the pack gives a real lay of the land, not just
+# factors/sectors/correlations. Held names (ENZL COLO VCSH VTIP CLOX BUXX QTUM
+# IPAY IGV BUG) are DELIBERATELY in these lists — the pack should show the
+# tape on what he actually owns. Bars bank and replay per as-of, so the wider
+# `need` costs one extra fetch per day, not per run.
+COMMODITIES = ["USO", "BNO", "UNG", "CPER", "ICOP", "GLD", "SLV", "PALL",
+               "URA", "DBA", "WOOD", "XME", "DBC"]
+COMMODITY_BENCH = "DBC"                     # the block's own benchmark
+CRYPTO = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "IBIT"]
+DOLLAR_FX = ["UUP", "UDN", "FXE", "FXY", "FXB", "FXF", "FXA"]
+DOLLAR_BENCH = "UUP"
+INTERNATIONAL = ["EFA", "EEM", "EWJ", "EWG", "EWU", "EWZ", "FXI", "INDA",
+                 "EWW", "EWY", "EWC", "ENZL", "COLO"]
+# Tradeable duration/credit — complements the FRED rates/credit block (this is
+# the instrument expression, not a replacement). CLOX/BUXX/VCSH/VTIP are the
+# margin-arb income sleeve and are held; thin yfinance history renders n/a in
+# place and shows in the coverage footer — they stay on the list regardless.
+DURATION_CREDIT = ["SHY", "IEF", "TLT", "LQD", "HYG", "TIP", "EMB", "BKLN",
+                   "MBB", "VCSH", "VTIP", "CLOX", "BUXX"]
+SUB_INDUSTRY = ["SMH", "SOXX", "IGV", "BUG", "XBI", "IBB", "ITA", "XOP",
+                "OIH", "XHB", "KRE", "XRT", "JETS", "TAN", "QTUM", "IPAY",
+                "MAGS"]
+
+# One row per (title, symbols, benchmark-or-None, note-or-None). Relative
+# columns render only when the block names a benchmark.
+MACRO_GROUPS = [
+    ("COMMODITIES", COMMODITIES, COMMODITY_BENCH, None),
+    ("CRYPTO", CRYPTO, None,
+     "24/7 instruments — their weekend bars never set the pack's session "
+     "date (resolve_session_date handles this)"),
+    ("DOLLAR + FX", DOLLAR_FX, DOLLAR_BENCH, None),
+    ("INTERNATIONAL", INTERNATIONAL, "SPY", None),
+    ("DURATION + CREDIT", DURATION_CREDIT, None,
+     "tradeable expression — complements the FRED rates/credit block"),
+    ("SUB-INDUSTRY + THEME", SUB_INDUSTRY, "SPY", None),
+]
+
+# The macro-grind blocks share the sector block's window set plus the
+# period-to-date columns the existing helpers already provide.
+GROUP_COLS = ["1D", "1W", "1M", "3M", "6M", "MTD", "QTD", "YTD"]
+
 
 # ═══════════════════════ pure logic (no I/O, fixture-tested) ════════════════
 
@@ -240,6 +282,23 @@ def returns_row(closes, dates) -> dict:
     out = {lbl: pct_return_asof(closes, dates, d) for lbl, d in WINDOW_DAYS}
     out["YTD"] = ytd_return(closes, dates)
     return out
+
+
+def full_returns_row(closes, dates) -> dict:
+    """returns_row plus MTD/QTD — the macro-grind blocks' window set. Every
+    value is None-propagating: no bars in, 'n/a' out, never 0.0."""
+    out = returns_row(closes, dates)
+    out["MTD"] = mtd_return(closes, dates)
+    out["QTD"] = qtd_return(closes, dates)
+    return out
+
+
+def relative_row(ab, bench) -> dict:
+    """Absolute minus benchmark per GROUP_COLS column. None when either side
+    is missing — a relative with one leg guessed is worse than a blank."""
+    return {c: (ab[c] - bench[c])
+            if (ab.get(c) is not None and bench.get(c) is not None) else None
+            for c in GROUP_COLS}
 
 
 def spread_row(long_r, short_r) -> dict:
@@ -421,6 +480,34 @@ def format_sectors(rows) -> str:
     for tkr, ab, rel in ranked:
         out.append(f"{tkr:<8}" + "".join(fmt_pct(ab.get(c), 8) for c in cols)
                    + "   |" + "".join(fmt_pct(rel.get(c), 8) for c in cols))
+    return "\n".join(out)
+
+
+def format_group_block(title, rows, bench=None, note=None) -> str:
+    """One macro-grind block. rows: [(ticker, abs_dict, rel_dict_or_None)] —
+    one row per ticker in the block's constant list, ALWAYS: a symbol with no
+    bars renders 'n/a' in every column (fmt_pct never prints 0.0 for None)
+    and never disappears silently. The footer prints the block's own coverage
+    so a thin symbol (CLOX/BUXX) is a stated gap, not an invisible one."""
+    out = [f"{title} — absolute"
+           + (f", and relative to {bench}" if bench else "")]
+    if note:
+        out.append(f"  note: {note}")
+    hdr = f"{'symbol':<8}" + "".join(c.rjust(8) for c in GROUP_COLS)
+    if bench:
+        hdr += "   |" + "".join(("r" + c).rjust(8) for c in GROUP_COLS)
+    out.append(hdr)
+    covered = 0
+    for tkr, ab, rel in rows:
+        if any(v is not None for v in (ab or {}).values()):
+            covered += 1
+        line = (f"{tkr:<8}"
+                + "".join(fmt_pct((ab or {}).get(c), 8) for c in GROUP_COLS))
+        if bench:
+            line += "   |" + "".join(fmt_pct((rel or {}).get(c), 8)
+                                     for c in GROUP_COLS)
+        out.append(line)
+    out.append(f"  coverage: {covered}/{len(rows)} symbols")
     return "\n".join(out)
 
 
@@ -1049,6 +1136,10 @@ def build_eod_pack() -> str:
     need |= set(SECTORS)
     need |= {s for _, s in CORR_ROWS} | {s for _, s in CORR_ANCHORS}
     need |= set(quad_tape.doctrine_tickers())
+    for _t, _syms, _b, _n in MACRO_GROUPS:          # the full macro grind
+        need |= set(_syms)
+        if _b:
+            need.add(_b)
     # DETERMINISM. Replay banked bars for this as-of when they exist, so a
     # rebuild is byte-identical. yfinance is NOT reproducible -- three identical
     # ranged calls returned 617/617/614 rows for CPER -- so the only way a
@@ -1085,7 +1176,7 @@ def build_eod_pack() -> str:
     built = _now_et()
     if not ok or dup:
         reason = why if not ok else ("final bar is a duplicate: " + dup_detail)
-        return "\n".join([
+        blocked = "\n".join([
             "!! EOD PACK BLOCKED — THE BAR DATE FAILED VALIDATION.",
             "   %s" % reason,
             "   expected last completed session: %s" % last_completed_session(),
@@ -1099,7 +1190,9 @@ def build_eod_pack() -> str:
             "   symbols with data: %d/%d" % (got, len(need)),
         ])
         # Archive the FAILURE too -- a blocked run is exactly the one a future
-        # investigation needs to see.
+        # investigation needs to see. (2026-08-24: these two lines sat AFTER a
+        # return and `blocked` was never assigned — a blocked pack was never
+        # archived, the exact unfalsifiability the 8/16 Sunday-bar bug had.)
         _persist_pack(blocked, last_bar, False, reason, got, len(need), built)
         return blocked
     asof_line_idx = len(parts)
@@ -1169,6 +1262,25 @@ def build_eod_pack() -> str:
     except Exception as e:
         parts.append(f"\nSECTORS: unavailable ({e})")
 
+    def _frets(sym):
+        b = bars.get(sym) or {}
+        return full_returns_row(b.get("closes"), b.get("dates"))
+
+    # The macro grind — each block guarded on its own, so one bad group prints
+    # its reason in place and the other five still render.
+    for gtitle, gsyms, gbench, gnote in MACRO_GROUPS:
+        try:
+            bench_r = _frets(gbench) if gbench else None
+            rows = []
+            for s in gsyms:
+                ab = _frets(s)
+                rows.append((s, ab,
+                             relative_row(ab, bench_r) if gbench else None))
+            parts.append("")
+            parts.append(format_group_block(gtitle, rows, gbench, gnote))
+        except Exception as e:
+            parts.append(f"\n{gtitle}: unavailable ({e})")
+
     try:
         blocks = []
         for alabel, asym in CORR_ANCHORS:
@@ -1211,6 +1323,12 @@ def build_eod_pack() -> str:
     parts.append("VOL COMPLEX (VIX/VXN/RVX/VVIX/MOVE/GVZ/OVX) + IVOL: Phase 2")
     parts.append("CFTC positioning + FX realized-vol proxy: Phase 3")
     body = "\n".join(parts)
+    # Size provenance (D7, 2026-08-24): the macro grind nearly tripled `need`,
+    # and daypack.DOC_CAP truncates documents at 40k — so the pack states its
+    # own size, and the delivery layer splits at a block boundary above
+    # SPLIT_AT rather than ever letting a cap truncate it.
+    body += (f"\npack provenance: {len(need)} symbols requested · body "
+             f"{len(body):,} chars (excl. this line)")
     # §1.1b ARTIFACT RETENTION. Every pack persists with its build time, the
     # RESOLVED bar date, the validation result and the DEPLOYED COMMIT SHA.
     # The 2026-08-16 Sunday-bar bug was unfalsifiable purely because no such
@@ -1221,11 +1339,37 @@ def build_eod_pack() -> str:
 
 # ═══════════════════════ Telegram + schedule hooks ══════════════════════════
 
+# Split threshold, chosen 1k under tools/daypack.DOC_CAP (40k): a pack that
+# would arrive truncated by that cap is split into two whole documents at a
+# block boundary instead. Truncation loses the tail silently; a split loses
+# nothing.
+SPLIT_AT = 39_000
+
+
+def split_pack(body, cap=SPLIT_AT) -> list:
+    """Pure. [body] when it fits; otherwise 2+ parts split ONLY at block
+    boundaries (blank lines) — never mid-table. A single block larger than
+    the cap ships alone rather than being truncated."""
+    if body is None or len(body) <= cap:
+        return [body] if body is not None else []
+    parts, cur = [], ""
+    for block in body.split("\n\n"):
+        if cur and len(cur) + len(block) + 2 > cap:
+            parts.append(cur)
+            cur = block
+        else:
+            cur = f"{cur}\n\n{block}" if cur else block
+    if cur:
+        parts.append(cur)
+    return parts
+
+
 def handle_eod_command(text):
-    """Telegram hook — owns EOD. Returns a document reply, or None to decline.
-    Document rather than an inline code block: the pack runs well past
-    Telegram's 4096-char message limit, and notifier.send_telegram does not
-    chunk (the weekly-backlog lesson)."""
+    """Telegram hook — owns EOD. Returns a document reply (or a LIST of
+    document replies when the pack outgrows SPLIT_AT — telegram_handler sends
+    each in order), or None to decline. Document rather than an inline code
+    block: the pack runs well past Telegram's 4096-char message limit, and
+    notifier.send_telegram does not chunk (the weekly-backlog lesson)."""
     t = (text or "").strip().upper()
     if t not in ("EOD", "/EOD", "EOD PACK", "STAT PACK"):
         return None
@@ -1239,9 +1383,16 @@ def handle_eod_command(text):
         store_report(body, "eod-pack")
     except Exception as e:
         log.warning("eod: store failed: %s", e)
-    return {"document_name": f"eod_stat_pack_{date.today()}.txt",
-            "document_text": body,
-            "caption": "📊 EOD stat pack"}
+    pieces = split_pack(body)
+    if len(pieces) <= 1:
+        return {"document_name": f"eod_stat_pack_{date.today()}.txt",
+                "document_text": body,
+                "caption": "📊 EOD stat pack"}
+    return [{"document_name":
+             f"eod_stat_pack_{date.today()}_{i}of{len(pieces)}.txt",
+             "document_text": p,
+             "caption": f"📊 EOD stat pack ({i}/{len(pieces)})"}
+            for i, p in enumerate(pieces, 1)]
 
 
 def run_scheduled() -> str:

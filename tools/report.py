@@ -403,6 +403,222 @@ def build_book_table(fills: dict) -> str:
     return "\n".join(out)
 
 
+# ═══════════════════════ BOOK RP (2026-08-24) ══════════════════════════════
+# The whole book with the range position on every line — including the names
+# the bot CANNOT range (dark), which the alert path rightly drops and a book
+# listing must not. Dark semantics come from tools.mfr_coverage.is_dark_row,
+# the same predicate MFR COVERAGE uses, so the two features always agree.
+
+RP_TRIM = 0.80          # longs at/above: trim candidates
+RP_ADD = 0.20           # longs at/below: add candidates
+
+_RP_TICKER_RE = None    # compiled lazily in _plausible_ticker
+
+
+def _plausible_ticker(t: str) -> bool:
+    """Shape gate for RP <TICKER>: 1-7 alnum chars with optional .-_ suffix
+    groups, at least one letter. Anything else declines so the dispatch chain
+    falls through to the trade verbs."""
+    global _RP_TICKER_RE
+    if _RP_TICKER_RE is None:
+        import re
+        _RP_TICKER_RE = re.compile(
+            r"^[A-Z0-9]{1,7}(?:[._\-][A-Z0-9]{1,4}){0,2}$")
+    import re
+    return bool(_RP_TICKER_RE.match(t)) and bool(re.search(r"[A-Z]", t))
+
+
+def rp_summary(table_rows) -> dict:
+    """Pure. {trim, add, dark} sorted ticker lists from BOOK RP table rows.
+    trim/add are LONGS ONLY at the inclusive 0.80 / 0.20 boundaries; dark is
+    every row the shared predicate calls dark (deduped across accounts)."""
+    from tools.mfr_coverage import is_dark_row
+    trim, add, dark = set(), set(), set()
+    for r in table_rows:
+        if is_dark_row(r):
+            dark.add(r["ticker"])
+            continue
+        if r.get("side") != "long":
+            continue
+        rp = r.get("rp_now")
+        if rp >= RP_TRIM:
+            trim.add(r["ticker"])
+        elif rp <= RP_ADD:
+            add.add(r["ticker"])
+    return {"trim": sorted(trim), "add": sorted(add), "dark": sorted(dark)}
+
+
+def sort_rp_rows(table_rows) -> list:
+    """Pure. rp descending, dark rows LAST, ticker/account as tiebreak."""
+    from tools.mfr_coverage import is_dark_row
+    return sorted(table_rows,
+                  key=lambda r: (is_dark_row(r),
+                                 -(r.get("rp_now") if r.get("rp_now")
+                                   is not None else 0.0),
+                                 r.get("ticker") or "", r.get("acct") or ""))
+
+
+def format_book_rp(table_rows) -> str:
+    """Pure. Summary lines first (the actionable rows), then the full table,
+    rp descending with dark rows last."""
+    from tools.mfr_coverage import is_dark_row
+    s = rp_summary(table_rows)
+    out = [f"BOOK RP — every position with its range position",
+           f"NEAR TOP OF RANGE (rp>={RP_TRIM:.2f}, longs — trim candidates): "
+           + (" ".join(s["trim"]) or "none"),
+           f"NEAR BOTTOM (rp<={RP_ADD:.2f}, longs — add candidates): "
+           + (" ".join(s["add"]) or "none"),
+           "HELD AND DARK (no MFR range — the enrollment to-do): "
+           + (" ".join(s["dark"]) or "none"),
+           "",
+           f"{'tkr':<8}{'acct':<10}{'side':<6}{'$val':>9}{'%acct':>7}"
+           f"{'rp':>6}  {'5d lo-hi':<11}{'trend':<9}{'PM bucket'}"]
+
+    def _f(v, fmt):
+        return f"{v:{fmt}}" if v is not None else "n/a"
+
+    for r in sort_rp_rows(table_rows):
+        band = ("n/a" if r.get("rp_5d_min") is None or r.get("rp_5d_max") is None
+                else f"{r['rp_5d_min']:.2f}-{r['rp_5d_max']:.2f}")
+        pct = (f"{r['pct']:.1f}%" if r.get("pct") is not None else "n/a")
+        out.append(
+            f"{r['ticker']:<8}{(r.get('acct') or '?'):<10}"
+            f"{(r.get('side') or '?'):<6}"
+            f"{_f(r.get('val'), ',.0f'):>9}"
+            f"{pct:>7}"
+            f"{_f(r.get('rp_now'), '.2f'):>6}  {band:<11}"
+            f"{(r.get('trend') or 'n/a'):<9}"
+            f"{r.get('bucket') or '-'}"
+            + ("   DARK" if is_dark_row(r) else ""))
+    return "\n".join(out)
+
+
+_ACCT_LABELS_FALLBACK = {}
+
+
+def _acct_label(acct_no) -> str:
+    """Short account label from portfolio.ACCOUNTS ('Individual' -> 'Individ',
+    'Rollover IRA' -> 'Rollover'); unknown accounts show their last 4."""
+    if not _ACCT_LABELS_FALLBACK:
+        try:
+            from portfolio import ACCOUNTS
+            for no, info in ACCOUNTS.items():
+                _ACCT_LABELS_FALLBACK[no] = (info.get("name") or no).split()[0][:8]
+        except Exception as e:
+            log.warning("account labels unavailable: %s", e)
+    return _ACCT_LABELS_FALLBACK.get(acct_no) or f"…{str(acct_no)[-4:]}"
+
+
+def build_book_rp() -> str:
+    """IO assembly for BOOK RP: positions per (underlying, account) joined to
+    _book_rows(include_dark=True) rp data and ticker_tags PM buckets."""
+    import db_pg
+    from tools.book_alerts import _book_rows
+    rp_by = {r["ticker"]: r for r in _book_rows(include_dark=True)}
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT upper(underlying), account_number, sum(market_value)
+               FROM book_positions
+               WHERE snapshot_date = (SELECT max(snapshot_date)
+                                      FROM book_positions)
+                 AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0
+               GROUP BY 1, 2""")
+        pos = cur.fetchall()
+        cur.execute(
+            """SELECT account_number, COALESCE(sum(market_value), 0)
+               FROM book_positions
+               WHERE snapshot_date = (SELECT max(snapshot_date)
+                                      FROM book_positions)
+               GROUP BY 1""")
+        totals = {a: float(v or 0) for a, v in cur.fetchall()}
+        held = sorted({p[0] for p in pos})
+        # ticker_tags keys on `ticker` (a t.symbol join errors — 8/24 brief)
+        cur.execute("SELECT ticker, hedgeye_bucket_0629 FROM ticker_tags "
+                    "WHERE ticker = ANY(%s) "
+                    "AND hedgeye_bucket_0629 IS NOT NULL", (held,))
+        buckets = dict(cur.fetchall())
+    rows = []
+    for t, acct, mv in pos:
+        rp = rp_by.get(t) or {"dark": True}
+        tot = totals.get(acct) or 0.0
+        rows.append({"ticker": t, "acct": _acct_label(acct),
+                     "side": rp.get("side") or
+                     ("short" if (mv or 0) < 0 else "long"),
+                     "val": float(mv or 0),
+                     "pct": (abs(float(mv or 0)) / tot * 100) if tot else None,
+                     "rp_now": rp.get("rp_now"),
+                     "rp_5d_min": rp.get("rp_5d_min"),
+                     "rp_5d_max": rp.get("rp_5d_max"),
+                     "trend": rp.get("trend_dir"),
+                     "bucket": buckets.get(t),
+                     "dark": rp.get("dark", False)})
+    return format_book_rp(rows)
+
+
+def build_rp_single(t: str) -> str:
+    """RP <TICKER> — one name, held or not: price, range, rp, 5d band, trend,
+    PM bucket, held-where. Inline message, not a document."""
+    import db_pg
+    from tools.screener import (_apply_btcquant_trend, _apply_wrapper_trend,
+                                _fetch_source_slice)
+    slice_ = _fetch_source_slice([t], None)
+    _apply_btcquant_trend(slice_)
+    _apply_wrapper_trend(slice_)
+    r = slice_[0] if slice_ else {}
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT m.snapshot_date, m.price,
+                      COALESCE(h.buy_trade,  m.range_low),
+                      COALESCE(h.sell_trade, m.range_high)
+               FROM mfr_snapshots m
+               LEFT JOIN hedgeye_risk_ranges h
+                      ON h.ticker = m.ticker AND h.signal_date = m.snapshot_date
+                     AND h.buy_trade IS NOT NULL AND h.sell_trade IS NOT NULL
+                     AND h.sell_trade > h.buy_trade
+               WHERE m.ticker = %s
+               ORDER BY m.snapshot_date DESC LIMIT 1""", (t,))
+        snap = cur.fetchone()
+        cur.execute(
+            """SELECT max((price - range_low)
+                          / NULLIF(range_high - range_low, 0)),
+                      min((price - range_low)
+                          / NULLIF(range_high - range_low, 0))
+               FROM mfr_snapshots
+               WHERE ticker = %s AND snapshot_date >= CURRENT_DATE - 7""", (t,))
+        hi, lo = cur.fetchone() or (None, None)
+        cur.execute(
+            """SELECT account_number, sum(quantity), sum(market_value)
+               FROM book_positions
+               WHERE snapshot_date = (SELECT max(snapshot_date)
+                                      FROM book_positions)
+                 AND upper(underlying) = %s AND COALESCE(quantity, 0) <> 0
+               GROUP BY 1""", (t,))
+        held = cur.fetchall()
+        cur.execute("SELECT hedgeye_bucket_0629 FROM ticker_tags "
+                    "WHERE ticker = %s", (t,))
+        brow = cur.fetchone()
+
+    def _n(v, fmt=".2f"):
+        return f"{float(v):{fmt}}" if v is not None else "n/a"
+
+    rp = r.get("range_pos")
+    lines = [f"RP {t}"
+             + (f" — as of {snap[0]}" if snap else " — no MFR snapshot"),
+             f"price {_n(snap[1] if snap else None)}  "
+             f"range {_n(snap[2] if snap else None)}-"
+             f"{_n(snap[3] if snap else None)}  rp {_n(rp)}",
+             f"5d rp band {_n(lo)}-{_n(hi)}  "
+             f"trend {r.get('trend_dir') or 'n/a'}",
+             f"PM bucket: {(brow[0] if brow and brow[0] else '-')}"]
+    if held:
+        lines.append("held: " + "  ".join(
+            f"{_acct_label(a)} {float(q):g}sh ${float(mv or 0):,.0f}"
+            for a, q, mv in held))
+    else:
+        lines.append("held: no")
+    return "\n".join(lines)
+
+
 def build_report_v4(kind: str = "on-demand", full: bool = False,
                     verbose: bool = False, persist_snapshot: bool = True,
                     fills_override: dict | None = None) -> str:
@@ -938,7 +1154,8 @@ def store_eod() -> str:
 
 
 def handle_report_command(text: str):
-    """Telegram hook — owns REPORT* and BOOK FULL. None to decline.
+    """Telegram hook — owns REPORT*, BOOK FULL, BOOK RP and RP <TICKER>.
+    None to decline.
     REPORT          v4 compact (Telegram mode — tgt/src only when explicit
                     or OVER)
     REPORT FULL     compact + unfiltered ⚡DIV
@@ -946,12 +1163,26 @@ def handle_report_command(text: str):
                     position table appended) — for pasting into an LLM
     REPORT LEGACY   v3 renderer (parallel-run week; no snapshot write)
     BOOK FULL       the per-account position table as a .txt document
+    BOOK RP         the whole book with range position per line, dark rows
+                    last, as a .txt document
+    RP <TICKER>     single-name range-position lookup, inline; declines on
+                    anything that is not a plausible ticker so the dispatch
+                    chain still falls through to the trade verbs
     Document replies are dicts {document_name, document_text, caption} —
     telegram_handler sends them via sendDocument."""
     if not text:
         return None
     up = text.strip().upper()
     try:
+        if up == "BOOK RP":
+            return {"document_name": f"book_rp_{date.today()}.txt",
+                    "document_text": build_book_rp(),
+                    "caption": "📗 book with range position per line"}
+        if up.startswith("RP ") or up == "RP":
+            arg = up[2:].strip()
+            if not arg or not _plausible_ticker(arg):
+                return None                  # not ours — fall through
+            return build_rp_single(arg)
         if up == "BOOK FULL":
             import db_pg
             from tools.book_direction import book_sides
