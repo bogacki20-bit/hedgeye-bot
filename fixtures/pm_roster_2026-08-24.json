@@ -1,0 +1,30 @@
+{
+ "as_of": "2026-08-24",
+ "buckets": {
+  "active_long": 97,
+  "active_short": 74,
+  "long_bench": 130,
+  "short_bench": 79,
+  "top_idea_long": 38,
+  "top_idea_short": 19
+ },
+ "sectors": {
+  "CANNABIS": 7,
+  "COMMUNICATIONS": 32,
+  "CONSUMER STAPLES": 50,
+  "DIGITAL ASSETS": 12,
+  "ENERGY": 34,
+  "FINANCIALS": 31,
+  "GLL": 25,
+  "GLOBAL TECH": 15,
+  "HEALTHCARE": 26,
+  "INDUSTRIALS": 42,
+  "MATERIALS": 24,
+  "RESTAURANTS": 17,
+  "RETAIL": 88,
+  "SMALL CAPS": 4,
+  "SOFTWARE": 30
+ },
+ "source": "Position Monitor PDF ingest, RUN_REPORT_2026-08-24; captured 2026-08-25 from ticker_tags (hedgeye_group/hedgeye_bucket_0629 WHERE bucket IS NOT NULL)",
+ "total": 437
+}

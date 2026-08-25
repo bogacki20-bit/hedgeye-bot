@@ -1,22 +1,20 @@
 """PM sector taxonomy tests — SCREEN's move from gics_sector to the Position
 Monitor's own 15 sectors (ticker_tags.hedgeye_group).
 
-Groups 1-4 are PURE (regex/parse only, no DB). Group 5 needs the database and
-is SKIPPED with a loud notice if it is unreachable — never silently passed, an
-absent DB must not look like a green sector check.
+PURE, per the repo's test doctrine: no DB, no network. Group 5 asserts the
+taxonomy STRUCTURE of a captured roster fixture
+(fixtures/pm_roster_2026-08-24.json) rather than live counts — 2026-08-25:
+the live-DB version of group 5 baked the 8/17 roster and blocked a code merge
+the day an authorized PM ingest moved the data. Data acceptance now lives in
+_acceptance_live.py; this file tests logic only.
 
 Run: python test_pm_sector_taxonomy.py
 """
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# .env BEFORE anything that reads DATABASE_*_URL. active_slice resolves it
-# lazily; importing blind leaves it returning an empty roster, which has already
-# produced a falsely-passing check on this project.
-import db_pg
-db_pg._load_dotenv_fallback()
 
 from tools.pm_parse import PM_SECTORS, pm_sector_key
 from tools.screener import (parse_query, run_screen, _SECTORS, _SECTOR_NAMES,
@@ -120,30 +118,35 @@ for text in ["gll longs", "gaming longs", "lodging longs", "leisure longs",
     check(f"'{text}' -> GLL", q["sector"], "GLL")
     check(f"'{text}' clean", q["unrecognized"], [])
 
-# ── 5. per-sector row counts match the Phase A acceptance table ─────────────
-ACCEPT = {"RESTAURANTS": 17, "CONSUMER STAPLES": 49, "CANNABIS": 7, "GLL": 25,
-          "RETAIL": 88, "HEALTHCARE": 25, "FINANCIALS": 31, "DIGITAL ASSETS": 12,
-          "SMALL CAPS": 3, "INDUSTRIALS": 42, "MATERIALS": 24, "ENERGY": 37,
-          "SOFTWARE": 30, "COMMUNICATIONS": 32, "GLOBAL TECH": 16}
+# ── 5. roster fixture STRUCTURE (not live counts, not a checksum) ───────────
+# The fixture is a frozen capture with provenance. What is asserted here is
+# that the taxonomy HOLDS over a real roster: every sector the ingest stored
+# is one of the 15, none is empty, and the bucket partition sums to the total.
+# Specific per-sector counts are deliberately NOT asserted — that is data
+# acceptance, and it lives in _acceptance_live.py, off the merge gate.
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "fixtures", "pm_roster_2026-08-24.json")
 
-print("\n5. per-sector roster counts vs the Phase A acceptance table (needs DB):")
-try:
-    with db_pg.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT hedgeye_group, count(*) FROM ticker_tags "
-                    "WHERE hedgeye_bucket_0629 IS NOT NULL "
-                    "GROUP BY 1 ORDER BY 1")
-        got = {g: n for g, n in cur.fetchall()}
-    for s in PM15:
-        check(f"{s} roster count", got.get(s, 0), ACCEPT[s])
-    check("15 sectors present", len(got), 15)
-    check("roster total", sum(got.values()), 438)
-    check("every stored group is one of the 15",
-          sorted(set(got) - PM_SECTORS), [])
-except Exception as e:
-    print(f"  !! DB UNREACHABLE ({e}) — group 5 NOT RUN.")
-    print("     Not counted as a pass. Re-run with the DB up before trusting "
-          "the sector counts.")
-    FAIL += 1
+print("\n5. roster fixture structure (fixtures/pm_roster_2026-08-24.json):")
+with open(FIXTURE, encoding="utf-8") as f:
+    fx = json.load(f)
+check("fixture carries as_of", bool(fx.get("as_of")), True)
+check("fixture carries source", bool(fx.get("source")), True)
+sectors, bucket_counts = fx["sectors"], fx["buckets"]
+check("every fixture sector is one of the 15",
+      sorted(set(sectors) - PM_SECTORS), [])
+check("all 15 sectors present", len(sectors), 15)
+check("no sector is empty", sorted(s for s, n in sectors.items() if n <= 0), [])
+check("sector counts sum to the total", sum(sectors.values()), fx["total"])
+check("bucket counts sum to the total",
+      sum(bucket_counts.values()), fx["total"])
+check("all six buckets present", len(bucket_counts), 6)
+check("bucket names are the canonical six",
+      sorted(bucket_counts),
+      ["active_long", "active_short", "long_bench", "short_bench",
+       "top_idea_long", "top_idea_short"])
+check("no bucket is empty",
+      sorted(b for b, n in bucket_counts.items() if n <= 0), [])
 
 # ── canonicalisation helper ────────────────────────────────────────────────
 print("\n6. pm_sector_key canonicalisation:")

@@ -1,0 +1,991 @@
+{
+ "account_values": {
+  "244859926": 50383.62,
+  "245734604": 14947.61,
+  "X96383748": 23391.989999999998,
+  "Z20791845": 12.16
+ },
+ "as_of": "2026-08-24",
+ "positions": [
+  {
+   "account_number": "X96383748",
+   "market_value": 440.9,
+   "symbol": "AFRM"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 1750.88,
+   "symbol": "AMZN"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 448.82,
+   "symbol": "BJRI"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 349.18,
+   "symbol": "BUG"
+  },
+  {
+   "account_number": "245734604",
+   "market_value": 12999.99,
+   "symbol": "BUXX"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 599.95,
+   "symbol": "BUXX"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 277.5,
+   "symbol": "CBRL"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 662.05,
+   "symbol": "CFG"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 182.3,
+   "symbol": "CGC"
+  },
+  {
+   "account_number": "245734604",
+   "market_value": 800.18,
+   "symbol": "CLOX"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 1457.04,
+   "symbol": "CLOX"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 449.99,
+   "symbol": "COLO"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 356.78,
+   "symbol": "CPER"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 412.61,
+   "symbol": "CRAK"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 894.67,
+   "symbol": "CRWD"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 319.33,
+   "symbol": "CSX"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 1039.22,
+   "symbol": "DELL"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 538.95,
+   "symbol": "DGX"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 633.57,
+   "symbol": "DT"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 861.27,
+   "symbol": "EMR"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 344.03999999999996,
+   "symbol": "ENZL"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 1231.08,
+   "symbol": "EPHE"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 527.67,
+   "symbol": "EXPGY"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 447.68,
+   "symbol": "FAB"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 404.85,
+   "symbol": "FXE"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 569.39,
+   "symbol": "FXH"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 426.65,
+   "symbol": "FXY"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 483.95,
+   "symbol": "GO"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 658.21,
+   "symbol": "GPN"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 316.22,
+   "symbol": "HDV"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 450.62,
+   "symbol": "HYG"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 462.46,
+   "symbol": "IAUI"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 617.28,
+   "symbol": "ICOP"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 1052.77,
+   "symbol": "IGV"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 398.99,
+   "symbol": "IPAY"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 448.82,
+   "symbol": "IVOL"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 907.19,
+   "symbol": "JACK"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 384.35,
+   "symbol": "JBS"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 677.14,
+   "symbol": "JPM"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": -177.24,
+   "symbol": "KR"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 676.74,
+   "symbol": "LFST"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 874.47,
+   "symbol": "LH"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 446.56,
+   "symbol": "LW"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 658.04,
+   "symbol": "MA"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 482.0,
+   "symbol": "MICC"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 1279.89,
+   "symbol": "MRVL"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 859.12,
+   "symbol": "MSFT"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 915.34,
+   "symbol": "NET"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 655.92,
+   "symbol": "NFLX"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 966.6199999999999,
+   "symbol": "NOBL"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 488.25,
+   "symbol": "NOW"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 824.84,
+   "symbol": "OKTA"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 627.05,
+   "symbol": "PANW"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 341.77,
+   "symbol": "PANW"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 782.75,
+   "symbol": "PCAR"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 229.17,
+   "symbol": "PM"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 344.79,
+   "symbol": "PSX"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 728.96,
+   "symbol": "QTUM"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 498.33,
+   "symbol": "RDNT"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 847.32,
+   "symbol": "RSP"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 710.93,
+   "symbol": "SBUX"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 652.67,
+   "symbol": "SHEL"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 381.88,
+   "symbol": "SJM"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 945.32,
+   "symbol": "SN"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 365.43,
+   "symbol": "SN"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 879.25,
+   "symbol": "SNOW"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 628.82,
+   "symbol": "SOFI"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 349.64,
+   "symbol": "SPLV"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": -153.85,
+   "symbol": "SUJA"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 470.9,
+   "symbol": "SXT"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 280.73,
+   "symbol": "TBT"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 354.79,
+   "symbol": "TRLV"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 385.6,
+   "symbol": "TSCO"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 471.41,
+   "symbol": "TXG"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 701.88,
+   "symbol": "TXRH"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 378.22,
+   "symbol": "UDN"
+  },
+  {
+   "account_number": "244859926",
+   "market_value": 292.54,
+   "symbol": "V"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 613.0,
+   "symbol": "V"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 600.34,
+   "symbol": "VCSH"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 481.28,
+   "symbol": "VLO"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 451.4,
+   "symbol": "VTIP"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 374.15,
+   "symbol": "VXF"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 486.85,
+   "symbol": "VYM"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 820.68,
+   "symbol": "WFC"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 326.49,
+   "symbol": "WOOD"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": -172.88,
+   "symbol": "XLU"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": 716.0899999999999,
+   "symbol": "XLV"
+  },
+  {
+   "account_number": "X96383748",
+   "market_value": -75.9,
+   "symbol": "ZG"
+  }
+ ],
+ "source": "book_positions latest snapshot + ticker_tags, captured 2026-08-25 with the same queries tools/sector_cap._exposures and asset_classifier.prime_cache run; RUN_REPORT_2026-08-24",
+ "tag_misses": [
+  "CGC",
+  "CRAK",
+  "DELL",
+  "HAL",
+  "HDV",
+  "IAUI",
+  "ICOP",
+  "IGV",
+  "IVOL",
+  "JACK",
+  "QTUM",
+  "TBT",
+  "TRLV",
+  "TSLQ",
+  "UDN",
+  "VCSH",
+  "WOOD"
+ ],
+ "tags": {
+  "AFRM": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "consumer_finance"
+  },
+  "AMZN": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "RETAIL",
+   "instrument": "stock",
+   "subsector": "ecommerce"
+  },
+  "BJRI": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "RESTAURANTS",
+   "instrument": "stock",
+   "subsector": "restaurants"
+  },
+  "BUG": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Technology"
+  },
+  "BUXX": {
+   "cash_equivalent": 1,
+   "exposure": "fixed-income",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Ultrashort Bond"
+  },
+  "CBRL": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "stock",
+   "subsector": "Restaurants"
+  },
+  "CFG": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "banks"
+  },
+  "CLOX": {
+   "cash_equivalent": 0,
+   "exposure": "fixed-income",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Securitized Bond - Focused"
+  },
+  "COLO": {
+   "cash_equivalent": 0,
+   "exposure": "single-country",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Focused Region"
+  },
+  "CPER": {
+   "cash_equivalent": 0,
+   "exposure": "commodity-proxy",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Commodities Focused"
+  },
+  "CRWD": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software_largecap"
+  },
+  "CSX": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "INDUSTRIALS",
+   "instrument": "stock",
+   "subsector": "rails"
+  },
+  "DGX": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "HEALTHCARE",
+   "instrument": "stock",
+   "subsector": "dx_tools"
+  },
+  "DT": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software"
+  },
+  "EMR": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "INDUSTRIALS",
+   "instrument": "stock",
+   "subsector": "automation"
+  },
+  "ENZL": {
+   "cash_equivalent": 0,
+   "exposure": "single-country",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Focused Region"
+  },
+  "EPHE": {
+   "cash_equivalent": 0,
+   "exposure": "single-country",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Focused Region"
+  },
+  "EXPGY": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "financial_data"
+  },
+  "FAB": {
+   "cash_equivalent": 0,
+   "exposure": "diversified-equity",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Mid-Cap Value"
+  },
+  "FXE": {
+   "cash_equivalent": 0,
+   "exposure": "currency",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Single Currency"
+  },
+  "FXH": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Health"
+  },
+  "FXY": {
+   "cash_equivalent": 0,
+   "exposure": "currency",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Single Currency"
+  },
+  "GO": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "grocery"
+  },
+  "GPN": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "payments"
+  },
+  "HEFT": {
+   "cash_equivalent": 0,
+   "exposure": "multi-asset",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Thematic \u2014 Fourth Turning"
+  },
+  "HYG": {
+   "cash_equivalent": 0,
+   "exposure": "fixed-income",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "High Yield Bond"
+  },
+  "IPAY": {
+   "cash_equivalent": 0,
+   "exposure": "diversified-equity",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Miscellaneous Sector"
+  },
+  "JBS": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "staples"
+  },
+  "JPM": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "banks"
+  },
+  "KR": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "grocery"
+  },
+  "LFST": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "HEALTHCARE",
+   "instrument": "stock",
+   "subsector": "health_tech"
+  },
+  "LH": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "HEALTHCARE",
+   "instrument": "stock",
+   "subsector": "dx_tools"
+  },
+  "LMT": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "stock",
+   "subsector": "Aerospace & Defense"
+  },
+  "LW": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "staples"
+  },
+  "MA": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "payments"
+  },
+  "MICC": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "unresolved"
+  },
+  "MRVL": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "GLOBAL TECH",
+   "instrument": "stock",
+   "subsector": "semis"
+  },
+  "MSFT": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "GLOBAL TECH",
+   "instrument": "stock",
+   "subsector": "cloud_ai"
+  },
+  "NET": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software"
+  },
+  "NFLX": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "COMMUNICATIONS",
+   "instrument": "stock",
+   "subsector": "media"
+  },
+  "NOBL": {
+   "cash_equivalent": 0,
+   "exposure": "broad-market",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Large Value"
+  },
+  "NOW": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software_largecap"
+  },
+  "OIH": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Equity Energy"
+  },
+  "OKTA": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software"
+  },
+  "PANW": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software_largecap"
+  },
+  "PCAR": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "INDUSTRIALS",
+   "instrument": "stock",
+   "subsector": "truck_oem"
+  },
+  "PM": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "tobacco"
+  },
+  "PSX": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "ENERGY",
+   "instrument": "stock",
+   "subsector": "refiners"
+  },
+  "RDNT": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "HEALTHCARE",
+   "instrument": "stock",
+   "subsector": "providers"
+  },
+  "RSP": {
+   "cash_equivalent": 0,
+   "exposure": "broad-market",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Large Blend"
+  },
+  "SBUX": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "RESTAURANTS",
+   "instrument": "stock",
+   "subsector": "restaurants"
+  },
+  "SHEL": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "ENERGY",
+   "instrument": "stock",
+   "subsector": "integrated"
+  },
+  "SJM": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "staples"
+  },
+  "SN": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "staples"
+  },
+  "SNOW": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "SOFTWARE",
+   "instrument": "stock",
+   "subsector": "software"
+  },
+  "SOFI": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "consumer_finance"
+  },
+  "SPLV": {
+   "cash_equivalent": 0,
+   "exposure": "broad-market",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Large Value"
+  },
+  "SUJA": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "beverages"
+  },
+  "SXT": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "CONSUMER STAPLES",
+   "instrument": "stock",
+   "subsector": "staples"
+  },
+  "TSCO": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "RETAIL",
+   "instrument": "stock",
+   "subsector": "softlines_specialty"
+  },
+  "TXG": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "HEALTHCARE",
+   "instrument": "stock",
+   "subsector": "dx_tools"
+  },
+  "TXRH": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "RESTAURANTS",
+   "instrument": "stock",
+   "subsector": "restaurants"
+  },
+  "UGA": {
+   "cash_equivalent": 0,
+   "exposure": "commodity-proxy",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Commodities Focused"
+  },
+  "USO": {
+   "cash_equivalent": 0,
+   "exposure": "commodity-proxy",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Commodities Focused"
+  },
+  "V": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "payments"
+  },
+  "VLO": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "ENERGY",
+   "instrument": "stock",
+   "subsector": "refiners"
+  },
+  "VTIP": {
+   "cash_equivalent": 0,
+   "exposure": "fixed-income",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Short-Term Inflation-Protected Bond"
+  },
+  "VXF": {
+   "cash_equivalent": 0,
+   "exposure": "diversified-equity",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Mid-Cap Blend"
+  },
+  "VYM": {
+   "cash_equivalent": 0,
+   "exposure": "diversified-equity",
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Large Value"
+  },
+  "WFC": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "banks"
+  },
+  "XLU": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Utilities"
+  },
+  "XLV": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Health"
+  },
+  "XOP": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": null,
+   "instrument": "etf",
+   "subsector": "Equity Energy"
+  },
+  "ZG": {
+   "cash_equivalent": 0,
+   "exposure": null,
+   "hedgeye_group": "FINANCIALS",
+   "instrument": "stock",
+   "subsector": "housing_fintech"
+  }
+ }
+}

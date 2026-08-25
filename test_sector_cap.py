@@ -1,21 +1,45 @@
 """Sector cap tests. Thresholds, fail-closed routing, and THE ENERGY TEST.
 
-Groups 1-5 are PURE (evaluate() takes numbers, no DB). Group 6 needs the
-database for classification and is counted as a FAILURE if it cannot run — an
-unreachable DB must never make a cap test look green.
+PURE, per the repo's test doctrine: no DB, no network. Classification runs
+through classify_from() (the pure resolver) fed by tag columns captured in
+fixtures/book_snapshot_2026-08-24.json, and the concentration assertions run
+over that same frozen fixture — 2026-08-25: the live-DB version baked an
+older book's concentrations and blocked a code merge the day an authorized
+ingest moved the data. Data acceptance now lives in _acceptance_live.py;
+this file tests logic only.
 
 Run: python test_sector_cap.py
 """
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import db_pg
-db_pg._load_dotenv_fallback()          # BEFORE anything reading DATABASE_*_URL
-
 from tools.sector_cap import (ALLOW, WARN, REJECT, REFUSE, WARN_PCT,
                               REJECT_PCT, evaluate, doctrine_pct)
+
+# ── the frozen book fixture + the PURE classification path ──────────────────
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "fixtures", "book_snapshot_2026-08-24.json"),
+          encoding="utf-8") as _f:
+    BOOK_FX = json.load(_f)
+
+from tools.asset_classifier import classify_from
+from tools.doctrine import asset_class_for
+
+
+def fx_classify(t: str) -> dict:
+    """classify() minus the DB: the same pure classify_from() resolver, fed
+    the ticker_tags columns captured in the fixture. A name with no tags row
+    gets all-None signals, exactly what prime_cache would have yielded."""
+    tg = BOOK_FX["tags"].get(t, {})
+    return classify_from(t, instrument=tg.get("instrument"),
+                         subsector=tg.get("subsector"),
+                         hedgeye_group=tg.get("hedgeye_group"),
+                         exposure=tg.get("exposure"),
+                         cash_equivalent=tg.get("cash_equivalent"),
+                         doctrine_class=asset_class_for(t))
 
 FAIL = 0
 
@@ -120,10 +144,9 @@ check("shorts concentrate too (abs exposure)",
 print("\n6. THE ENERGY TEST — USO UGA XOP OIH HAL, and WHICH rule catches each:")
 print("   (a pass where everything is merely 'unclassified' is a FAILURE)")
 try:
-    from tools.asset_classifier import classify
     ENERGY_BOOK = {"USO": 5_000.0, "UGA": 4_000.0, "XOP": 5_000.0,
                    "OIH": 4_000.0, "HAL": 4_000.0}
-    cls = {t: classify(t) for t in ENERGY_BOOK}
+    cls = {t: fx_classify(t) for t in ENERGY_BOOK}
     for t in ENERGY_BOOK:
         check(f"{t} classifies (not unknown)",
               cls[t]["asset_class"] != "unknown", True)
@@ -176,8 +199,8 @@ except Exception as e:
 # ── 7. F1 taxonomy: XLU is capped, broad market is exempt ONLY by membership ─
 print("\n7. XLU is a SECTOR BET and must be capped, not exempted:")
 try:
-    from tools.asset_classifier import classify, BROAD_MARKET, COUNTRY_FUND
-    x = classify("XLU")
+    from tools.asset_classifier import BROAD_MARKET, COUNTRY_FUND
+    x = fx_classify("XLU")
     check("XLU asset_class", x["asset_class"], "equity")
     check("XLU sector is UTILITIES", x["sector"], "UTILITIES")
     check("XLU bucket_kind is sector", x["bucket_kind"], "sector")
@@ -225,7 +248,7 @@ except Exception as e:
 
 print("\n9. COUNTRY funds get their own rule, not a silent exemption:")
 try:
-    c = classify("EPHE")
+    c = fx_classify("EPHE")
     check("EPHE bucket_kind", c["bucket_kind"], "country")
     check("EPHE bucket", c["bucket"], "PHILIPPINES")
     r = ev(ticker="EPHE", sector=None, bucket_kind="country",
@@ -245,10 +268,10 @@ try:
     for t, want in (("QTUM", "GLOBAL TECH"), ("WOOD", "MATERIALS"),
                     ("TSLQ", "INDUSTRIALS"), ("LMT", "INDUSTRIALS"),
                     ("CBRL", "RESTAURANTS")):
-        c = classify(t)
+        c = fx_classify(t)
         check(f"{t} sector", c["sector"], want)
         check(f"{t} participates in the cap", c["bucket_kind"], "sector")
-    h = classify("HEFT")
+    h = fx_classify("HEFT")
     check("HEFT still unknown", h["asset_class"], "unknown")
     check("HEFT has no bucket", h["bucket"], None)
     check("HEFT refused by the cap",
@@ -268,12 +291,13 @@ check("no 'account_value_usd = 50_000.0' fallback remains",
 check("UnresolvedAccountValue is handled by name",
       "UnresolvedAccountValue" in src, True)
 check("declines by setting None", "account_value_usd = None" in src, True)
-from portfolio import account_value, UnresolvedAccountValue
-try:
-    account_value("KM13868186")
-    check("closed account raises", False, True)
-except UnresolvedAccountValue:
-    check("closed account raises UnresolvedAccountValue", True, True)
+# The live probe (account_value on a closed account raising against the real
+# DB) moved to _acceptance_live.py — a DB round-trip is data acceptance, not
+# logic. The raise-not-return-zero CONTRACT is still pinned here, on source:
+import portfolio as _pf
+_psrc = inspect.getsource(_pf.account_value)
+check("account_value raises UnresolvedAccountValue rather than returning 0",
+      "raise UnresolvedAccountValue" in _psrc, True)
 
 
 # ── 12. G5: THE WIRING — assert on the LIVE call sites, not the library ─────
@@ -319,32 +343,76 @@ import decision_engine as _de
 _dsrc = inspect.getsource(_de)
 check("decision_engine sizing is gated too", _dsrc.count("clamp_size") >= 2, True)
 
-print("\n14. PSX add is REJECTED through the WIRED path (needs DB):")
+print("\n14. CONCENTRATION LOGIC over the 2026-08-24 book fixture:")
+# The old version of this group ran clamp_size/size_for against the LIVE book
+# and baked its concentrations; every daily ingest re-broke it. This asserts
+# the LOGIC over the frozen fixture instead: classify every held name through
+# the pure resolver, aggregate sector buckets the way _exposures does, and
+# assert that pct -> verdict mapping holds — no specific percentage is baked.
 try:
-    allowed, v = clamp_size("PSX", 500.0, side="long", account="Individual")
-    check("clamp_size allows 0 extra dollars", allowed, 0.0)
-    check("decision is REJECT", v["decision"], REJECT)
-    check("bound by sector concentration", v["binding"], "sector_concentration")
-    check("bucket is ENERGY", v["bucket"], "ENERGY")
-    # and the sizing function itself returns a clamped size
-    dollars, dbg = _rc.size_for("Adding", "Individual", ticker="PSX", side="long")
-    check("size_for returns 0 for PSX", float(dollars or 0.0), 0.0)
-    check("size_for names the binding rule", dbg.get("clamped_by"),
-          "sector_concentration")
-    check("size_for carries the cap verdict", "sector_cap" in dbg, True)
-    # contrast: a name with headroom is NOT clamped to zero
-    ok_d, ok_v = clamp_size("OKTA", 500.0, side="long", account="Individual")
-    check("OKTA is allowed", ok_d, 500.0)
-    check("OKTA decision", ok_v["decision"], ALLOW)
-    # the CAP command answers
-    out = handle_cap_command("CAP PSX 500")
-    check("CAP command returns a verdict", "REJECT" in out, True)
-    check("CAP names the sector", "ENERGY" in out, True)
-    check("CAP shows projected pct", "projected" in out, True)
-    check("CAP declines non-CAP text", handle_cap_command("SCREEN energy longs"),
-          None)
+    ACCT = "X96383748"                       # the Individual account
+    av_fx = float(BOOK_FX["account_values"][ACCT])
+    buckets_fx: dict = {}
+    routed = {"sector": [], "country": [], "broad": [], "non_equity": [],
+              "unclassified": []}
+    for p in BOOK_FX["positions"]:
+        if p["account_number"] != ACCT:
+            continue
+        c = fx_classify(p["symbol"])
+        check_ok = isinstance(c, dict) and "asset_class" in c
+        if not check_ok:
+            check(f"{p['symbol']} classification returns a dict", check_ok, True)
+        if c["asset_class"] == "unknown":
+            routed["unclassified"].append(p["symbol"])
+        elif c["asset_class"] != "equity":
+            routed["non_equity"].append(p["symbol"])
+        elif c.get("bucket_kind") == "sector":
+            routed["sector"].append(p["symbol"])
+            buckets_fx[c["bucket"]] = (buckets_fx.get(c["bucket"], 0.0)
+                                       + abs(float(p["market_value"])))
+        elif c.get("bucket_kind") in ("country", "broad"):
+            routed[c["bucket_kind"]].append(p["symbol"])
+        else:
+            # equity with no bucket: the cap REFUSES it — that is a routing,
+            # not a drop, so it counts as classified-but-refusable
+            routed["unclassified"].append(p["symbol"])
+    n_pos = sum(1 for p in BOOK_FX["positions"] if p["account_number"] == ACCT)
+    check("every Individual position routed somewhere (none dropped)",
+          sum(len(v) for v in routed.values()), n_pos)
+    check("fixture book has sector-bucketed equities", len(buckets_fx) > 0, True)
+
+    # pct -> verdict mapping over every real bucket in the fixture
+    for bkt, val in sorted(buckets_fx.items()):
+        pct = val / av_fx * 100.0
+        want = (REJECT if pct > REJECT_PCT
+                else (WARN if pct > WARN_PCT else ALLOW))
+        r = ev(ticker="FXTR", sector=bkt, account_value=av_fx,
+               current_sector_value=val)
+        check(f"{bkt} at {pct:.0f}%% maps to {want}", r["decision"], want)
+        if want in (WARN, REJECT):
+            check(f"{bkt} binds on concentration", r["binding"],
+                  "sector_concentration")
+
+    # the frozen 8/24 book DOES contain a bucket over the hard limit — the
+    # cap must reject it. (Which bucket and by how much is data; that it is
+    # rejected is logic. If a future FIXTURE has no such bucket, capture a
+    # new one that does or synthesize the case — do not delete the check.)
+    over = [b for b, v in buckets_fx.items() if v / av_fx * 100 > REJECT_PCT]
+    check("fixture contains at least one over-cap bucket", len(over) > 0, True)
+
+    # an UNCLASSIFIED name is refused by the cap, never silently allowed
+    if routed["unclassified"]:
+        t0 = routed["unclassified"][0]
+        r = ev(ticker=t0, asset_class="unknown", sector=None,
+               bucket_kind=None, bucket=None, account_value=av_fx)
+        check(f"unclassified holding {t0} is REFUSED, not allowed",
+              r["decision"], REFUSE)
+
+    # the CAP command still declines non-CAP text (pure sentinel gate)
+    check("CAP declines non-CAP text",
+          handle_cap_command("SCREEN energy longs"), None)
 except Exception as e:
-    print(f"  !! WIRED-PATH TEST COULD NOT RUN ({e}) — counted as FAILURE.")
+    print(f"  !! FIXTURE CONCENTRATION TEST COULD NOT RUN ({e}) — FAILURE.")
     FAIL += 1
 
 print("\n" + ("ALL PASS" if FAIL == 0 else f"{FAIL} FAILURE(S)"))
