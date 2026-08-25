@@ -830,6 +830,21 @@ def _cli() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
     )
 
+    # Provenance line (2026-08-25): the scanner stamped no sha, so its code
+    # provenance since 8/9 was unauditable. SAME resolver the pack artifacts
+    # use — one helper, one truth.
+    try:
+        from tools.eod_stat_pack import build_provenance
+        _p = build_provenance()
+        logging.getLogger("scanner").info(
+            "code provenance: sha=%s built_by=%s sha_source=%s dirty_tree=%s "
+            "dirty_tracked_n=%s",
+            (_p["sha"] or "?")[:12], _p["built_by"], _p["sha_source"],
+            _p["dirty_tree"], _p["dirty_tracked_n"])
+    except Exception as _e:
+        logging.getLogger("scanner").warning("code provenance unavailable: %s",
+                                             _e)
+
     summary = scan(
         tickers=args.tickers,
         max_tickers=args.max_tickers,

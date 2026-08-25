@@ -683,6 +683,78 @@ def test_dirty_tree_stamp_true_dirty_false_clean():
         == (True, 3)
 
 
+def test_provenance_resolution_order_is_honest_at_every_step():
+    """082 (A3/A4): each resolution branch returns a (sha, built_by,
+    sha_source) triple describing the SAME process, and dirty_tree attaches
+    ONLY to a local-git sha — NULL everywhere else, never a guess."""
+    from tools.eod_stat_pack import apply_dirty_rule, resolve_provenance as rp
+
+    # 1. local git wins, named machine
+    p = rp("aaa111", "bbb222", "ccc333", "WINBOX")
+    assert (p["sha"], p["built_by"], p["sha_source"]) == \
+        ("aaa111", "WINBOX", "local-git")
+    # 2. railway env
+    p = rp(None, "bbb222", "ccc333", "WINBOX")
+    assert (p["sha"], p["built_by"], p["sha_source"]) == \
+        ("bbb222", "railway", "railway-env")
+    # 3. bot_state is ANOTHER process's stamp — machine must read unknown
+    p = rp(None, None, "ccc333", "WINBOX")
+    assert (p["sha"], p["built_by"], p["sha_source"]) == \
+        ("ccc333", "unknown", "bot_state")
+    # 4. nothing
+    p = rp(None, None, None, "WINBOX")
+    assert (p["sha"], p["built_by"], p["sha_source"]) == \
+        (None, "WINBOX", "unknown")
+    assert rp(None, None, None, None)["built_by"] == "unknown"
+
+    # A4: dirty only rides a local sha
+    dirty = (True, 14)
+    assert apply_dirty_rule(rp("aaa", None, None, "H"), dirty)["dirty_tree"] \
+        is True
+    for p in (rp(None, "bbb", None, "H"), rp(None, None, "ccc", "H"),
+              rp(None, None, None, "H")):
+        out = apply_dirty_rule(p, dirty)
+        assert out["dirty_tree"] is None and out["dirty_tracked_n"] is None, \
+            f"dirty must be NULL for sha_source={p['sha_source']}"
+
+
+def test_persist_false_never_touches_the_ledger_and_default_is_true():
+    """B (2026-08-25): build_eod_pack(persist=False) must not call
+    _persist_pack at all — the test suite used to file three packs into the
+    production ledger per sweep. The default stays True."""
+    import inspect as _ins
+
+    import tools.eod_stat_pack as esp
+    import tools.trading_calendar as tc
+
+    sig = _ins.signature(esp.build_eod_pack)
+    assert sig.parameters["persist"].default is True
+
+    calls = []
+    saved = (esp._header, esp._bars_from_store, esp._persist_pack,
+             tc.resolve_session_date, tc.validate_bar_date,
+             tc.duplicate_final_bar, tc.last_completed_session)
+    try:
+        esp._header = lambda asof=None: (["HDR"], None, True)
+        esp._bars_from_store = lambda a, s: {
+            sym: {"closes": [1.0], "dates": [dt.date(2026, 8, 22)]}
+            for sym in s}
+        esp._persist_pack = lambda *a, **k: calls.append(a)
+        tc.resolve_session_date = lambda bars: (dt.date(2026, 8, 22), [])
+        tc.validate_bar_date = lambda d: (False, "test: forced block")
+        tc.duplicate_final_bar = lambda bars: (False, "")
+        tc.last_completed_session = lambda: dt.date(2026, 8, 21)
+        out = esp.build_eod_pack(persist=False)     # blocked path, no persist
+        assert "EOD PACK BLOCKED" in out
+        assert calls == [], "persist=False must not call _persist_pack"
+        esp.build_eod_pack()                        # default True DOES persist
+        assert len(calls) == 1
+    finally:
+        (esp._header, esp._bars_from_store, esp._persist_pack,
+         tc.resolve_session_date, tc.validate_bar_date,
+         tc.duplicate_final_bar, tc.last_completed_session) = saved
+
+
 def test_blocked_pack_persists_exactly_once():
     """D8 regression: the blocked path used to have _persist_pack AFTER a
     return (unreachable, `blocked` undefined) — a blocked run was never

@@ -403,9 +403,12 @@ try:
     import db_pg as _db
     _db._load_dotenv_fallback()
     from tools.eod_stat_pack import build_eod_pack
-    build_eod_pack()                    # ensure bars are banked for this as-of
-    b1 = build_eod_pack()               # then TWO REPLAY builds, as required
-    b2 = build_eod_pack()
+    # persist=False (2026-08-25): these three builds used to file three rows
+    # into the PRODUCTION artifact ledger on every suite sweep — the source
+    # of the retracted 8/24 "scheduled tasks built branch packs" finding.
+    build_eod_pack(persist=False)       # ensure bars are banked for this as-of
+    b1 = build_eod_pack(persist=False)  # then TWO REPLAY builds, as required
+    b2 = build_eod_pack(persist=False)
     d1, d2 = _data_only(b1), _data_only(b2)
     check("BOTH builds replayed from the store",
           ("REPLAYED from store" in b1, "REPLAYED from store" in b2),

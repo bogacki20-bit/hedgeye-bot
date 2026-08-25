@@ -1079,10 +1079,12 @@ def _rates_credit_block() -> str:
 
 
 def _deployed_sha() -> str | None:
-    """The commit the RUNNING process was built from. The single most useful
-    field in the artifact table: on 2026-08-16 the first question asked was
-    'which build produced this', and nothing recorded it."""
-    import subprocess
+    """LAST-RESORT sha: bot_state.bot_git_sha — ANOTHER MACHINE'S stamp (main.py
+    on Railway writes it at boot). Until 2026-08-25 this was preferred over
+    local HEAD, so packs built on the Windows box recorded Railway's commit
+    while 079's locally-measured dirty_tree sat beside it. It is now only
+    resolution branch 3 in resolve_provenance(), labelled sha_source=
+    'bot_state' / built_by='unknown' so it can never masquerade as local."""
     try:
         with __import__("db_pg").get_conn() as c:
             cur = c.cursor()
@@ -1092,11 +1094,69 @@ def _deployed_sha() -> str | None:
                 return r[0]
     except Exception:
         pass
+    return None
+
+
+def resolve_provenance(local_sha, railway_sha, bot_state_sha,
+                       hostname) -> dict:
+    """Pure. (sha, built_by, sha_source) per the 2026-08-25 A3 order — the
+    recorded sha and the recorded machine must always describe the SAME
+    process, so each branch sets both together and never mixes sources:
+      1. local git HEAD      -> 'local-git',   built_by = this hostname
+      2. Railway commit env  -> 'railway-env', built_by = 'railway'
+      3. bot_state stamp     -> 'bot_state',   built_by = 'unknown' (the
+         stamp is another process's; claiming a machine would be a guess)
+      4. nothing             -> sha None, 'unknown'
+    """
+    if local_sha:
+        return {"sha": local_sha, "built_by": hostname or "unknown",
+                "sha_source": "local-git"}
+    if railway_sha:
+        return {"sha": railway_sha, "built_by": "railway",
+                "sha_source": "railway-env"}
+    if bot_state_sha:
+        return {"sha": bot_state_sha, "built_by": "unknown",
+                "sha_source": "bot_state"}
+    return {"sha": None, "built_by": hostname or "unknown",
+            "sha_source": "unknown"}
+
+
+def build_provenance() -> dict:
+    """{sha, built_by, sha_source, dirty_tree, dirty_tracked_n} for THIS
+    process. dirty_tree is measured ONLY when sha_source='local-git' — a
+    dirty flag next to another machine's sha is an actively wrong claim, so
+    every other branch writes NULL ('could not have known'). Never raises."""
+    import socket
+    import subprocess
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    local_sha = None
     try:
-        return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
-                              text=True, timeout=5).stdout.strip() or None
+        r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                           text=True, timeout=10, cwd=repo)
+        if r.returncode == 0:
+            local_sha = r.stdout.strip() or None
     except Exception:
-        return None
+        pass
+    railway_sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+    bot_state_sha = None
+    if not local_sha and not railway_sha:
+        bot_state_sha = _deployed_sha()
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = None
+    p = resolve_provenance(local_sha, railway_sha, bot_state_sha, hostname)
+    return apply_dirty_rule(p, _tree_state())
+
+
+def apply_dirty_rule(p, tree_state) -> dict:
+    """Pure. A4: dirty_tree/dirty_tracked_n attach ONLY to a local-git sha.
+    A dirty flag measured here next to another machine's sha is an actively
+    wrong claim, so every other sha_source records NULL — could not have
+    known."""
+    dirty, n = tree_state if p.get("sha_source") == "local-git" \
+        else (None, None)
+    return dict(p, dirty_tree=dirty, dirty_tracked_n=n)
 
 
 def tree_state_from_porcelain(full_out, tracked_out) -> tuple:
@@ -1142,11 +1202,11 @@ def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
     the pack being delivered. Logs loudly instead, because an unarchived run is
     an undiagnosable one.
 
-    dirty_tree (079): whether the WORKING TREE differed from HEAD at build
-    time. The sha alone cannot say that — a pack built from a dirty tree
-    stamps a clean-looking sha (the 2026-08-25 audit found eight such packs,
-    all classified ON-MASTER)."""
-    dirty, dirty_n = _tree_state()
+    Provenance (082): sha, built_by and sha_source come from ONE resolver
+    (build_provenance) so they always describe the same process; dirty_tree
+    (079) is NULL unless the sha is local. Before 082 the sha preferred
+    bot_state — the RAILWAY bot's stamp — which voided the 8/25 audit."""
+    p = build_provenance()
     try:
         import db_pg
         with db_pg.get_conn() as c:
@@ -1155,14 +1215,17 @@ def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
                 """INSERT INTO eod_pack_artifacts
                    (built_at_et, last_bar_date, bar_date_valid, block_reason,
                     deployed_sha, symbols_ok, symbols_total, body,
-                    dirty_tree, dirty_tracked_n)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (built_et, last_bar, valid, block_reason, _deployed_sha(),
-                 ok_n, total_n, body, dirty, dirty_n))
+                    dirty_tree, dirty_tracked_n, built_by, sha_source)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   RETURNING id""",
+                (built_et, last_bar, valid, block_reason, p["sha"],
+                 ok_n, total_n, body, p["dirty_tree"], p["dirty_tracked_n"],
+                 p["built_by"], p["sha_source"]))
             rid = cur.fetchone()[0]
             c.commit()
         log.info("eod pack archived as artifact %s (bar %s, valid=%s, "
-                 "dirty_tree=%s)", rid, last_bar, valid, dirty)
+                 "sha_source=%s, built_by=%s, dirty_tree=%s)", rid, last_bar,
+                 valid, p["sha_source"], p["built_by"], p["dirty_tree"])
         return rid
     except Exception as e:
         log.error("EOD PACK NOT ARCHIVED (%s) — this run will be "
@@ -1170,8 +1233,15 @@ def _persist_pack(body, last_bar, valid, block_reason, ok_n, total_n, built_et):
         return None
 
 
-def build_eod_pack() -> str:
-    """Assemble the pack. Every section guarded; a failure prints in place."""
+def build_eod_pack(persist: bool = True) -> str:
+    """Assemble the pack. Every section guarded; a failure prints in place.
+
+    persist=False builds and returns the body WITHOUT touching the artifact
+    ledger — for tests. Until 2026-08-25 every test-suite sweep filed three
+    packs into the production table (test_trading_calendar builds the pack
+    per replay assertion), which is how the ledger grew rows that produced a
+    false audit finding. The default stays True: the live path and the
+    scheduled runner archive exactly as before."""
     from tools.trading_calendar import last_completed_session as _lcs
     parts, header_quad, quad_stale = _header(_lcs())
 
@@ -1238,7 +1308,9 @@ def build_eod_pack() -> str:
         # investigation needs to see. (2026-08-24: these two lines sat AFTER a
         # return and `blocked` was never assigned — a blocked pack was never
         # archived, the exact unfalsifiability the 8/16 Sunday-bar bug had.)
-        _persist_pack(blocked, last_bar, False, reason, got, len(need), built)
+        if persist:
+            _persist_pack(blocked, last_bar, False, reason, got, len(need),
+                          built)
         return blocked
     asof_line_idx = len(parts)
     parts.append(f"DATA AS OF: {last_bar:%a %Y-%m-%d} close")
@@ -1378,7 +1450,8 @@ def build_eod_pack() -> str:
     # RESOLVED bar date, the validation result and the DEPLOYED COMMIT SHA.
     # The 2026-08-16 Sunday-bar bug was unfalsifiable purely because no such
     # record existed; the next occurrence is answerable from one query.
-    _persist_pack(body, last_bar, True, None, got, len(need), built)
+    if persist:
+        _persist_pack(body, last_bar, True, None, got, len(need), built)
     return body
 
 
