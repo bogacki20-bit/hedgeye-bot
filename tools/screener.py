@@ -597,6 +597,9 @@ WITH mem AS (SELECT DISTINCT unnest(%(members)s::text[]) AS ticker),
         WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
           AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0)
 SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
+       lm.price,
+       COALESCE(hb.range_low,  lm.range_low)  AS range_low,
+       COALESCE(hb.range_high, lm.range_high) AS range_high,
        (lm.price - COALESCE(hb.range_low, lm.range_low))
          / NULLIF(COALESCE(hb.range_high, lm.range_high)
                   - COALESCE(hb.range_low, lm.range_low), 0) AS range_pos,
@@ -956,6 +959,16 @@ def _refresh_range_pos_live(rows):
             r["_price"] = px_eod
             r["_rp_stale"] = True
     _apply_shadow_failover(rows)
+    # THE resolver (2026-08-26, the HYG defect): MFR's PUBLISHED position
+    # wins over anything derived; every row gets rp_source. The derived
+    # value survives in _rp_derived and a >0.05 disagreement is recorded
+    # and squawked once per ticker per day.
+    try:
+        from tools.rp_resolve import apply_rp_resolution
+        apply_rp_resolution(rows)
+    except Exception as e:
+        log.warning("SCREEN: rp resolution unavailable (%s) — derived "
+                    "values stand, UNLABELLED", e)
 
 
 def _apply_shadow_failover(rows) -> None:
@@ -1007,7 +1020,15 @@ def _rp_str(r) -> str:
     if r.get("range_pos") is None:
         return "n/a"
     s = f"{float(r['range_pos']):.2f}"
-    return s + "!eod" if r.get("_rp_stale") else s
+    if r.get("_rp_stale"):
+        s += "!eod"
+    # D5 (2026-08-26): a number whose provenance is invisible is how the HYG
+    # defect survived — every printed rp carries its source tag.
+    src = r.get("rp_source")
+    if src:
+        from tools.rp_resolve import SRC_TAG
+        s += "·" + SRC_TAG.get(src, src)
+    return s
 
 
 def _px_str(r) -> str:

@@ -124,7 +124,11 @@ def _persist(payload, snapshot_date):
         print(f"ERROR: persistence failed: {e}", file=sys.stderr); return 3
 
 def run(dry_run=False):
-    today = dt.datetime.now(dt.timezone.utc).date()   # UTC: session-dated row; payload = _compute()
+    today = dt.datetime.now(dt.timezone.utc).date()   # UTC: session-dated row
+    # 2026-08-26: `payload = _compute()` had been absorbed into the comment
+    # above (an editing accident), so run() NameError'd on every invocation
+    # and the daily upsert silently died — the matrix froze at 2026-07-24.
+    payload = _compute()
     if not payload["pairs"]: print("ERROR: no pairs computed", file=sys.stderr); return 4
     print(f"computed {len(payload['pairs'])} pairs over {len(payload['tickers'])} names, windows {WINDOWS}")
     held = _held_names()

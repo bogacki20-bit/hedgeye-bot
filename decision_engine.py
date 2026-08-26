@@ -266,6 +266,7 @@ def _get_mfr_latest(ticker: str) -> Optional[dict]:
                            iv, rv, daily_pct_change, previous_day_volume,
                            call_wall_mfr, put_wall_mfr, zero_gamma,
                            absolute_gamma, iv30_mfr,
+                           mfr_pos_short, mfr_pos_long,
                            fetched_at
                       FROM mfr_snapshots
                      WHERE ticker = %s
@@ -2082,7 +2083,13 @@ def decide_notifier(
     except Exception:
         pct_primary = None
     try:
-        if (price is not None and mfr_lo is not None and mfr_hi is not None
+        # 083 (2026-08-26): MFR PUBLISHES positionOnRange — prefer the
+        # vendor's own number over re-deriving it (the HYG 1.29-vs-0.89
+        # defect). The derived form remains the fallback for older
+        # snapshots that predate the column.
+        if mfr.get("mfr_pos_short") is not None:
+            pct_mfr = float(mfr["mfr_pos_short"]) * 100.0
+        elif (price is not None and mfr_lo is not None and mfr_hi is not None
                 and float(mfr_hi) > float(mfr_lo)):
             pct_mfr = ((float(price) - float(mfr_lo))
                        / (float(mfr_hi) - float(mfr_lo))) * 100.0

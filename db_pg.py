@@ -286,6 +286,14 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
     """
     p = payload or {}
     range_data = (p.get("rangeData") or {})
+    lt_range_data = (p.get("ltRangeData") or {})
+    # 083 (2026-08-26): MFR PUBLISHES the position-on-range for both tiers —
+    # rangeData.positionOnRange (the dashboard's short-term %) and
+    # ltRangeData.positionOnRange. The bot re-derived it for months and had
+    # nothing to check the derivation against (the HYG 1.29-vs-0.89 defect).
+    mfr_pos_short = range_data.get("positionOnRange")
+    mfr_pos_long = lt_range_data.get("positionOnRange")
+    rp_source = "mfr-published" if mfr_pos_short is not None else "derived-mfr"
     # gammaMetrics.gamma — present on US equities with listed options,
     # absent (null) on commodities/FX/VIX/thin tickers. Drill defensively.
     gm = (p.get("gammaMetrics") or {})
@@ -306,9 +314,11 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                    iv, rv, daily_pct_change, previous_day_volume,
                    call_wall_mfr, put_wall_mfr, zero_gamma,
                    absolute_gamma, iv30_mfr,
+                   mfr_pos_short, mfr_pos_long, rp_source,
                    full_payload, fetched_at, source_endpoint)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s,
+                        %s, %s, %s,
                         %s, NOW(), %s)
                 ON CONFLICT (ticker, snapshot_date) DO UPDATE SET
                   price             = EXCLUDED.price,
@@ -327,6 +337,9 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                   zero_gamma        = EXCLUDED.zero_gamma,
                   absolute_gamma    = EXCLUDED.absolute_gamma,
                   iv30_mfr          = EXCLUDED.iv30_mfr,
+                  mfr_pos_short     = EXCLUDED.mfr_pos_short,
+                  mfr_pos_long      = EXCLUDED.mfr_pos_long,
+                  rp_source         = EXCLUDED.rp_source,
                   full_payload      = EXCLUDED.full_payload,
                   fetched_at        = NOW()
                 """,
@@ -349,6 +362,9 @@ def save_mfr_snapshot(ticker: str, snapshot_date, payload: dict,
                     zero_gamma,
                     absolute_gamma,
                     iv30_mfr,
+                    mfr_pos_short,
+                    mfr_pos_long,
+                    rp_source,
                     json.dumps(payload),
                     source_endpoint,
                 ),

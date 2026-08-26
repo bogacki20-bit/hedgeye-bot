@@ -40,12 +40,13 @@ _MACRO = ["UUP", "TLT", "SHY", "LQD", "HYG"]
 def _rp_series(cur, tickers, days=10) -> dict:
     """{ticker: [(date, rp, lo, hi), ...] ascending} computed in Python.
 
-    Source hierarchy: a Hedgeye risk range published for the same session
-    overrides the MFR band for that date (same per-date join keith_pattern
-    uses). The join predicate guarantees both hdg bounds are present and
-    ordered, so the COALESCE pair can never mix feeds."""
+    2026-08-26 (the HYG defect): rp per date is MFR's PUBLISHED
+    positionOnRange when the snapshot carries it (083 backfilled 100% of
+    history), else derived — with a same-session Hedgeye risk range
+    overriding the MFR band for that date, as before. The lo/hi pair stays
+    the presentation band either way."""
     cur.execute(
-        """SELECT m.ticker, m.snapshot_date, m.price,
+        """SELECT m.ticker, m.snapshot_date, m.price, m.mfr_pos_short,
                   COALESCE(r.buy_trade,  m.range_low)  AS range_low,
                   COALESCE(r.sell_trade, m.range_high) AS range_high
            FROM mfr_snapshots m
@@ -56,10 +57,16 @@ def _rp_series(cur, tickers, days=10) -> dict:
            WHERE m.ticker = ANY(%s) AND m.snapshot_date >= CURRENT_DATE - %s
            ORDER BY m.ticker, m.snapshot_date""", (tickers, days))
     out: dict = {}
-    for t, d, px, lo, hi in cur.fetchall():
-        if px is None or lo is None or hi is None or float(hi) <= float(lo):
+    for t, d, px, pub, lo, hi in cur.fetchall():
+        if pub is not None:
+            rp = float(pub)
+            if lo is None or hi is None:
+                lo, hi = 0.0, 0.0
+        elif (px is None or lo is None or hi is None
+                or float(hi) <= float(lo)):
             continue
-        rp = (float(px) - float(lo)) / (float(hi) - float(lo))
+        else:
+            rp = (float(px) - float(lo)) / (float(hi) - float(lo))
         out.setdefault(t, []).append((d, round(rp, 3), float(lo), float(hi)))
     return out
 
@@ -403,14 +410,13 @@ def build_book_table(fills: dict) -> str:
     return "\n".join(out)
 
 
-# ═══════════════════════ BOOK RP (2026-08-24) ══════════════════════════════
-# The whole book with the range position on every line — including the names
-# the bot CANNOT range (dark), which the alert path rightly drops and a book
-# listing must not. Dark semantics come from tools.mfr_coverage.is_dark_row,
-# the same predicate MFR COVERAGE uses, so the two features always agree.
-
-RP_TRIM = 0.80          # longs at/above: trim candidates
-RP_ADD = 0.20           # longs at/below: add candidates
+# ═══════════════════════ BOOK RP v2 (2026-08-26) ═══════════════════════════
+# The whole book with BOTH range positions (short- and long-term, MFR's own
+# published values first — see tools/rp_resolve), a provenance tag on every
+# rp, five zones with verdicts for longs AND shorts, a low-signal filter for
+# pennies-wide bands, per-row top correlation, and correlation-built risk
+# clusters with the sector cap beside them. Dark semantics still come from
+# tools.mfr_coverage.is_dark_row so MFR COVERAGE always agrees.
 
 _RP_TICKER_RE = None    # compiled lazily in _plausible_ticker
 
@@ -428,24 +434,31 @@ def _plausible_ticker(t: str) -> bool:
     return bool(_RP_TICKER_RE.match(t)) and bool(re.search(r"[A-Z]", t))
 
 
-def rp_summary(table_rows) -> dict:
-    """Pure. {trim, add, dark} sorted ticker lists from BOOK RP table rows.
-    trim/add are LONGS ONLY at the inclusive 0.80 / 0.20 boundaries; dark is
-    every row the shared predicate calls dark (deduped across accounts)."""
+def rp_zone_lists(table_rows) -> dict:
+    """Pure. {trim, add, cover, low_signal, dark} sorted ticker lists.
+    Zones and verdicts come from tools.rp_resolve (the one place the
+    boundaries live): longs — top/breakout = trim, bottom/breakdown = add;
+    SHORTS INVERT — top/breakout = add-to-short, bottom/breakdown = cover
+    (shorts previously got no verdict at all; SUJA sat at 1.02 short and
+    appeared nowhere). LOW-SIGNAL and CASH-EQ rows are excluded from every
+    candidate list but never from the table."""
     from tools.mfr_coverage import is_dark_row
-    trim, add, dark = set(), set(), set()
+    from tools.rp_resolve import verdict as rp_verdict, zone as rp_zone
+    out = {"trim": set(), "add": set(), "cover": set(),
+           "low_signal": set(), "dark": set()}
     for r in table_rows:
         if is_dark_row(r):
-            dark.add(r["ticker"])
+            out["dark"].add(r["ticker"])
             continue
-        if r.get("side") != "long":
+        if r.get("low_signal"):
+            out["low_signal"].add(r["ticker"])
             continue
-        rp = r.get("rp_now")
-        if rp >= RP_TRIM:
-            trim.add(r["ticker"])
-        elif rp <= RP_ADD:
-            add.add(r["ticker"])
-    return {"trim": sorted(trim), "add": sorted(add), "dark": sorted(dark)}
+        if r.get("cash_eq"):
+            continue
+        v = rp_verdict(rp_zone(r.get("rp_now")), r.get("side"))
+        if v:
+            out[v].add(r["ticker"])
+    return {k: sorted(v) for k, v in out.items()}
 
 
 def sort_rp_rows(table_rows) -> list:
@@ -458,38 +471,173 @@ def sort_rp_rows(table_rows) -> list:
                                  r.get("ticker") or "", r.get("acct") or ""))
 
 
-def format_book_rp(table_rows) -> str:
-    """Pure. Summary lines first (the actionable rows), then the full table,
-    rp descending with dark rows last."""
+def build_rp_clusters(pairs, dollars_by_ticker, total_book,
+                      thresh=0.70) -> dict:
+    """Pure. Risk clusters from a correlation-pair list — NOT from sector
+    tags: the 2025 energy loss was six names in different-looking buckets
+    that moved as one, and a sector-built view missed it exactly the way
+    the sector view did.
+
+    pairs: [{"a": t1, "b": t2, "corr": c}] (the 90d window). Union-find on
+    |corr| >= thresh over the held set; per cluster: members, combined
+    ABS dollars, pct of TOTAL book, max and avg pairwise corr among
+    members. Names with no pair row at all land in "unclustered" so
+    nothing vanishes because the math could not reach it."""
+    held = sorted(dollars_by_ticker)
+    seen_in_pairs = set()
+    parent = {t: t for t in held}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    corr_of = {}
+    for p in pairs:
+        a, b, c = p.get("a"), p.get("b"), p.get("corr")
+        if a in parent and b in parent and c is not None:
+            seen_in_pairs |= {a, b}
+            corr_of[frozenset((a, b))] = float(c)
+            if abs(float(c)) >= thresh:
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    parent[ra] = rb
+
+    groups = {}
+    for t in held:
+        if t in seen_in_pairs:
+            groups.setdefault(find(t), []).append(t)
+    clusters = []
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        members = sorted(members)
+        cs = [corr_of[frozenset((a, b))]
+              for i, a in enumerate(members) for b in members[i + 1:]
+              if frozenset((a, b)) in corr_of]
+        dollars = sum(abs(dollars_by_ticker[t]) for t in members)
+        clusters.append({
+            "members": members, "dollars": dollars,
+            "pct": (dollars / total_book * 100) if total_book else None,
+            "max_corr": max(cs) if cs else None,
+            "avg_corr": (sum(cs) / len(cs)) if cs else None})
+    clusters.sort(key=lambda c: -c["dollars"])
+    unclustered = sorted(t for t in held if t not in seen_in_pairs)
+    return {"clusters": clusters, "unclustered": unclustered,
+            "unclustered_dollars": sum(abs(dollars_by_ticker[t])
+                                       for t in unclustered)}
+
+
+def top_corr_map(pairs, held) -> dict:
+    """Pure. {ticker: (other, corr)} — each held name's most-|corr| other
+    held position from the 90d pairs. Missing names simply absent (render
+    n/a, never 0.00)."""
+    held_set = set(held)
+    best = {}
+    for p in pairs:
+        a, b, c = p.get("a"), p.get("b"), p.get("corr")
+        if c is None or a not in held_set or b not in held_set:
+            continue
+        c = float(c)
+        for x, y in ((a, b), (b, a)):
+            if x not in best or abs(c) > abs(best[x][1]):
+                best[x] = (y, c)
+    return best
+
+
+def format_rp_clusters(cl, warn_pct=8.0, reject_pct=12.0) -> list:
+    """Pure. The RISK CLUSTERS block lines. Same 8/12 thresholds as the
+    sector cap — a correlated cluster IS the exposure, whatever the GICS
+    sector says."""
+    out = ["RISK CLUSTERS (90d corr >= 0.70 — positions that are one bet)"]
+    if not cl["clusters"]:
+        out.append("  none — no held pair reaches the threshold")
+    for i, c in enumerate(cl["clusters"], 1):
+        pct = c["pct"]
+        flag = ""
+        if pct is not None:
+            flag = ("  !! REJECT-LEVEL (>12%)" if pct > reject_pct
+                    else ("  ! warn (>8%)" if pct > warn_pct else ""))
+        out.append(
+            f"  #{i}  ${c['dollars']:,.0f}  "
+            + (f"{pct:.1f}% of book  " if pct is not None else "?% ")
+            + f"max corr {c['max_corr']:.2f}  avg {c['avg_corr']:.2f}  "
+            + " ".join(c["members"]) + flag)
+    if cl["unclustered"]:
+        out.append(f"  UNCLUSTERED (no correlation data, "
+                   f"${cl['unclustered_dollars']:,.0f}): "
+                   + " ".join(cl["unclustered"]))
+    return out
+
+
+def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
+                   sector_cap_lines=None, total_book=None,
+                   corr_coverage=None) -> str:
+    """Pure. Zone verdict lines, the full two-range table (rp desc, dark
+    last), risk clusters, then the sector-cap verdict — two lenses side by
+    side so neither reads as an all-clear on its own."""
     from tools.mfr_coverage import is_dark_row
-    s = rp_summary(table_rows)
-    out = [f"BOOK RP — every position with its range position",
-           f"NEAR TOP OF RANGE (rp>={RP_TRIM:.2f}, longs — trim candidates): "
-           + (" ".join(s["trim"]) or "none"),
-           f"NEAR BOTTOM (rp<={RP_ADD:.2f}, longs — add candidates): "
-           + (" ".join(s["add"]) or "none"),
-           "HELD AND DARK (no MFR range — the enrollment to-do): "
-           + (" ".join(s["dark"]) or "none"),
-           "",
-           f"{'tkr':<8}{'acct':<10}{'side':<6}{'$val':>9}{'%acct':>7}"
-           f"{'rp':>6}  {'5d lo-hi':<11}{'trend':<9}{'PM bucket'}"]
+    from tools.rp_resolve import SRC_TAG
+    z = rp_zone_lists(table_rows)
+    out = ["BOOK RP — both ranges, provenance on every rp"]
+    if total_book:
+        out.append(f"total book (cash included): ${total_book:,.2f} — "
+                   f"%book is against this, per the 2026-08-25 cap policy")
+    out += [
+        "TRIM candidates (longs at/above 0.80 or breakout): "
+        + (" ".join(z["trim"]) or "none"),
+        "ADD candidates (longs at/below 0.20; shorts at/above 0.80 — a "
+        "run-over short is an add): " + (" ".join(z["add"]) or "none"),
+        "COVER candidates (shorts at/below 0.20 or breakdown): "
+        + (" ".join(z["cover"]) or "none"),
+        "LOW-SIGNAL (band under 2% of price — rp printed, verdicts "
+        "suppressed): " + (" ".join(z["low_signal"]) or "none"),
+        "HELD AND DARK (no rp from any tier — the enrollment to-do): "
+        + (" ".join(z["dark"]) or "none"),
+        "",
+        f"{'tkr':<8}{'acct':<9}{'side':<6}{'$val':>9}{'%book':>7}"
+        f"{'rpST':>7}{'rpLT':>6}  {'5d lo-hi':<11}{'trend':<9}"
+        f"{'PM bucket':<15}{'src':<6}{'top-corr'}"]
 
     def _f(v, fmt):
         return f"{v:{fmt}}" if v is not None else "n/a"
 
     for r in sort_rp_rows(table_rows):
-        band = ("n/a" if r.get("rp_5d_min") is None or r.get("rp_5d_max") is None
+        band = ("n/a" if r.get("rp_5d_min") is None
+                or r.get("rp_5d_max") is None
                 else f"{r['rp_5d_min']:.2f}-{r['rp_5d_max']:.2f}")
         pct = (f"{r['pct']:.1f}%" if r.get("pct") is not None else "n/a")
+        src = SRC_TAG.get(r.get("rp_source"), r.get("rp_source") or "-")
+        tc = (corr_by_ticker or {}).get(r["ticker"])
+        tc_s = f"{tc[0]} {tc[1]:+.2f}" if tc else "n/a"
+        tags = []
+        if is_dark_row(r):
+            tags.append("DARK")
+        if r.get("low_signal"):
+            tags.append("LOW-SIGNAL")
+        if r.get("cash_eq"):
+            tags.append("CASH-EQ")
         out.append(
-            f"{r['ticker']:<8}{(r.get('acct') or '?'):<10}"
+            f"{r['ticker']:<8}{(r.get('acct') or '?'):<9}"
             f"{(r.get('side') or '?'):<6}"
             f"{_f(r.get('val'), ',.0f'):>9}"
             f"{pct:>7}"
-            f"{_f(r.get('rp_now'), '.2f'):>6}  {band:<11}"
+            f"{_f(r.get('rp_now'), '.2f'):>7}"
+            f"{_f(r.get('rp_lt'), '.2f'):>6}  {band:<11}"
             f"{(r.get('trend') or 'n/a'):<9}"
-            f"{r.get('bucket') or '-'}"
-            + ("   DARK" if is_dark_row(r) else ""))
+            f"{(r.get('bucket') or '-'):<15}{src:<6}{tc_s}"
+            + (("   " + " ".join(tags)) if tags else ""))
+
+    if corr_coverage:
+        out.append("")
+        out.append(corr_coverage)
+    if clusters is not None:
+        out.append("")
+        out += format_rp_clusters(clusters)
+    if sector_cap_lines:
+        out.append("")
+        out += sector_cap_lines
     return "\n".join(out)
 
 
@@ -509,11 +657,54 @@ def _acct_label(acct_no) -> str:
     return _ACCT_LABELS_FALLBACK.get(acct_no) or f"…{str(acct_no)[-4:]}"
 
 
+def _sector_cap_lines() -> list:
+    """The sector-cap lens, unchanged, rendered for the enforced account:
+    one verdict line per PM sector bucket held in the Individual account
+    (largest holding as the probe), WARN/REJECT first."""
+    try:
+        import db_pg
+        from tools.asset_classifier import classify
+        from tools.sector_cap import check_trade, format_verdict
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT upper(underlying), sum(market_value)
+                   FROM book_positions
+                   WHERE snapshot_date = (SELECT max(snapshot_date)
+                                          FROM book_positions)
+                     AND account_number = 'X96383748'
+                     AND asset_class <> 'cash' AND COALESCE(quantity,0) <> 0
+                   GROUP BY 1""")
+            held = {t: float(v or 0) for t, v in cur.fetchall()}
+        probe = {}
+        for t, mv in held.items():
+            c = classify(t)
+            if c.get("bucket_kind") == "sector" and c.get("bucket"):
+                b = c["bucket"]
+                if b not in probe or abs(mv) > abs(probe[b][1]):
+                    probe[b] = (t, mv)
+        lines = []
+        for b, (t, _mv) in sorted(probe.items()):
+            v = check_trade(t, side="long", add_dollars=0.0,
+                            account="Individual")
+            lines.append((v.get("decision"), f"  {b:<17} "
+                          + format_verdict(v).split("  book-wide")[0]))
+        order = {"reject": 0, "warn": 1}
+        lines.sort(key=lambda x: (order.get(x[0], 2), x[1]))
+        return ["SECTOR CAP (per-account lens, Individual — unchanged "
+                "thresholds 8% warn / 12% reject):"] + [l for _, l in lines]
+    except Exception as e:
+        log.warning("sector cap block failed: %s", e)
+        return [f"SECTOR CAP: unavailable ({e})"]
+
+
 def build_book_rp() -> str:
-    """IO assembly for BOOK RP: positions per (underlying, account) joined to
-    _book_rows(include_dark=True) rp data and ticker_tags PM buckets."""
+    """IO assembly for BOOK RP v2: positions per (underlying, account) joined
+    to _book_rows(include_dark=True) — which now resolves rp through
+    tools/rp_resolve (published first) — plus cash-equivalents (same source
+    BOOK FULL uses), the low-signal filter, 90d correlations and clusters."""
     import db_pg
     from tools.book_alerts import _book_rows
+    from tools.rp_resolve import is_low_signal
     rp_by = {r["ticker"]: r for r in _book_rows(include_dark=True)}
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -524,46 +715,86 @@ def build_book_rp() -> str:
                  AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0
                GROUP BY 1, 2""")
         pos = cur.fetchall()
+        # E1: %book is against the TOTAL book, CASH INCLUDED — the same
+        # denominator as the 2026-08-25 position-cap policy.
         cur.execute(
-            """SELECT account_number, COALESCE(sum(market_value), 0)
-               FROM book_positions
+            """SELECT COALESCE(sum(market_value), 0) FROM book_positions
                WHERE snapshot_date = (SELECT max(snapshot_date)
-                                      FROM book_positions)
-               GROUP BY 1""")
-        totals = {a: float(v or 0) for a, v in cur.fetchall()}
+                                      FROM book_positions)""")
+        total_book = float(cur.fetchone()[0] or 0)
         held = sorted({p[0] for p in pos})
         # ticker_tags keys on `ticker` (a t.symbol join errors — 8/24 brief)
         cur.execute("SELECT ticker, hedgeye_bucket_0629 FROM ticker_tags "
                     "WHERE ticker = ANY(%s) "
                     "AND hedgeye_bucket_0629 IS NOT NULL", (held,))
         buckets = dict(cur.fetchall())
+        # 90d correlations among held names (tools/correlation_matrix's
+        # table — the LIVE engine; correlation_tracker is shipping fiction
+        # per its own docstring and is not used)
+        cur.execute("SELECT ticker_a, ticker_b, correlation, as_of "
+                    "FROM correlation_matrix WHERE window_days = 90 "
+                    "AND ticker_a = ANY(%s) AND ticker_b = ANY(%s)",
+                    (held, held))
+        pairs = [{"a": a, "b": b, "corr": float(c)}
+                 for a, b, c, _ in cur.fetchall() if c is not None]
+    # E4: ONE cash-equivalent source — the same get_cash_equivalents BOOK
+    # FULL's compute_fills uses, so the two commands cannot disagree on BUXX.
+    try:
+        from tools.position_targets import get_cash_equivalents
+        cash_eq = get_cash_equivalents()
+    except Exception as e:
+        log.warning("cash-equivalents unavailable: %s", e)
+        cash_eq = set()
+
+    dollars = {}
     rows = []
     for t, acct, mv in pos:
         rp = rp_by.get(t) or {"dark": True}
-        tot = totals.get(acct) or 0.0
+        dollars[t] = dollars.get(t, 0.0) + float(mv or 0)
         rows.append({"ticker": t, "acct": _acct_label(acct),
                      "side": rp.get("side") or
                      ("short" if (mv or 0) < 0 else "long"),
                      "val": float(mv or 0),
-                     "pct": (abs(float(mv or 0)) / tot * 100) if tot else None,
+                     "pct": (abs(float(mv or 0)) / total_book * 100)
+                     if total_book else None,
                      "rp_now": rp.get("rp_now"),
+                     "rp_lt": rp.get("rp_lt"),
+                     "rp_source": rp.get("rp_source"),
                      "rp_5d_min": rp.get("rp_5d_min"),
                      "rp_5d_max": rp.get("rp_5d_max"),
                      "trend": rp.get("trend_dir"),
                      "bucket": buckets.get(t),
+                     "low_signal": is_low_signal(rp.get("range_low"),
+                                                 rp.get("range_high"),
+                                                 rp.get("price")),
+                     "cash_eq": t in cash_eq,
                      "dark": rp.get("dark", False)})
-    return format_book_rp(rows)
+
+    # exclude cash-equivalents from cluster dollars the way BOOK FULL parks
+    # them; they still print in the table tagged CASH-EQ
+    cl = build_rp_clusters(pairs, {t: v for t, v in dollars.items()
+                                   if t not in cash_eq}, total_book)
+    tc = top_corr_map(pairs, held)
+    covered = len({t for t in held if t in tc})
+    corr_line = (f"correlations: {covered}/{len(held)} positions have a 90d "
+                 f"coefficient; {len(held) - covered} do not (n/a, never "
+                 f"0.00)")
+    return format_book_rp(rows, clusters=cl, corr_by_ticker=tc,
+                          sector_cap_lines=_sector_cap_lines(),
+                          total_book=total_book, corr_coverage=corr_line)
 
 
 def build_rp_single(t: str) -> str:
-    """RP <TICKER> — one name, held or not: price, range, rp, 5d band, trend,
-    PM bucket, held-where. Inline message, not a document."""
+    """RP <TICKER> — one name, held or not: price, range, both rps with
+    provenance, 5d band, trend, PM bucket, held-where. Inline message."""
     import db_pg
+    from tools.rp_resolve import SRC_TAG, apply_rp_resolution
     from tools.screener import (_apply_btcquant_trend, _apply_wrapper_trend,
                                 _fetch_source_slice)
     slice_ = _fetch_source_slice([t], None)
     _apply_btcquant_trend(slice_)
     _apply_wrapper_trend(slice_)
+    apply_rp_resolution(slice_)
     r = slice_[0] if slice_ else {}
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -579,10 +810,10 @@ def build_rp_single(t: str) -> str:
                ORDER BY m.snapshot_date DESC LIMIT 1""", (t,))
         snap = cur.fetchone()
         cur.execute(
-            """SELECT max((price - range_low)
-                          / NULLIF(range_high - range_low, 0)),
-                      min((price - range_low)
-                          / NULLIF(range_high - range_low, 0))
+            """SELECT max(COALESCE(mfr_pos_short, (price - range_low)
+                          / NULLIF(range_high - range_low, 0))),
+                      min(COALESCE(mfr_pos_short, (price - range_low)
+                          / NULLIF(range_high - range_low, 0)))
                FROM mfr_snapshots
                WHERE ticker = %s AND snapshot_date >= CURRENT_DATE - 7""", (t,))
         hi, lo = cur.fetchone() or (None, None)
@@ -602,11 +833,13 @@ def build_rp_single(t: str) -> str:
         return f"{float(v):{fmt}}" if v is not None else "n/a"
 
     rp = r.get("range_pos")
+    src = SRC_TAG.get(r.get("rp_source"), r.get("rp_source") or "n/a")
     lines = [f"RP {t}"
              + (f" — as of {snap[0]}" if snap else " — no MFR snapshot"),
              f"price {_n(snap[1] if snap else None)}  "
              f"range {_n(snap[2] if snap else None)}-"
-             f"{_n(snap[3] if snap else None)}  rp {_n(rp)}",
+             f"{_n(snap[3] if snap else None)}  "
+             f"rpST {_n(rp)}·{src}  rpLT {_n(r.get('rp_lt'))}",
              f"5d rp band {_n(lo)}-{_n(hi)}  "
              f"trend {r.get('trend_dir') or 'n/a'}",
              f"PM bucket: {(brow[0] if brow and brow[0] else '-')}"]

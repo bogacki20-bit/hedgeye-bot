@@ -126,14 +126,46 @@ def _book_rows(*, include_dark: bool = False) -> list:
     slice_ = _fetch_source_slice(held, None)
     _apply_btcquant_trend(slice_)
     _apply_wrapper_trend(slice_)
+    # THE resolver (2026-08-26): published MFR position first, derived band
+    # second, shadow third, wrapper fourth — same order every surface uses.
+    # Alert THRESHOLDS are unchanged; the VALUES they see are now the
+    # vendor's own where it publishes one.
+    from tools.rp_resolve import apply_rp_resolution, published_map
+    apply_rp_resolution(slice_)
     by_t = {r["ticker"]: r for r in slice_}
+    # wrapper tier: a held name with NO rp of its own but a linked underlying
+    # takes the underlying's published rp, inverted when the link is inverse.
+    try:
+        from tools.wrapper_links import get_links
+        links = get_links()
+    except Exception:
+        links = {}
+    wrap_under = {w: l for w, l in links.items()
+                  if w in set(held)
+                  and (by_t.get(w) is None
+                       or by_t[w].get("range_pos") is None)}
+    if wrap_under:
+        upub = published_map({l["underlying"] for l in wrap_under.values()})
+        for w, l in wrap_under.items():
+            ps = upub.get((l.get("underlying") or "").upper(), (None,))[0]
+            if ps is None or w not in by_t:
+                continue
+            rp = (1.0 - float(ps)) if l.get("inverse") else float(ps)
+            by_t[w]["range_pos"] = rp
+            by_t[w]["rp_source"] = "wrapper"
 
     ext: dict = {}
     with db_pg.get_conn() as conn, conn.cursor() as cur:
+        # 083: the published position first, per-day, so the 5d band is
+        # consistent with the tier-1 rp_now instead of mixing sources.
         cur.execute(
             """SELECT ticker,
-                      max((price - range_low) / NULLIF(range_high - range_low, 0)),
-                      min((price - range_low) / NULLIF(range_high - range_low, 0))
+                      max(COALESCE(mfr_pos_short,
+                          (price - range_low)
+                          / NULLIF(range_high - range_low, 0))),
+                      min(COALESCE(mfr_pos_short,
+                          (price - range_low)
+                          / NULLIF(range_high - range_low, 0)))
                FROM mfr_snapshots
                WHERE ticker = ANY(%s)
                  AND snapshot_date >= CURRENT_DATE - 7
@@ -169,6 +201,16 @@ def _book_rows(*, include_dark: bool = False) -> list:
                      "trend_dir": r.get("trend_dir"),
                      "rp_now": (float(r["range_pos"])
                                 if r.get("range_pos") is not None else None),
+                     "rp_lt": (float(r["rp_lt"])
+                               if r.get("rp_lt") is not None else None),
+                     "rp_source": r.get("rp_source"),
+                     "price": (float(r["price"])
+                               if r.get("price") is not None else None),
+                     "range_low": (float(r["range_low"])
+                                   if r.get("range_low") is not None else None),
+                     "range_high": (float(r["range_high"])
+                                    if r.get("range_high") is not None
+                                    else None),
                      "rp_5d_max": hi, "rp_5d_min": lo, "wrap": wrap})
     return rows
 

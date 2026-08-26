@@ -90,7 +90,7 @@ def delta_line(today, backlog, prior) -> str:
 
 def format_report(*, asof, universe, enrolled, served, parked,
                   backlog, backlog_note, held_rows, dark_days,
-                  prior) -> str:
+                  prior, divergences=None) -> str:
     """Pure formatter — everything IO-derived arrives as arguments so tests
     need no DB and no network.
 
@@ -149,6 +149,17 @@ def format_report(*, asof, universe, enrolled, served, parked,
                  f"(KNOWN_UNCOVERABLE / PARKED_FOR_SOURCE), not missing:")
     lines.append("  " + " ".join(prk) if prk else "  none")
 
+    lines.append("")
+    # D4 (2026-08-26): today's published-vs-derived disagreements > 0.05 —
+    # the check that would have caught the HYG 1.29-vs-0.89 defect on day one.
+    lines.append(f"RP DIVERGENCE ({len(divergences or [])}) — published vs "
+                 f"derived rp disagreeing by > 0.05 today:")
+    if divergences:
+        for t, pub, der, delta in divergences:
+            lines.append(f"  {t:<8} published {pub:.2f}  derived {der:.2f}  "
+                         f"delta {delta:.2f}")
+    else:
+        lines.append("  none recorded today")
     lines.append("")
     lines.append("HELD, by coverage:")
     for t in held_dark:
@@ -281,12 +292,20 @@ def build_coverage_report() -> str:
     cls = classify_universe(universe, enrolled, served, parked)
     dark_days = _dark_days(cls["enrolled_dark"])
 
+    try:
+        from tools.rp_resolve import todays_divergences
+        divergences = todays_divergences()
+    except Exception as e:
+        log.warning("rp divergence section unavailable: %s", e)
+        divergences = []
+
     today = date.today()
     prior = load_prior_snapshot(before=today)
     body = format_report(asof=today, universe=universe, enrolled=enrolled,
                          served=served, parked=parked, backlog=backlog,
                          backlog_note=note, held_rows=held_rows,
-                         dark_days=dark_days, prior=prior)
+                         dark_days=dark_days, prior=prior,
+                         divergences=divergences)
     record_snapshot(universe_count=len(universe),
                     enrolled_count=len(enrolled),
                     served_count=len(served), backlog=backlog)
