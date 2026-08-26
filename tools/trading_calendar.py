@@ -168,7 +168,7 @@ def _sessions_between(a: date, b: date) -> int:
     return n
 
 
-def resolve_session_date(bars: dict) -> tuple:
+def resolve_session_date(bars: dict, now=None) -> tuple:
     """(session_date, offenders) — the EQUITY session the frame represents.
 
     ROOT CAUSE, found 2026-08-16. The pack resolved its bar date as
@@ -187,6 +187,18 @@ def resolve_session_date(bars: dict) -> tuple:
     of those. Symbols sitting off that consensus are RETURNED, not dropped
     quietly -- a 24/7 instrument is legitimate and its data is still used for
     correlations; it simply must not define the session.
+
+    SECOND ROOT CAUSE, found 2026-08-25. The session filter above screens out
+    NON-SESSIONS but not the FUTURE. At 21:01 ET on Tue 2026-08-25 (already
+    01:01 UTC on the 26th) the 24/7 crypto symbols had rolled to their
+    2026-08-26 daily bar. 2026-08-26 is a Wednesday -- a perfectly valid NYSE
+    session -- so it passed is_trading_day() and won the max(), and
+    validate_bar_date then (correctly) blocked the pack. Same instrument
+    class, new edge: a crypto bar can be a FUTURE session, not just a weekend.
+
+    Fix: also exclude dates later than the last completed session. No
+    hardcoded list of 24/7 tickers -- both incidents came from unmaintained
+    assumptions about crypto, and a list is one more of those.
     """
     dates = {}
     for sym, b in (bars or {}).items():
@@ -195,7 +207,8 @@ def resolve_session_date(bars: dict) -> tuple:
             dates[sym] = d[-1]
     if not dates:
         return None, []
-    sessions = [d for d in dates.values() if is_trading_day(d)]
+    sessions = [d for d in dates.values()
+                if is_trading_day(d) and d <= last_completed_session(now)]
     if not sessions:
         return max(dates.values()), sorted(dates)
     resolved = max(sessions)

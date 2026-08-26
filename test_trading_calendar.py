@@ -196,6 +196,45 @@ check("and that date then FAILS validation, so it still blocks",
       validate_bar_date(SUN, now=datetime(2026, 8, 16, 10, 27))[0], False)
 check("empty frame -> None", resolve_session_date({})[0], None)
 
+# ── 8b. THE SECOND ROOT CAUSE (2026-08-25): a FUTURE bar is not a session ───
+print("\n8b. a rolled-over crypto bar must not set a FUTURE session date:")
+# At 21:01 ET Tue 2026-08-25 (01:01 UTC on the 26th) the 24/7 symbols had
+# rolled to their Wed 2026-08-26 daily bar. Wednesday IS a valid NYSE session,
+# so the 8/16 non-session filter passed it and it won the max().
+TUE, WED = date(2026, 8, 25), date(2026, 8, 26)
+NOW_2101 = datetime(2026, 8, 25, 21, 1)
+check("the clock: last completed session at Tue 21:01 ET is Tuesday",
+      last_completed_session(NOW_2101), TUE)
+CRYPTO = ("BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD")
+frame25 = {"SYM%02d" % i: {"dates": [TUE], "closes": [1.0]} for i in range(94)}
+for s in CRYPTO:
+    frame25[s] = {"dates": [WED], "closes": [1.0]}
+s25, off25 = resolve_session_date(frame25, now=NOW_2101)
+check("94 Tue + 4 future-Wed resolves to Tuesday", s25, TUE)
+check("naive session-filtered max() would have said Wednesday",
+      max(d["dates"][-1] for d in frame25.values()), WED)
+check("the 4 crypto symbols are returned as offenders, not dropped",
+      off25, sorted(CRYPTO))
+check("the resolved date passes validation",
+      validate_bar_date(s25, now=NOW_2101)[0], True)
+# a normal frame -- every symbol on the same completed session -- is unchanged
+uniform = {s: {"dates": [TUE], "closes": [1.0]} for s in ("SPY", "TLT", "QQQ")}
+check("uniform completed-session frame is unchanged",
+      resolve_session_date(uniform, now=NOW_2101), (TUE, []))
+# the 8/16 regression still holds under the new filter
+frame16 = {s: {"dates": [FRI], "closes": [1.0]} for s in ("SPY", "TLT", "QQQ")}
+frame16["BTC-USD"] = {"dates": [SUN], "closes": [1.0]}
+check("a Sunday crypto bar is still excluded (8/16 regression)",
+      resolve_session_date(frame16, now=datetime(2026, 8, 16, 10, 27)),
+      (FRI, ["BTC-USD"]))
+# every date in the future -> the empty-sessions fallback, not an exception
+all_future = {s: {"dates": [WED], "closes": [1.0]} for s in CRYPTO}
+sf, offf = resolve_session_date(all_future, now=NOW_2101)
+check("all-future frame hits the fallback rather than raising", sf, WED)
+check("and every symbol is named as an offender", offf, sorted(CRYPTO))
+check("and that date then FAILS validation, so it still blocks",
+      validate_bar_date(sf, now=NOW_2101)[0], False)
+
 print("\n9. the pack resolves the session, not max():")
 check("uses resolve_session_date", "resolve_session_date(bars)" in src, True)
 check("no naive max over all symbols",
