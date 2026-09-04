@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import math
 import sys
 import time
@@ -50,10 +51,11 @@ import db_pg  # noqa: E402
 NY = ZoneInfo("America/New_York")
 UTC = timezone.utc
 
-DEFAULT_UPLOAD_URL = "https://charts.trendspider.com/userapi/1/data/custom_symbols/"
+# No trailing slash — the slash variant 504s (TrendSpider working example,
+# 2026-09-04). One symbol per POST, named in the body's "symbol" field.
+DEFAULT_UPLOAD_URL = "https://charts.trendspider.com/userapi/1/data/custom_symbols"
 SLEEP_BETWEEN_UPLOADS_S = 20      # rate limit: "a few calls per minute"
 MAX_CSV_BYTES = 7 * 1024 * 1024   # TrendSpider upload cap
-BATCH_SIZE_SYMBOLS = 10           # ~10 symbols per CSV per spec
 DRY_RUN_DIR = REPO_ROOT / "ts_export"
 
 TREND_MAP = {"trendBullish": 1.0, "trendNeutral": 0.0, "trendBearish": -1.0}
@@ -394,22 +396,31 @@ def build_csv(rows: list[tuple[int, str, datetime, float]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def upload_csv(csv_text: str, url: str, api_key: str) -> tuple[int, str]:
-    """POST one CSV to the TrendSpider custom-symbols endpoint. Returns
-    (http_status, response_body)."""
-    import requests
+def upload_csv(csv_text: str, url: str, api_key: str, symbol: str) -> tuple[int, str]:
+    """POST one single-symbol CSV to the TrendSpider custom-symbols endpoint.
+    Returns (http_status, response_body).
+
+    The JSON body MUST be serialized with compact separators: TrendSpider's
+    backend hangs ~60s (-> nginx 504) on JSON containing whitespace after
+    ':' or ',' — json.dumps' DEFAULT separators. Isolated 2026-09-03 by
+    byte-diffing failing vs succeeding requests; same payload compacted
+    returns 200 in 0.2s. requests' json= kwarg uses the default separators,
+    so serialize explicitly and send via data=."""
     b64 = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")  # no newlines
+    payload = json.dumps({
+        "symbol": symbol,
+        "fileBase64": "data:text/csv;base64," + b64,
+        "targetAssetType": "stock",
+        "groupingMethod": "last",
+    }, separators=(",", ":"))
+    import requests
     resp = requests.post(
         url,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-type": "application/json",
         },
-        json={
-            "fileBase64": "data:text/csv;base64," + b64,
-            "targetAssetType": "stock",
-            "groupingMethod": "last",
-        },
+        data=payload,
         timeout=120,
     )
     return resp.status_code, resp.text
@@ -452,11 +463,6 @@ def print_summary(results: dict[str, Extract]) -> None:
             print(f"{sym.name:<22} {0:>5} {len(ext.skips):>5}  (no new rows)")
 
 
-def _batches() -> list[list[Symbol]]:
-    return [SYMBOLS[i:i + BATCH_SIZE_SYMBOLS]
-            for i in range(0, len(SYMBOLS), BATCH_SIZE_SYMBOLS)]
-
-
 # ─────────────────────────── main ───────────────────────────
 
 def run(dry_run: bool, backfill: bool) -> int:
@@ -477,52 +483,53 @@ def run(dry_run: bool, backfill: bool) -> int:
     if dry_run:
         DRY_RUN_DIR.mkdir(exist_ok=True)
         stamp = datetime.now(NY).strftime("%Y%m%dT%H%M%S")
-        for i, batch in enumerate(_batches(), 1):
-            rows = []
-            for sym in batch:
-                rows.extend((0, sym.name, r.known_at, r.value)
-                            for r in results[sym.name].rows)
-            rows.sort(key=lambda t: (t[1], t[2]))
-            csv_text = build_csv(rows) if rows else ""
-            path = DRY_RUN_DIR / f"ts_export_{stamp}_batch{i}.csv"
+        n_files = 0
+        for sym in SYMBOLS:
+            rows = [(0, sym.name, r.known_at, r.value)
+                    for r in results[sym.name].rows]
+            if not rows:
+                continue
+            csv_text = build_csv(rows)
+            path = DRY_RUN_DIR / f"ts_export_{stamp}_{sym.name.lstrip('#')}.csv"
             path.write_text(csv_text, encoding="utf-8", newline="\n")
             size = len(csv_text.encode("utf-8"))
             if size > MAX_CSV_BYTES:
-                raise ValidationError(f"batch {i} CSV is {size} bytes > 7MB cap")
-            print(f"\nbatch {i}: {len(rows)} rows, {size} bytes -> {path}")
-        print(f"\nDRY RUN complete — {total_rows} rows across {len(_batches())} "
-              f"batches. Nothing staged, nothing uploaded.")
+                raise ValidationError(f"{sym.name} CSV is {size} bytes > 7MB cap")
+            n_files += 1
+            print(f"{sym.name}: {len(rows)} rows, {size} bytes -> {path}")
+        print(f"\nDRY RUN complete — {total_rows} rows across {n_files} "
+              f"per-symbol files. Nothing staged, nothing uploaded.")
         return 0
 
     staged = stage_rows(results)
     print(f"\nstaged/refreshed {staged} rows in ts_export_log")
 
     batch_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    n_batches = 0
+    n_posts = 0
     n_uploaded_rows = 0
     failures: list[str] = []
-    for i, batch in enumerate(_batches(), 1):
-        pending = fetch_pending([s.name for s in batch])
+    for sym in SYMBOLS:
+        pending = fetch_pending([sym.name])
         if not pending:
-            print(f"batch {i}: nothing pending")
+            print(f"{sym.name}: nothing pending")
             continue
         csv_text = build_csv(pending)
         size = len(csv_text.encode("utf-8"))
         if size > MAX_CSV_BYTES:
-            raise ValidationError(f"batch {i} CSV is {size} bytes > 7MB cap")
-        batch_id = f"{batch_stamp}-{i}"
-        if n_batches > 0:
+            raise ValidationError(f"{sym.name} CSV is {size} bytes > 7MB cap")
+        batch_id = f"{batch_stamp}-{sym.name.lstrip('#')}"
+        if n_posts > 0:
             time.sleep(SLEEP_BETWEEN_UPLOADS_S)
-        status, body = upload_csv(csv_text, url, api_key)
+        status, body = upload_csv(csv_text, url, api_key, sym.name)
         ok = 200 <= status < 300
         mark_batch([r[0] for r in pending], batch_id, status, ok)
-        n_batches += 1
+        n_posts += 1
         if ok:
             n_uploaded_rows += len(pending)
-            print(f"batch {i} ({batch_id}): HTTP {status}, {len(pending)} rows uploaded")
+            print(f"{sym.name}: HTTP {status}, {len(pending)} rows uploaded")
         else:
-            failures.append(f"batch {i}: HTTP {status}")
-            print(f"batch {i} ({batch_id}): HTTP {status} — NOT marked uploaded.")
+            failures.append(f"{sym.name}: HTTP {status}")
+            print(f"{sym.name}: HTTP {status} — NOT marked uploaded.")
             print(f"  response body: {body[:500]}")
 
     n_symbols = sum(1 for e in results.values() if e.rows)
@@ -531,7 +538,7 @@ def run(dry_run: bool, backfill: bool) -> int:
                    f"{n_uploaded_rows}/{total_rows} rows uploaded")
     else:
         summary = (f"TS EXPORT ok · {n_symbols} symbols · {n_uploaded_rows} rows · "
-                   f"{n_batches} batches")
+                   f"{n_posts} posts")
     print(f"\n{summary}")
     try:
         from notifier import send_telegram
