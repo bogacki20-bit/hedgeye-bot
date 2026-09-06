@@ -63,7 +63,17 @@ ETF_ABS_TOL = 5.0001e-4
 VIX_REL_TOL = 0.0025
 ETF_WARN_REL = 0.0005     # <= 0.05% of close: log, don't fail
 VIX_WARN_REL = 0.015      # <= 1.5%: log, don't fail
-JUNE_ECHO = (date(2026, 6, 11), date(2026, 7, 10))
+# Dated windows where the FEED's own values are known-divergent — logged, not
+# failed. "*" = the 2026-06-11 stale-feed day and its trailing-window decay
+# (Step 0). Add per-ticker windows here only for drift that is bounded AND
+# explained. NOT a home for TLT: its feed range diverges from the TV
+# indicator on ~2/3 of ALL overlap dates including the newest (0.07-0.29%,
+# 2026-09-06 finding — closes identical to raw, no Hedgeye override, payload
+# == columns), so TLT ingest deliberately keeps FAILING until the vendor
+# discrepancy is resolved or the operator waives it.
+LOGGED_WINDOWS = {
+    "*": [(date(2026, 6, 11), date(2026, 7, 10))],
+}
 
 # range-vs-close sanity: VIX closes detach from the range on spike days
 SANITY = {"^VIX": (0.15, 3.0), "*": (0.5, 2.0)}
@@ -164,9 +174,11 @@ def repaint_check(cur, ticker: str, body: list[dict]) -> None:
         else:
             rel = max(dlo, dhi) / r["close"]
             ok, warn = max(dlo, dhi) <= ETF_ABS_TOL, rel <= ETF_WARN_REL
+        windows = LOGGED_WINDOWS["*"] + LOGGED_WINDOWS.get(ticker, [])
+        in_window = any(a <= r["date"] <= b for a, b in windows)
         if ok:
             n_ok += 1
-        elif warn or JUNE_ECHO[0] <= r["date"] <= JUNE_ECHO[1]:
+        elif warn or in_window:
             warns.append((r["date"], r["rl"], r["rh"], L, rel))
         else:
             fails.append((r["date"], r["rl"], r["rh"], L, rel))
