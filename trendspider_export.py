@@ -266,18 +266,60 @@ class Symbol:
 # evidence, 2026-09-06). Hist rows at/after the live boundary are silently
 # dropped (expected overlap), not loud-skipped.
 
-# Live range position: MFR's published positionOnRange (same formula as the
-# backfill: prior close vs published range — verified 2026-09-04), from the
-# typed column when present (migration 083), else the stored payload. NB on
-# rows the fetcher re-bumped intraday, the published value reflects the price
-# AT FETCH TIME — honest against known_at = fetched_at.
-RP_LIVE_SQL = ("COALESCE(mfr_pos_short, "
-               "(full_payload->'rangeData'->>'positionOnRange')::numeric)")
+# Live-side range position (operator decision, 2026-09-06 part 2):
+#   rp[D] = (close[D-1] - range_low[D]) / (range_high[D] - range_low[D]),
+#   clamped [-0.5, 1.5],
+# where close[D-1] is the PRIOR SESSION close from the same close source the
+# historical rows used — the TradingView bars (tv_mfr_history.close,
+# migration 086). Range low/high come from the live feed's stored row for D.
+# NOT MFR's published positionOnRange: on rows the fetcher re-bumps intraday
+# that value reflects the price at fetch time, so the definition would drift
+# across the history/live splice. A live bar with no TV close in the prior
+# RP_MAX_CLOSE_AGE_D calendar days is skipped loudly (never approximated
+# with a stale close) — RP resumes when a fresh TV CSV is ingested.
+RP_MAX_CLOSE_AGE_D = 4   # Fri close still serves Tue-after-long-weekend
 
 
-def _convert_rp(raw):
-    """Clamp range position to [-0.5, 1.5] (operator decision, 2026-09-06)."""
-    return max(-0.5, min(1.5, _num(raw))), None
+def _clamp_rp(v: float) -> float:
+    return max(-0.5, min(1.5, v))
+
+
+def rp_live_from_tv_close(ticker: str):
+    """Live RP rows: feed range for bar D + latest earlier TV close.
+    known_at = fetched_at (the stored row's write time), as for every
+    mfr_snapshots-sourced symbol."""
+    def extract(cur, since) -> Extract:
+        cur.execute(
+            """
+            SELECT m.snapshot_date::text, m.snapshot_date, m.fetched_at,
+                   m.range_low, m.range_high, pc.close, pc.bar_date
+              FROM mfr_snapshots m
+              LEFT JOIN LATERAL (
+                   SELECT close, bar_date FROM tv_mfr_history h
+                    WHERE h.ticker = m.ticker AND h.bar_date < m.snapshot_date
+                      AND h.close IS NOT NULL
+                    ORDER BY h.bar_date DESC LIMIT 1) pc ON TRUE
+             WHERE m.ticker = %s AND (%s::text IS NULL OR m.snapshot_date::text > %s)
+             ORDER BY m.snapshot_date
+            """,
+            (ticker, since, since),
+        )
+        out = Extract()
+        for key, snap_date, fetched_at, rl, rh, pclose, pdate in cur.fetchall():
+            if rl is None or rh is None:
+                out.skips.append((key, "NULL range in source"))
+                continue
+            if pclose is None:
+                out.skips.append((key, "no TV close before bar"))
+                continue
+            age = (snap_date - pdate).days
+            if age > RP_MAX_CLOSE_AGE_D:
+                out.skips.append((key, f"prior TV close stale ({age}d, {pdate})"))
+                continue
+            rl, rh, pclose = _num(rl), _num(rh), _num(pclose)
+            out.rows.append(Row(key, fetched_at, _clamp_rp((pclose - rl) / (rh - rl))))
+        return out
+    return extract
 
 
 def tv_hist_column(ticker: str, col: str):
@@ -417,10 +459,14 @@ def _tv_symbols() -> list["Symbol"]:
                                    mfr_column(ticker, "trend_signal", _convert_trend),
                                    *_mfr_first_live(ticker, "trend_signal IS NOT NULL")),
                    (-1, 1)),
+            # rp[D] = (close[D-1] - range_low[D]) / (range_high[D] - range_low[D]),
+            # clamped [-0.5, 1.5]; close[D-1] = prior TV session close on BOTH
+            # sides of the splice (hist: features_backfill; live:
+            # rp_live_from_tv_close). Ranges: TV before the boundary, the live
+            # feed's stored row after.
             Symbol(f"#MFR_{tag}_RP",
                    union_hist_live(tv_hist_feature(ticker, "rp"),
-                                   mfr_column(ticker, RP_LIVE_SQL, _convert_rp),
-                                   *_mfr_first_live(ticker, f"{RP_LIVE_SQL} IS NOT NULL")),
+                                   rp_live_from_tv_close(ticker), *rng_b),
                    (-0.5, 1.5)),
             # LT band + trend levels: TV history only. The feed's
             # ltRangeData.upperRange matches TV exactly but lowerRange drifts
@@ -538,11 +584,11 @@ def last_uploaded_key(cur, symbol: str):
     return row[0] if row else None
 
 
-def extract_all(backfill: bool) -> dict[str, Extract]:
+def extract_all(backfill: bool, symbols: list[Symbol]) -> dict[str, Extract]:
     """Run every extractor (read-only) and validate. Returns {symbol: Extract}."""
     results: dict[str, Extract] = {}
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        for sym in SYMBOLS:
+        for sym in symbols:
             since = None if backfill else last_uploaded_key(cur, sym.name)
             ext = sym.extract(cur, since)
             validate(sym, ext.rows)
@@ -658,10 +704,10 @@ def mark_batch(row_ids: list[int], batch_id: str, status: int, ok: bool) -> None
 
 # ─────────────────────────── report helpers ───────────────────────────
 
-def print_summary(results: dict[str, Extract]) -> None:
+def print_summary(results: dict[str, Extract], symbols: list[Symbol]) -> None:
     print(f"\n{'symbol':<22} {'rows':>5} {'skips':>5}  known_at range"
           f"{'':<28} value range")
-    for sym in SYMBOLS:
+    for sym in symbols:
         ext = results[sym.name]
         if ext.rows:
             ka_min = _ny_minute(min(r.known_at for r in ext.rows))
@@ -676,7 +722,9 @@ def print_summary(results: dict[str, Extract]) -> None:
 
 # ─────────────────────────── main ───────────────────────────
 
-def run(dry_run: bool, backfill: bool) -> int:
+def run(dry_run: bool, backfill: bool,
+        symbols: list[Symbol] | None = None) -> int:
+    symbols = SYMBOLS if symbols is None else symbols
     db_pg._load_dotenv_fallback()   # ensure TRENDSPIDER_* reach os.environ on CLI runs
     api_key = os.environ.get("TRENDSPIDER_API_KEY")
     url = os.environ.get("TRENDSPIDER_UPLOAD_URL", DEFAULT_UPLOAD_URL)
@@ -685,17 +733,17 @@ def run(dry_run: bool, backfill: bool) -> int:
         return 2
 
     mode = f"{'DRY-RUN ' if dry_run else ''}{'backfill' if backfill else 'incremental'}"
-    print(f"TS EXPORT — {mode} — {len(SYMBOLS)} symbols")
+    print(f"TS EXPORT — {mode} — {len(symbols)} symbols")
 
-    results = extract_all(backfill)
-    print_summary(results)
+    results = extract_all(backfill, symbols)
+    print_summary(results, symbols)
     total_rows = sum(len(e.rows) for e in results.values())
 
     if dry_run:
         DRY_RUN_DIR.mkdir(exist_ok=True)
         stamp = datetime.now(NY).strftime("%Y%m%dT%H%M%S")
         n_files = 0
-        for sym in SYMBOLS:
+        for sym in symbols:
             rows = [(0, sym.name, r.known_at, r.value)
                     for r in results[sym.name].rows]
             if not rows:
@@ -719,7 +767,7 @@ def run(dry_run: bool, backfill: bool) -> int:
     n_posts = 0
     n_uploaded_rows = 0
     failures: list[str] = []
-    for sym in SYMBOLS:
+    for sym in symbols:
         pending = fetch_pending([sym.name])
         if not pending:
             print(f"{sym.name}: nothing pending")
@@ -765,9 +813,29 @@ def main() -> int:
                     help="write CSVs to ./ts_export/ and print counts; no DB writes, no upload")
     ap.add_argument("--backfill", action="store_true",
                     help="export full history (default: incremental past last uploaded row)")
+    ap.add_argument("--only", metavar="SYMS",
+                    help="comma-separated symbol names: run ONLY these")
+    ap.add_argument("--exclude", metavar="SYMS",
+                    help="comma-separated symbol names to leave out")
     args = ap.parse_args()
+
+    symbols = list(SYMBOLS)
+    for flag, keep in (("only", True), ("exclude", False)):
+        raw = getattr(args, flag)
+        if not raw:
+            continue
+        names = {s.strip() for s in raw.split(",") if s.strip()}
+        unknown = names - {s.name for s in SYMBOLS}
+        if unknown:
+            print(f"ERROR: --{flag} names not in the registry: {sorted(unknown)}")
+            return 2
+        symbols = [s for s in symbols if (s.name in names) is keep]
+    if not symbols:
+        print("ERROR: symbol filter left nothing to run")
+        return 2
+
     try:
-        return run(dry_run=args.dry_run, backfill=args.backfill)
+        return run(dry_run=args.dry_run, backfill=args.backfill, symbols=symbols)
     except ValidationError as e:
         msg = f"TS EXPORT FAILED · validation: {e}"
         print(f"\nERROR: {msg}")

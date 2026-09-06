@@ -204,8 +204,8 @@ def ingest(path: Path, ticker: str, dry_run: bool) -> int:
                 INSERT INTO tv_mfr_history
                     (ticker, bar_date, known_at, range_high, range_low,
                      lt_range_high, lt_range_low, bull_level, bear_level,
-                     trend_tag, source_file, ingested_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                     trend_tag, close, source_file, ingested_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (ticker, bar_date) DO UPDATE SET
                     known_at = EXCLUDED.known_at,
                     range_high = EXCLUDED.range_high,
@@ -215,11 +215,12 @@ def ingest(path: Path, ticker: str, dry_run: bool) -> int:
                     bull_level = EXCLUDED.bull_level,
                     bear_level = EXCLUDED.bear_level,
                     trend_tag = EXCLUDED.trend_tag,
+                    close = EXCLUDED.close,
                     source_file = EXCLUDED.source_file,
                     ingested_at = NOW()
                 """,
                 (ticker, d, known_at, r["rh"], r["rl"], r["lth"], r["ltl"],
-                 r["bull"], r["bear"], tag, path.name),
+                 r["bull"], r["bear"], tag, r["close"], path.name),
             )
             n += 1
         conn.commit()
