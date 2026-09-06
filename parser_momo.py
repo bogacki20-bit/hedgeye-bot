@@ -43,6 +43,11 @@ def parse_momo(subject: str) -> list[dict]:
 
 def upsert_rows(rows: list[dict], signal_date: date, message_id: str | None) -> dict:
     import db_pg
+    # Write gate: subject-line extraction let prose tokens through (WIDEST)
+    # and Hedgeye's own typos (APPL). MAG7 is deliberate and passes via
+    # symbol_guard.PSEUDO_INSTRUMENTS.
+    from tools.symbol_guard import filter_rows
+    rows, _dropped = filter_rows(rows, "momo")
     written, failed = 0, 0
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:

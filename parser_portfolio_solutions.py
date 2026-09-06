@@ -63,7 +63,7 @@ RANK_BLOCK_RE = re.compile(
     r"Macro ETFs by Rank\s*:\s*(.*?)(?:Keith'?s Commentary|VIEW LARGER|Watch Keith)",
     re.I | re.S,
 )
-TICKER_TOKEN_RE = re.compile(r"\b([A-Z]{2,6})\b")
+TICKER_TOKEN_RE = re.compile(r"\b([A-Z0-9]{2,6}(?:[.\-][A-Z0-9]{1,4}){0,2})\b")  # suffix-aware: ADS.DE is one symbol
 
 # Extract the commentary block (between "Keith's Commentary" header and the next section)
 COMMENTARY_BLOCK_RE = re.compile(
@@ -82,7 +82,7 @@ ACTION_SENTENCE_RE = re.compile(
     r"([A-Z][A-Z0-9,\s]+?)(?:\.|$|;)",
     re.I,
 )
-TICKER_LIST_RE = re.compile(r"\b([A-Z]{2,6})\b")
+TICKER_LIST_RE = re.compile(r"\b([A-Z0-9]{2,6}(?:[.\-][A-Z0-9]{1,4}){0,2})\b")  # suffix-aware, same dialect
 
 
 def parse_body(html_body: str, snapshot_date: date) -> dict:
@@ -153,6 +153,8 @@ def extract_snapshot_date(subject: str, fallback: date) -> date:
 
 def upsert_ranks(ranks: list[dict], snapshot_date: date, message_id: str | None) -> dict:
     import db_pg
+    from tools.symbol_guard import filter_rows
+    ranks, _dropped = filter_rows(ranks, "portsol")
     written, failed = 0, 0
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
@@ -355,6 +357,11 @@ def _refresh_keith_trades_view() -> None:
 
 def insert_actions(actions: list[dict], action_date: date, message_id: str | None) -> dict:
     import db_pg
+    # Write gate: ACTION_SENTENCE_RE scans free-text commentary, so an OCR
+    # near-miss ("BUXXX", "WTUM") inherits the sentence's action+bps and
+    # lands as a signal row. Coverage decides, not spelling.
+    from tools.symbol_guard import filter_rows
+    actions, _dropped = filter_rows(actions, "portactions")
     mq, qq = _quad_for_date(action_date)
     written, failed = 0, 0
     with db_pg.get_conn() as conn:

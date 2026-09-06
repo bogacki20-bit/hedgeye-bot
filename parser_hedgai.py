@@ -32,7 +32,7 @@ SECTIONS_RE = re.compile(
     r"(?=\(\s*VIEW\s+LARGER|System\s+Expansion|Please\s+visit|$)",
     re.I | re.S,
 )
-TRAIL_TICKER_RE = re.compile(r"\b([A-Z]{2,5})\s*$")
+TRAIL_TICKER_RE = re.compile(r"\b([A-Z0-9]{2,5}(?:[.\-][A-Z0-9]{1,4}){0,2})\s*$")  # suffix-aware
 BODY_TS_RE = re.compile(
     r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+E[DS]T", re.I)
 FEED_ID_RE = re.compile(r"feed_items/(\d+)")

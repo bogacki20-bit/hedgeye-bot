@@ -76,16 +76,20 @@ def _strip_html(html: str) -> str:
 # is what bounds it to the ticker list without discarding it — dropping the real
 # adds along with the prose would trade a loud bug for a silent one.
 ADDED_RE   = re.compile(
-    r"\b(?i:added)\s*:\s*([A-Z0-9,\s]+?)"
+    r"\b(?i:added)\s*:\s*([A-Z0-9.,\-\s]+?)"
     r"(?=(?i:removed)|(?i:rank)|(?i:please)|[a-z\(\[\*]|\Z)",
     re.S,
 )
 REMOVED_RE = re.compile(
-    r"\b(?i:removed)\s*:\s*([A-Z0-9,\s]+?)"
+    r"\b(?i:removed)\s*:\s*([A-Z0-9.,\-\s]+?)"
     r"(?=(?i:added)|(?i:rank)|(?i:please)|[a-z\(\[\*]|\Z)",
     re.S,
 )
-TICKER_RE  = re.compile(r"\b([A-Z]{1,5})\b")
+# Suffix-aware: a bare \b[A-Z]{1,5}\b split RPI.L into RPI + L (the '.' is a
+# word boundary), seeding fragments into the roster. Exchange suffixes are
+# part of the symbol, not a delimiter — same dialect as
+# parser_research_common.TICKER_TOK_RE plus the -B share-class form.
+TICKER_RE  = re.compile(r"\b([A-Z0-9]{1,7}(?:[.\-][A-Z0-9]{1,4}){0,2})\b")
 # Kept as a backstop for ALL-CAPS prose, which case-sensitivity cannot catch.
 # Deliberately contains no real ticker: HAS, JUST, CAN, ALL, ONE, NEW are all
 # listed securities. Never add a word here without checking it doesn't trade.
@@ -114,6 +118,14 @@ def parse_body(html_body: str) -> dict:
     # Dedup preserving order
     out["added"]   = list(dict.fromkeys(out["added"]))
     out["removed"] = list(dict.fromkeys(out["removed"]))
+    # Write gate here (not in upsert) so BOTH persist paths — upsert_deltas
+    # AND tools.ss_roster.apply_deltas — receive validated lists.
+    try:
+        from tools.symbol_guard import validate_for_storage
+        out["added"], _d1 = validate_for_storage(out["added"], "sigstr")
+        out["removed"], _d2 = validate_for_storage(out["removed"], "sigstr")
+    except Exception as e:
+        log.warning("symbol_guard unavailable, SS lists unvalidated: %s", e)
     return out
 
 

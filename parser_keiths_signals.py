@@ -36,6 +36,13 @@ def parse_keiths_signals(body: str) -> list[dict]:
 
 def upsert_rows(rows, signal_date, feed_id, mid) -> dict:
     import db_pg
+    # Write gate: Keith's lists occasionally carry source-side junk — the
+    # 4/20 email literally listed "FISV, FIO, SOFI" and FIO resolves nowhere.
+    # Known names pass on membership without any network hit; a genuinely
+    # new name is accepted via live quote; unresolvable ones are dropped
+    # LOUDLY (the log is the tell that Hedgeye typo'd a ticker).
+    from tools.symbol_guard import filter_rows
+    rows, _dropped = filter_rows(rows, "keiths")
     w = f = 0
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         for r in rows:

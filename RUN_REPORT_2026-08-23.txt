@@ -183,6 +183,103 @@ ACCEPTANCE TESTS - all run, results
   Vol anchor labels ................ PASS - both outputs, explicit
     '(anchor: <date> session close - stored daily rows, not live)'
 
+=== PART 3 - FIX THE SOURCE (same day, evening) ===
+
+PROVENANCE - each malformed symbol traced to its writer, live DB:
+  MORRIS  hedgeye_rta         side=long price=190.60 - a "PHILIP MORRIS
+          $190.60" body line; BODY_SIGNAL_RE takes "the token before the
+          $price", so the company NAME word stored WITH PM's price
+  WIDEST/APPL/MAG7  hedgeye_momo   subject-line extraction; MAG7 turned out
+          DELIBERATE (parser normalizes MAG->MAG7, Hedgeye's basket)
+  BUXXX/WTUM  hedgeye_portfolio_actions  commentary scan; near-misses of
+          the real BUXX/QTUM, inheriting the sentence's action+bps
+  FIO     hedgeye_keiths_signals  the raw 4/20 email LITERALLY lists
+          "FISV, FIO, SOFI" - Hedgeye's own content (likely FICO typo);
+          parser was faithful, so the gate must catch source-side junk too
+  ATZ     hedgeye_retail      REAL (Aritzia, TSX-only) - curation, not junk
+  fragments (HK, KS, N, RPI.LN, brand words) - suffix-blind regexes +
+          free-text scans; N was added-and-removed SAME DAY three Sundays
+          running (matched both Added and Removed scans = fragment)
+  NEAR-MISS AUDIT: no fuzzy/correction code exists anywhere in the repo
+          (searched difflib/fuzzy/levenshtein/close_matches) - every symbol
+          map is exact-key. APPL can never silently become AAPL.
+
+CONSUMER AUDIT (why this mattered beyond the backlog):
+  monitored_tickers is a VIEW over hedgeye_ticker_inventory -> every OCR
+  token was in the LIVE price-polling + alert universe (price_monitor).
+  v_screener's base universe = ticker_tags UNION book underlyings.
+  ticker_inventory.note_ticker() is the single write path for the mention
+  tables, called by 17 parsers + the LLM classifier.
+  Highest-risk consumers: price_monitor alert universe, sector_cap trade
+  verdicts, portfolio.account_value sizing, wrapper_links (uses ticker_tags
+  membership AS its validator), refresh fan-outs (MFR/SG/yahoo).
+
+WRITE-TIME FIXES (validate at write, not read):
+  NEW tools/symbol_guard.py - one shared gate. Coverage decides, not
+  spelling (no wordlists): option-shaped tokens always rejected (even
+  membership can't launder one); known to curated stores (ticker_tags,
+  book, mfr_snapshots, hedgeye_risk_ranges, etf_pro_ranges, alias maps -
+  mention tables deliberately EXCLUDED so garbage can't self-validate) ->
+  keep; instrument-shaped unknowns -> ONE live-quote probe (1mo,
+  dot->dash class-share fallback); probe outage FAILS OPEN with a loud
+  log (ingest availability beats purity; the enrollment print-gate stays
+  as defense-in-depth). Every drop logged with source tag + count.
+  Wired into: parser_retail, parser_momo, parser_keiths_signals,
+  parser_rta, parser_portfolio_solutions (ranks + actions),
+  parser_signal_strength (both persist paths incl. the roster),
+  tools/pm_parse (the OCR screenshot path - drops surfaced in the
+  Telegram reply), and ticker_inventory.note_ticker (the 17-parser
+  chokepoint guarding the polling/alert universe).
+  SUFFIX FIXES: parser_signal_strength TICKER_RE was \b[A-Z]{1,5}\b (the
+  RPI.L -> RPI+L splitter; its block regexes also stopped at '.') - now
+  suffix-aware incl. 6-digit Korean codes; parser_portfolio_solutions
+  x2 and parser_hedgai regexes likewise; pm_parse now requires a letter
+  (kills numeric OCR tokens - the rule the CSV path already had and the
+  OCR path lacked).
+  OPTION STRINGS - DECISION, documented in code: positions path REJECTS
+  the row outright (these accounts hold no options by rule; anomaly
+  blocks CLI auto-commit); activity path KEEPS the row (real cash
+  movement) with underlying NULLED, raw form retained in `symbol`.
+
+STORAGE SWEEP (tools/symbol_sweep.py, report-then-commit):
+  638 rows deleted across 10 tables: momo APPL/WIDEST - rta MORRIS -
+  portactions BUXXX/WTUM - keiths FIO - retail 70 prose-word rows -
+  signal_strength/roster/flow the N fragment (tripwire-safe: not in
+  current roster) - inventory 95 symbols / history 455 rows (OCR words,
+  bare-FX condensed forms, suffix fragments HK/KS, dead listings).
+  SPARED with documented evidence: SS (Shanghai Composite per its own RR
+  rows), MAG7, GLASF (real OTC, ticker_tags CANNABIS), ATZ (TSX-only),
+  ADS (adidas bare notation - collides with delisted US ADS), TCNNF
+  (Trulieve's OTC line - same issuer as HELD TRLV; roster events real),
+  BF.B (batch probe false-negative, resolves individually),
+  DE/L-class collisions (Deere/Loews - the probe itself vouches),
+  everything in KNOWN_UNCOVERABLE/PARKED_FOR_SOURCE (curated real names).
+  Sweep re-run after commit: ZERO garbage remaining.
+  Deliberately NOT swept: hedgeye_risk_ranges / hedgeye_signal_changes
+  (legit FX/index macro instruments), book_positions (broker = truth),
+  mfr_snapshots (MFR accepted = proof).
+
+ENROLLMENT CURATION: KNOWN_UNCOVERABLE += the four FX pairs, SS, MAG7,
+  ATZ, GLASF (each with evidence comments); probe window 5d -> 1mo
+  (GRUSF was a thin-OTC false drop).
+
+ACCEPTANCE (PART 3):
+  RPI.L / 005930.KS / 1913.HK / 2331.HK / ADS.DE / ES_F survive parsing
+    intact .......................................... PASS (unit-tested)
+  OCR word-tokens rejected at parse with logged count  PASS (symbol_guard
+    logs per-drop + summary; pm_parse surfaces drops in the reply)
+  Option strings: behavior decided + documented ....... PASS (see above)
+  Storage zero unresolvable after sweep ............... PASS (re-run clean)
+  Enrollment gate dropped-count ....................... 0  (was 14)
+    to_add 22, all resolvable; held tagging intact
+  16 new tests in test_symbol_guard.py - ALL PASS. Regressions green:
+  pm_parse, signal_strength_parse, mfr_backlog_guard, side_blocks,
+  tag_proposals, hdg_read_paths, report_v4.
+  PRE-EXISTING failure, not mine: test_pm_sector_taxonomy pins live
+  roster counts from its 8/16 commit; a week of PM syncs drifted them
+  (+1 staples, +1 healthcare, -1 global tech). Sweep deleted nothing
+  from ticker_tags (commit log shows no such section).
+
 NOT DONE / YOUR CALL
   - Deploy: code fixes are inert on Railway until commit + railway up.
   - FRED_API_KEY whitespace on Railway: untouched (env change, flagged

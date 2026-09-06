@@ -67,6 +67,23 @@ KNOWN_UNCOVERABLE = {
     # from every paste line, the same permanent-resident problem as the *USD
     # crypto names in PARKED_FOR_SOURCE below.
     "UST10Y", "UST2Y", "UST30Y",
+
+    # ── FX pairs and index/basket names — real Hedgeye instruments that MFR
+    # cannot activate under these symbols (2026-08-23). Same class as the
+    # UST yields above: hedgeye_risk_ranges / signal_changes legitimately
+    # carry them, so they re-listed in every backlog and were then dropped
+    # by the quote gate — permanent residents either way. If any earns an
+    # MFR alias later, translate it there rather than un-parking it here.
+    "CAD/USD", "EUR/USD", "GBP/USD", "USD/YEN",
+    "SS",                           # SHANGHAI COMPOSITE per its own RR rows —
+                                    #   NOT a US equity; no MFR symbol
+    "MAG7",                         # momo tracker's Mag7 basket, deliberate
+                                    #   pseudo-instrument (symbol_guard)
+    # ── Real coverage with no US-resolvable listing (2026-08-23) ───────────
+    "ATZ",                          # Aritzia — TSX only (ATZ.TO); Hedgeye
+                                    #   retail names it bare
+    "GLASF",                        # Glass House Brands — OTC, in ticker_tags
+                                    #   (CANNABIS) and SS roster; no yahoo data
 }
 
 # Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.

@@ -215,6 +215,19 @@ def parse_rta(subject: str, body_text_or_html: str) -> Optional[dict]:
 
 def upsert_row(rec: dict, signal_date: date, message_id: str | None) -> dict:
     import db_pg
+    # Write gate: BODY_SIGNAL_RE takes "the all-caps token immediately
+    # preceding the $price", which captured MORRIS out of a spelled-out
+    # "PHILIP MORRIS $190.60" line — a company-name word stored as a ticker
+    # WITH Philip Morris's price. Known names pass on membership; word
+    # tokens resolve nowhere and are dropped loudly.
+    try:
+        from tools.symbol_guard import validate_for_storage
+        kept, dropped = validate_for_storage([rec.get("ticker")], "rta")
+        if dropped:
+            return {"written": 0, "failed": 0,
+                    "dropped": [str(d) for d in dropped]}
+    except Exception as e:
+        log.warning("symbol_guard unavailable, RTA row unvalidated: %s", e)
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
             try:

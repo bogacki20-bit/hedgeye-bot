@@ -39,7 +39,11 @@ BUCKET_HEADERS = {
 _MASTHEAD_RE = re.compile(
     r"HEDGEYE\s+POSITION\s+MONITOR\s*\((\d{1,2})/(\d{1,2})/(20\d{2})\)", re.I)
 # Single token: AAPL · BF-B · RI.PA · 2513.HK · 005930.KS · VOLV-B.ST · BTCUSD
-_TICKER_RE = re.compile(r"^[A-Z0-9]{1,7}(?:[.\-\^][A-Z0-9]{1,4}){0,2}$")
+# Must contain a LETTER — the OCR path (Claude vision transcription) emits
+# pure-numeric fragments ('2513', '100.00') that are ticker-shaped but never
+# tickers. Same rule sync_position_monitor.py applies to the CSV feed; the
+# OCR feed had no equivalent until 2026-08-23.
+_TICKER_RE = re.compile(r"^(?=.*[A-Z])[A-Z0-9]{1,7}(?:[.\-\^][A-Z0-9]{1,4}){0,2}$")
 # If a sector's roster ever shrinks the mapping below this fraction of the
 # stored roster, removal detection is refused (partial upload ≠ mass exit).
 REMOVAL_GUARD_FRACTION = 0.6
@@ -196,6 +200,25 @@ def ingest_hook(row_id, note_date, text) -> str:
     if not p["mapping"]:
         return "⚠ PM parse: 0 tickers — NOT synced. " + \
             " · ".join(p["warnings"][:3])
+
+    # Write gate before ticker_tags sync: the mapping comes from vision
+    # transcription of a screenshot, so ticker-SHAPED word tokens (MORRIS,
+    # WIDEST) and near-misses (BUXXX) survive the shape regex. Membership or
+    # a live quote decides; drops are surfaced in the reply, not silent.
+    try:
+        from tools.symbol_guard import validate_for_storage
+        kept, dropped = validate_for_storage(list(p["mapping"]), "pm_parse")
+        if dropped:
+            p["warnings"].append(
+                "symbol guard dropped %d unresolvable token(s): %s"
+                % (len(dropped), " ".join(str(d) for d in dropped)))
+            p["mapping"] = {t: b for t, b in p["mapping"].items() if t in kept}
+            p["sectors"] = {t: s for t, s in p["sectors"].items() if t in kept}
+        if not p["mapping"]:
+            return "⚠ PM parse: every token failed symbol validation — " \
+                   "NOT synced. " + " · ".join(p["warnings"][:3])
+    except Exception as e:
+        log.warning("symbol_guard unavailable, PM mapping unvalidated: %s", e)
 
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM ticker_tags "

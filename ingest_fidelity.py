@@ -220,11 +220,20 @@ def parse_positions(path, snapshot_date, keep_cash, accounts):
         if is_opt:
             p = parse_option(sym)
             if p is None:
-                anomalies.append(f"UNPARSEABLE OPTION SYMBOL: {sym!r}")
-                underlying, asset = sym, "option"
-            else:
-                underlying, exp, otype, strike = p
-                asset = "option"
+                # DECISION (2026-08-23): reject the row outright, never store
+                # the raw contract string as an underlying. A raw string here
+                # previously flowed into v_screener's universe, book sides,
+                # the sizing denominator, and the enrollment backlog as if it
+                # were an equity ticker. These accounts hold no options by
+                # rule (portfolio.ACCOUNTS), so an unparseable option symbol
+                # is a malformed export line, not a position to preserve —
+                # and the anomaly BLOCKS auto-commit on the CLI path, so it
+                # cannot pass unnoticed.
+                anomalies.append(f"UNPARSEABLE OPTION SYMBOL (row rejected): "
+                                 f"{sym!r}")
+                continue
+            underlying, exp, otype, strike = p
+            asset = "option"
         elif sym in CASH_SYMBOLS or sym.startswith("Pending"):
             underlying, asset = sym, "cash"
         else:
@@ -334,8 +343,12 @@ def parse_activity(path, keep_spending, accounts):
                 if p:
                     underlying, exp, otype, strike = p
                 else:
-                    underlying = sym
-                    anomalies.append(f"UNPARSEABLE OPTION SYMBOL (activity): {sym!r}")
+                    # Activity differs from positions: the row is a REAL cash
+                    # movement, so it is kept — but the raw contract string
+                    # is never stored as an underlying (underlying stays
+                    # NULL; the raw form survives in `symbol` for audit).
+                    anomalies.append(f"UNPARSEABLE OPTION SYMBOL "
+                                     f"(activity; underlying nulled): {sym!r}")
             else:
                 underlying = sym
 

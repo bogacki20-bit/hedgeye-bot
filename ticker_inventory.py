@@ -88,6 +88,23 @@ def note_ticker(
         return False
     ticker = ticker.upper().strip()
 
+    # Write gate for the mention tables. This is the single write path for
+    # hedgeye_ticker_inventory / _history, and monitored_tickers is a VIEW
+    # over the inventory — so every token accepted here becomes part of the
+    # live price-polling and alert universe (price_monitor
+    # get_alert_ticker_universe). 17 parsers plus the LLM classifier call
+    # in; several extract from prose/OCR, and the classifier can emit
+    # near-misses (APPL). Membership or a live quote decides; the probe
+    # failing open is logged, never silent.
+    try:
+        from tools.symbol_guard import validate_for_storage
+        kept, _dropped = validate_for_storage([ticker], f"inventory:{source}")
+        if not kept:
+            return False
+    except Exception as e:
+        log.warning("symbol_guard unavailable, noting %s unvalidated: %s",
+                    ticker, e)
+
     try:
         import db_pg
     except ImportError as e:

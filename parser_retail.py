@@ -196,6 +196,11 @@ def parse_retail(subject: str, body_text_or_html: str) -> list[dict]:
 def upsert_rows(rows: list[dict], signal_date: date, feed_item_id: int | None,
                 message_id: str | None) -> dict:
     import db_pg
+    # Write gate: _SCAN_RE is a free-text scan, so prose words that look like
+    # tickers (and inherit the block's side) reach this point. Coverage
+    # decides, not spelling — see tools/symbol_guard.
+    from tools.symbol_guard import filter_rows
+    rows, _dropped = filter_rows(rows, "retail")
     written, failed = 0, 0
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
