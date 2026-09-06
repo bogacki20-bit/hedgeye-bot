@@ -603,23 +603,31 @@ def extract_all(backfill: bool, symbols: list[Symbol]) -> dict[str, Extract]:
 def stage_rows(results: dict[str, Extract]) -> int:
     """Upsert extracted rows into ts_export_log. Uploaded rows are never
     touched (decision 5: never re-export an uploaded (symbol, source_key));
-    still-pending rows refresh value/known_at. Returns rows staged/refreshed."""
+    still-pending rows refresh value/known_at. Returns rows staged/refreshed.
+
+    Batched with execute_values: the 8-year backfill stages ~115k rows, and
+    one round trip per row over the public DB link held a transaction open
+    long enough for the server to drop the connection (2026-09-06 backfill
+    run). Commits per batch — the upsert is idempotent, so a mid-run failure
+    just re-stages on retry."""
+    from psycopg2.extras import execute_values
+    rows = [(name, r.source_key, r.known_at, r.value)
+            for name, ext in results.items() for r in ext.rows]
     n = 0
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        for name, ext in results.items():
-            for r in ext.rows:
-                cur.execute(
-                    """
-                    INSERT INTO ts_export_log (symbol, source_key, known_at, value)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (symbol, source_key) DO UPDATE
-                        SET value = EXCLUDED.value, known_at = EXCLUDED.known_at
-                        WHERE ts_export_log.uploaded_at IS NULL
-                    """,
-                    (name, r.source_key, r.known_at, r.value),
-                )
-                n += cur.rowcount
-        conn.commit()
+        for i in range(0, len(rows), 1000):
+            execute_values(
+                cur,
+                """
+                INSERT INTO ts_export_log (symbol, source_key, known_at, value)
+                VALUES %s
+                ON CONFLICT (symbol, source_key) DO UPDATE
+                    SET value = EXCLUDED.value, known_at = EXCLUDED.known_at
+                    WHERE ts_export_log.uploaded_at IS NULL
+                """,
+                rows[i:i + 1000], page_size=1000)
+            n += cur.rowcount
+            conn.commit()
     return n
 
 
