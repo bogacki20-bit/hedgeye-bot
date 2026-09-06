@@ -716,8 +716,15 @@ def fetch_pending(symbols: list[str]) -> list[tuple[int, str, datetime, float]]:
 # ─────────────────────────── CSV + upload ───────────────────────────
 
 def _fmt_value(v: float) -> str:
+    """Plain decimal, never scientific notation. %.10g renders |v| < 1e-4 as
+    '8e-05', which TrendSpider's CSV ingest does not parse — the one such row
+    in #CORR_SPY_UUP60 left the whole symbol with no chart data despite an
+    HTTP 200 (2026-09-06). Seven symbols carried at least one e-notation row;
+    all were re-uploaded plain-decimal."""
     s = f"{v:.10g}"
-    return s
+    if "e" in s or "E" in s:
+        s = f"{v:.10f}".rstrip("0").rstrip(".")
+    return s or "0"
 
 
 def build_csv(rows: list[tuple[int, str, datetime, float]]) -> str:
