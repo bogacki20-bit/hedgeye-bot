@@ -4,6 +4,12 @@ Exports the bot's stored MFR / volume / RS / diversification / quad features to
 TrendSpider custom symbols (one symbol per feature) for the Round-1 ML
 feasibility test on SPY 60-min.
 
+Extended 2026-09-06 with the TradingView MFR indicator history (2018→,
+tv_mfr_history / tv_features_history, migration 085): per-asset range, LT
+range, trend tag + levels, range positions, shadow Hurst, and the Macro Show
+USD correlation set for SPY/UUP/VIX/USO/AAAU. Symbols with a live corpus
+source splice history-before / live-after (see union_hist_live).
+
 Doctrine (do not violate):
   * Python owns all arithmetic; no LLM calls.
   * Read ONLY stored corpus tables — never recompute a level at export time.
@@ -249,24 +255,229 @@ class Symbol:
     bounds: tuple[float, float]
 
 
+# ─────────── TradingView history union (2018→, migration 085) ───────────
+#
+# tv_mfr_history / tv_features_history hold the 8-year MFR indicator history
+# imported from TradingView chart exports (tradingview_ingest.py /
+# features_backfill.py). Union rule: historical rows for bar_dates BEFORE the
+# live source's first row, live rows after — a bar never has two sources.
+# Historical known_at is stored in the tables (bar_date 09:30 ET for
+# range-derived values, 16:00 ET for close-window features; Step 0 timing
+# evidence, 2026-09-06). Hist rows at/after the live boundary are silently
+# dropped (expected overlap), not loud-skipped.
+
+# Live range position: MFR's published positionOnRange (same formula as the
+# backfill: prior close vs published range — verified 2026-09-04), from the
+# typed column when present (migration 083), else the stored payload. NB on
+# rows the fetcher re-bumped intraday, the published value reflects the price
+# AT FETCH TIME — honest against known_at = fetched_at.
+RP_LIVE_SQL = ("COALESCE(mfr_pos_short, "
+               "(full_payload->'rangeData'->>'positionOnRange')::numeric)")
+
+
+def _convert_rp(raw):
+    """Clamp range position to [-0.5, 1.5] (operator decision, 2026-09-06)."""
+    return max(-0.5, min(1.5, _num(raw))), None
+
+
+def tv_hist_column(ticker: str, col: str):
+    """Extractor over tv_mfr_history: one column, known_at as stored,
+    source_key = bar_date. NULLs (trend_tag on the first post-warm-up bar)
+    are loud skips."""
+    def extract(cur, since) -> Extract:
+        cur.execute(
+            f"""
+            SELECT bar_date::text, known_at, {col}
+              FROM tv_mfr_history
+             WHERE ticker = %s AND (%s::text IS NULL OR bar_date::text > %s)
+             ORDER BY bar_date
+            """,
+            (ticker, since, since),
+        )
+        out = Extract()
+        for key, known_at, raw in cur.fetchall():
+            if raw is None:
+                out.skips.append((key, "NULL in source"))
+            else:
+                out.rows.append(Row(key, known_at, _num(raw)))
+        return out
+    return extract
+
+
+def tv_hist_feature(ticker: str, feature: str):
+    """Extractor over tv_features_history (features_backfill.py output)."""
+    def extract(cur, since) -> Extract:
+        cur.execute(
+            """
+            SELECT bar_date::text, known_at, value
+              FROM tv_features_history
+             WHERE ticker = %s AND feature = %s
+               AND (%s::text IS NULL OR bar_date::text > %s)
+             ORDER BY bar_date
+            """,
+            (ticker, feature, since, since),
+        )
+        out = Extract()
+        for key, known_at, raw in cur.fetchall():
+            out.rows.append(Row(key, known_at, _num(raw)))
+        return out
+    return extract
+
+
+def shadow_hurst_live(ticker: str):
+    """shadow_snapshots.shadow_hurst — the bot's own R/S Hurst, live rows."""
+    def extract(cur, since) -> Extract:
+        cur.execute(
+            """
+            SELECT snapshot_date::text, computed_at, shadow_hurst
+              FROM shadow_snapshots
+             WHERE ticker = %s AND status = 'ok' AND shadow_hurst IS NOT NULL
+               AND (%s::text IS NULL OR snapshot_date::text > %s)
+             ORDER BY snapshot_date
+            """,
+            (ticker, since, since),
+        )
+        out = Extract()
+        for key, computed_at, raw in cur.fetchall():
+            out.rows.append(Row(key, computed_at, _num(raw)))
+        return out
+    return extract
+
+
+def corr_pair_live(a: str, b: str, window: int):
+    """correlation_snapshots — tools.relative_strength's live pairwise corr."""
+    def extract(cur, since) -> Extract:
+        cur.execute(
+            """
+            SELECT snapshot_date::text, computed_at, correlation
+              FROM correlation_snapshots
+             WHERE ticker_a = %s AND ticker_b = %s AND window_days = %s
+               AND (%s::text IS NULL OR snapshot_date::text > %s)
+             ORDER BY snapshot_date
+            """,
+            (a, b, window, since, since),
+        )
+        out = Extract()
+        for key, computed_at, raw in cur.fetchall():
+            if raw is None:
+                out.skips.append((key, "NULL correlation"))
+            else:
+                out.rows.append(Row(key, computed_at, _num(raw)))
+        return out
+    return extract
+
+
+def union_hist_live(hist, live, boundary_sql: str, boundary_params: tuple):
+    """History before the live source's first row, live rows after.
+    boundary_sql must return the first live source_key (ISO date) or NULL;
+    with no live rows yet the full history exports."""
+    def extract(cur, since) -> Extract:
+        cur.execute(boundary_sql, boundary_params)
+        row = cur.fetchone()
+        boundary = str(row[0]) if row and row[0] is not None else None
+        h = hist(cur, since)
+        out = Extract()
+        if boundary is None:
+            out.rows, out.skips = h.rows, h.skips
+            return out
+        l = live(cur, since)
+        out.rows = [r for r in h.rows if r.source_key < boundary] + l.rows
+        out.skips = [s for s in h.skips if s[0] < boundary] + l.skips
+        return out
+    return extract
+
+
+def _mfr_first_live(ticker: str, cond: str):
+    return (f"SELECT min(snapshot_date)::text FROM mfr_snapshots "
+            f"WHERE ticker = %s AND {cond}", (ticker,))
+
+
+# (mfr ticker, symbol tag). BATS_TLT_1D.csv lands -> ingest + features, then
+# add ("TLT", "TLT") here.
+TV_TICKERS = [("SPY", "SPY"), ("UUP", "UUP"), ("^VIX", "VIX"),
+              ("USO", "USO"), ("AAAU", "AAAU")]
+
+
+def _tv_symbols() -> list["Symbol"]:
+    syms: list[Symbol] = []
+    for ticker, tag in TV_TICKERS:
+        px_hi = 1e4 if ticker == "^VIX" else 1e6
+        rng_b = _mfr_first_live(ticker, "range_low IS NOT NULL AND range_high IS NOT NULL")
+        syms += [
+            Symbol(f"#MFR_{tag}_LO",
+                   union_hist_live(tv_hist_column(ticker, "range_low"),
+                                   mfr_column(ticker, "range_low"), *rng_b),
+                   (1e-9, px_hi)),
+            Symbol(f"#MFR_{tag}_HI",
+                   union_hist_live(tv_hist_column(ticker, "range_high"),
+                                   mfr_column(ticker, "range_high"), *rng_b),
+                   (1e-9, px_hi)),
+            Symbol(f"#MFR_{tag}_TREND",
+                   union_hist_live(tv_hist_column(ticker, "trend_tag"),
+                                   mfr_column(ticker, "trend_signal", _convert_trend),
+                                   *_mfr_first_live(ticker, "trend_signal IS NOT NULL")),
+                   (-1, 1)),
+            Symbol(f"#MFR_{tag}_RP",
+                   union_hist_live(tv_hist_feature(ticker, "rp"),
+                                   mfr_column(ticker, RP_LIVE_SQL, _convert_rp),
+                                   *_mfr_first_live(ticker, f"{RP_LIVE_SQL} IS NOT NULL")),
+                   (-0.5, 1.5)),
+            # LT band + trend levels: TV history only. The feed's
+            # ltRangeData.upperRange matches TV exactly but lowerRange drifts
+            # ~0.12% (checked 2026-09-06) — no live splice until reconciled;
+            # bull/bear levels are not in the feed at all.
+            # VIX's LT low goes negative on spike unwinds (min -14.67,
+            # 2020-03) — the indicator's band, exported as-is.
+            Symbol(f"#MFR_{tag}_LTLO", tv_hist_column(ticker, "lt_range_low"),
+                   (-100.0 if ticker == "^VIX" else 1e-9, px_hi)),
+            Symbol(f"#MFR_{tag}_LTHI", tv_hist_column(ticker, "lt_range_high"), (1e-9, px_hi)),
+            Symbol(f"#MFR_{tag}_LTRP", tv_hist_feature(ticker, "lt_rp"), (-0.5, 1.5)),
+            Symbol(f"#MFR_{tag}_BULL", tv_hist_column(ticker, "bull_level"), (1e-9, px_hi)),
+            Symbol(f"#MFR_{tag}_BEAR", tv_hist_column(ticker, "bear_level"), (1e-9, px_hi)),
+            Symbol(f"#MFR_{tag}_BULLDIST", tv_hist_feature(ticker, "bull_dist"), (-3.0, 1.0)),
+            Symbol(f"#SHADOW_{tag}_HURST",
+                   union_hist_live(tv_hist_feature(ticker, "shadow_hurst"),
+                                   shadow_hurst_live(ticker),
+                                   "SELECT min(snapshot_date)::text FROM shadow_snapshots "
+                                   "WHERE ticker = %s AND status = 'ok' "
+                                   "AND shadow_hurst IS NOT NULL", (ticker,)),
+                   (0.0, 1.0)),
+        ]
+    syms.append(Symbol(
+        "#CORR_SPY_UUP60",
+        union_hist_live(tv_hist_feature("UUP", "corr60_spy"),
+                        corr_pair_live("UUP", "SPY", 60),
+                        "SELECT min(snapshot_date)::text FROM correlation_snapshots "
+                        "WHERE ticker_a = 'UUP' AND ticker_b = 'SPY' "
+                        "AND window_days = 60", ()),
+        (-1, 1)))
+    # Macro Show "Key $USD Correlations" windows (30/90d; 15/120/180d = Round
+    # 2). TV history only — no live module computes these pairs/windows yet.
+    for sym_name, feat in [("#CORR_UUP_SPY30", "corr30_spy"),
+                           ("#CORR_UUP_SPY90", "corr90_spy"),
+                           ("#CORR_UUP_USO30", "corr30_uso"),
+                           ("#CORR_UUP_USO90", "corr90_uso"),
+                           ("#CORR_UUP_AAAU30", "corr30_aaau"),
+                           ("#CORR_UUP_AAAU90", "corr90_aaau")]:
+        syms.append(Symbol(sym_name, tv_hist_feature("UUP", feat), (-1, 1)))
+    return syms
+
+
 SYMBOLS: list[Symbol] = [
-    Symbol("#MFR_SPY_LO",    mfr_column("SPY", "range_low"),            (1e-9, 1e6)),
-    Symbol("#MFR_SPY_HI",    mfr_column("SPY", "range_high"),           (1e-9, 1e6)),
-    Symbol("#MFR_SPY_TREND", mfr_column("SPY", "trend_signal", _convert_trend), (-1, 1)),
     Symbol("#MFR_SPY_HURST", mfr_column("SPY", "hurst"),                (1e-9, 1.0)),
     Symbol("#MFR_SPY_IVPD",  mfr_column("SPY", "(full_payload->>'ivpd')::numeric"), (-10, 10)),
     Symbol("#MFR_SPY_ZG",    mfr_column("SPY", "zero_gamma"),           (1e-9, 1e6)),
     Symbol("#MFR_SPY_CW",    mfr_column("SPY", "call_wall_mfr"),        (1e-9, 1e6)),
     Symbol("#MFR_SPY_PW",    mfr_column("SPY", "put_wall_mfr"),         (1e-9, 1e6)),
     Symbol("#MFR_SPY_DECEL", extract_decel,                             (-1, DECEL_CAP)),
-    Symbol("#MFR_VIX_LO",    mfr_column("^VIX", "range_low"),           (1e-9, 1e4)),
-    Symbol("#MFR_VIX_HI",    mfr_column("^VIX", "range_high"),          (1e-9, 1e4)),
-    Symbol("#MFR_VIX_TREND", mfr_column("^VIX", "trend_signal", _convert_trend), (-1, 1)),
     Symbol("#RS_SPYUNIV_CORR60", extract_corr60,                        (-1, 1)),
     Symbol("#RORO_HYGTLT_ROC",   extract_roro,                          (-1, 1)),
     Symbol("#QUAD_M", quad_extractor("monthly_quad"),                   (1, 4)),
     Symbol("#QUAD_Q", quad_extractor("quarterly_quad"),                 (1, 4)),
+    # #MFR_{SPY,VIX}_LO/_HI/_TREND moved into _tv_symbols(): same symbol
+    # names, now TV-history + live-feed unions.
 ]
+SYMBOLS += _tv_symbols()
 
 
 # ─────────────────────────── validation ───────────────────────────
