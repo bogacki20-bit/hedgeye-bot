@@ -51,6 +51,43 @@ def test_resolution_order_never_silently_falls_through():
     assert resolve_rp(None, 0.0) == (0.0, "derived-mfr")
 
 
+# ──────────── 2026-09-06: live-derived rp outranks frozen published ──────────
+
+def test_live_gate_published_never_overrides_a_live_quote():
+    """A row recomputed from a LIVE quote (_rp_stale=False) keeps its derived
+    rp; the published fetch-time value only stands where no live quote backs
+    the row (_rp_stale True or absent — EOD report / book alerts shapes)."""
+    import tools.rp_resolve as rr
+    real = rr.published_map
+    rr.published_map = lambda tickers: {t: (0.62, 0.5, None) for t in tickers}
+    try:
+        rows = [
+            {"ticker": "LIVE", "range_pos": 0.31, "_rp_stale": False},
+            {"ticker": "EODF", "range_pos": 0.31, "_rp_stale": True},
+            {"ticker": "NOKEY", "range_pos": 0.31},
+        ]
+        rr.apply_rp_resolution(rows, record=False)
+    finally:
+        rr.published_map = real
+    live, eod, nokey = rows
+    assert live["range_pos"] == 0.31 and live["rp_source"] == "derived-mfr", \
+        "live quote must win over frozen published"
+    assert live["_rp_derived"] == 0.31
+    assert eod["range_pos"] == 0.62 and eod["rp_source"] == "mfr-published", \
+        "no live quote -> published fallback stands"
+    assert nokey["range_pos"] == 0.62 and nokey["rp_source"] == "mfr-published", \
+        "rows without the flag (EOD report, book alerts) behave as before"
+
+
+def test_screen_marks_the_published_fallback_visibly():
+    from tools.screener import _rp_str
+    frozen = {"range_pos": 0.62, "rp_source": "mfr-published", "_rp_stale": True}
+    live = {"range_pos": 0.31, "rp_source": "derived-mfr", "_rp_stale": False}
+    assert _rp_str(frozen).startswith("0.62*"), \
+        "published fallback must carry the stale marker"
+    assert _rp_str(live).startswith("0.31") and "*" not in _rp_str(live)
+
+
 # ─────────────────── D4: the divergence alarm at > 0.05 ─────────────────────
 
 def test_divergence_fires_beyond_the_threshold_only():

@@ -959,10 +959,14 @@ def _refresh_range_pos_live(rows):
             r["_price"] = px_eod
             r["_rp_stale"] = True
     _apply_shadow_failover(rows)
-    # THE resolver (2026-08-26, the HYG defect): MFR's PUBLISHED position
-    # wins over anything derived; every row gets rp_source. The derived
-    # value survives in _rp_derived and a >0.05 disagreement is recorded
-    # and squawked once per ticker per day.
+    # THE resolver (2026-08-26, the HYG defect), live-gated 2026-09-06:
+    # rows just recomputed from a LIVE quote (_rp_stale=False) KEEP that
+    # value — the published position is frozen at the feed's fetch-time
+    # price and must not be displayed as live rp. Published is only the
+    # fallback when no live quote came back (rendered "0.62*·mfr").
+    # Every row still gets rp_source; the derived value survives in
+    # _rp_derived and a >0.05 disagreement is recorded and squawked once
+    # per ticker per day.
     try:
         from tools.rp_resolve import apply_rp_resolution
         apply_rp_resolution(rows)
@@ -1020,7 +1024,11 @@ def _rp_str(r) -> str:
     if r.get("range_pos") is None:
         return "n/a"
     s = f"{float(r['range_pos']):.2f}"
-    if r.get("_rp_stale"):
+    if r.get("rp_source") == "mfr-published":
+        # the feed's published position — frozen at ITS fetch-time price,
+        # shown only when no live quote backs a recomputed rp (2026-09-06)
+        s += "*"
+    elif r.get("_rp_stale"):
         s += "!eod"
     # D5 (2026-08-26): a number whose provenance is invisible is how the HYG
     # defect survived — every printed rp carries its source tag.

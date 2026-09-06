@@ -14,6 +14,12 @@ Resolution order, never silently falling through a tier:
 
 rp is NEVER clamped to [0,1]: above 1 / below 0 is real information — price
 outside the band — and is LABELLED by the zone logic, not hidden.
+
+2026-09-06 (rp frozen at fetch-time price): tier 1 is gated. The published
+position is computed by the vendor from the price AT FETCH TIME, so on any
+surface that just recomputed rp from a live quote (rows carrying
+_rp_stale=False) the live derived value wins and the published one is only
+a fallback — displayed with a stale marker by the callers.
 """
 from __future__ import annotations
 
@@ -160,7 +166,17 @@ def apply_rp_resolution(rows, record=True) -> list:
     """Mutate slice-shaped row dicts in place: set range_pos / rp_source /
     rp_lt via the five-tier order, and (record=True) file+squawk divergences.
     Rows keep their derived value in _rp_derived so nothing is erased.
-    Returns the divergence list [(ticker, published, derived, delta)]."""
+    Returns the divergence list [(ticker, published, derived, delta)].
+
+    LIVE gate (2026-09-06, the rp-does-not-move-with-price defect): a row
+    whose range_pos was just recomputed from a LIVE quote (_rp_stale is
+    False — SCREEN's _refresh_range_pos_live sets it) keeps that value; the
+    feed's published positionOnRange is frozen at ITS fetch-time price and
+    must never outrank a quote from seconds ago. Published stays tier 1
+    only where no live quote backs the derived value (rows without the flag
+    — EOD report, book alerts — behave exactly as before: the 2026-08-26
+    HYG ordering was about deriving from the WRONG BAND, not about
+    live-vs-published freshness, and this gate never re-derives a band)."""
     pub = published_map({r.get("ticker") for r in rows if r.get("ticker")})
     divergences = []
     for r in rows:
@@ -175,7 +191,10 @@ def apply_rp_resolution(rows, record=True) -> list:
             derived_now = derived
             derived_src = ("derived-hdg" if r.get("band_source") == "hdg"
                            else "derived-mfr")
-        rp, src = resolve_rp(published=ps, derived=derived_now,
+        live_derived = (derived_now is not None
+                        and r.get("_rp_stale") is False)
+        rp, src = resolve_rp(published=None if live_derived else ps,
+                             derived=derived_now,
                              derived_src=derived_src, shadow=shadow_rp,
                              wrapper=r.get("_wrapper_rp"))
         r["_rp_derived"] = derived
