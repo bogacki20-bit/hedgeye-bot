@@ -948,7 +948,13 @@ def run(dry_run: bool, backfill: bool,
         batch_id = f"{batch_stamp}-{sym.name.lstrip('#')}"
         if n_posts > 0:
             time.sleep(SLEEP_BETWEEN_UPLOADS_S)
-        status, body = upload_csv(csv_text, url, api_key, sym.name)
+        try:
+            status, body = upload_csv(csv_text, url, api_key, sym.name)
+        except Exception as e:
+            # transient transport failure (DNS blip killed the 2026-09-06
+            # round-2 run mid-loop): record it, keep the rows pending, and
+            # CONTINUE with the remaining symbols — they retry next run.
+            status, body = 0, f"transport error: {e}"
         ok = 200 <= status < 300
         mark_batch([r[0] for r in pending], batch_id, status, ok)
         n_posts += 1
