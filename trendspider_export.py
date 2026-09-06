@@ -266,28 +266,94 @@ class Symbol:
 # evidence, 2026-09-06). Hist rows at/after the live boundary are silently
 # dropped (expected overlap), not loud-skipped.
 
-# Live-side range position (operator decision, 2026-09-06 part 2):
+# Live-side range position (operator decisions, 2026-09-06 parts 2+3):
 #   rp[D] = (close[D-1] - range_low[D]) / (range_high[D] - range_low[D]),
 #   clamped [-0.5, 1.5],
-# where close[D-1] is the PRIOR SESSION close from the same close source the
-# historical rows used — the TradingView bars (tv_mfr_history.close,
-# migration 086). Range low/high come from the live feed's stored row for D.
+# where close[D-1] is the PRIOR SESSION close. Historical rows use the
+# TradingView bars (tv_mfr_history.close); LIVE rows use the bot's own
+# eod_close_store (migration 087) — unadjusted daily closes this job
+# refreshes itself every real run, so RP continues daily with NO CSV
+# dependency. Store-vs-TV validation over the 86-session overlap
+# (2026-09-06): SPY/UUP/USO exact (max 0.00001%, incl. through SPY's June
+# ex-div — no adjustment drift); documented vendor-precision drift only:
+# ^VIX one penny of index on most dates (yf settlement print vs TVC,
+# <=0.0701%), AAAU half-cent on 9 dates (TV sub-penny closes vs yf 2dp,
+# <=0.0126%) — rp impact <=0.002 on both.
+# Range low/high come from the live feed's stored row for D.
 # NOT MFR's published positionOnRange: on rows the fetcher re-bumps intraday
 # that value reflects the price at fetch time, so the definition would drift
-# across the history/live splice. A live bar with no TV close in the prior
-# RP_MAX_CLOSE_AGE_D calendar days is skipped loudly (never approximated
-# with a stale close) — RP resumes when a fresh TV CSV is ingested.
+# across the history/live splice. A live bar with no stored close in the
+# prior RP_MAX_CLOSE_AGE_D calendar days is skipped loudly (never
+# approximated with a stale close).
 RP_MAX_CLOSE_AGE_D = 4   # Fri close still serves Tue-after-long-weekend
+RP_CLOSE_LOOKBACK = "15d"  # refresh window: re-upserting heals late settles
 
 
 def _clamp_rp(v: float) -> float:
     return max(-0.5, min(1.5, v))
 
 
-def rp_live_from_tv_close(ticker: str):
-    """Live RP rows: feed range for bar D + latest earlier TV close.
-    known_at = fetched_at (the stored row's write time), as for every
-    mfr_snapshots-sourced symbol."""
+def refresh_eod_close_store(tickers: list[str], period: str = RP_CLOSE_LOOKBACK) -> int:
+    """Producer step: upsert the last `period` of UNADJUSTED daily closes for
+    `tickers` into eod_close_store. auto_adjust=False — raw exchange closes,
+    matching the TV bars the historical rows used; re-upserting past dates
+    only ever heals a late-settling print (unadjusted closes never move
+    again). A bar dated today is kept only after the 16:00 ET close so a
+    stray intraday run cannot bank a forming bar. Best-effort: failures are
+    loud, the run continues on whatever the store already holds (the
+    freshness guard catches true staleness). Returns rows upserted."""
+    try:
+        import yfinance as yf
+        from price_monitor import HEDGEYE_TO_YFINANCE
+    except Exception as e:
+        print(f"WARNING: close-store refresh unavailable ({e}) — "
+              f"running on stored closes")
+        return 0
+    sym_of = {t: HEDGEYE_TO_YFINANCE.get(t, t) for t in tickers}
+    now_ny = datetime.now(NY)
+    today_ny = now_ny.date()
+    market_closed = (now_ny.hour, now_ny.minute) >= (16, 5)
+    rows = []
+    try:
+        df = yf.download(list(set(sym_of.values())), period=period,
+                         interval="1d", group_by="ticker",
+                         auto_adjust=False, progress=False, threads=True)
+        for t, sym in sym_of.items():
+            try:
+                sub = df[sym] if len(set(sym_of.values())) > 1 else df
+                for idx, c in zip(sub.index, sub["Close"].tolist()):
+                    if c != c:          # NaN
+                        continue
+                    d = idx.date() if hasattr(idx, "date") else idx
+                    if d > today_ny or (d == today_ny and not market_closed):
+                        continue        # never bank a forming bar
+                    rows.append((t, d, float(c)))
+            except Exception:
+                print(f"WARNING: close-store refresh got no bars for {t} ({sym})")
+    except Exception as e:
+        print(f"WARNING: close-store download failed ({e}) — "
+              f"running on stored closes")
+        return 0
+    if not rows:
+        return 0
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        for t, d, c in rows:
+            cur.execute(
+                """
+                INSERT INTO eod_close_store (ticker, bar_date, close, fetched_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (ticker, bar_date) DO UPDATE
+                    SET close = EXCLUDED.close, fetched_at = NOW()
+                """,
+                (t, d, c))
+        conn.commit()
+    return len(rows)
+
+
+def rp_live_from_stored_close(ticker: str):
+    """Live RP rows: feed range for bar D + latest earlier close from
+    eod_close_store. known_at = fetched_at (the stored row's write time),
+    as for every mfr_snapshots-sourced symbol."""
     def extract(cur, since) -> Extract:
         cur.execute(
             """
@@ -295,10 +361,9 @@ def rp_live_from_tv_close(ticker: str):
                    m.range_low, m.range_high, pc.close, pc.bar_date
               FROM mfr_snapshots m
               LEFT JOIN LATERAL (
-                   SELECT close, bar_date FROM tv_mfr_history h
-                    WHERE h.ticker = m.ticker AND h.bar_date < m.snapshot_date
-                      AND h.close IS NOT NULL
-                    ORDER BY h.bar_date DESC LIMIT 1) pc ON TRUE
+                   SELECT close, bar_date FROM eod_close_store e
+                    WHERE e.ticker = m.ticker AND e.bar_date < m.snapshot_date
+                    ORDER BY e.bar_date DESC LIMIT 1) pc ON TRUE
              WHERE m.ticker = %s AND (%s::text IS NULL OR m.snapshot_date::text > %s)
              ORDER BY m.snapshot_date
             """,
@@ -310,11 +375,11 @@ def rp_live_from_tv_close(ticker: str):
                 out.skips.append((key, "NULL range in source"))
                 continue
             if pclose is None:
-                out.skips.append((key, "no TV close before bar"))
+                out.skips.append((key, "no stored close before bar"))
                 continue
             age = (snap_date - pdate).days
             if age > RP_MAX_CLOSE_AGE_D:
-                out.skips.append((key, f"prior TV close stale ({age}d, {pdate})"))
+                out.skips.append((key, f"prior stored close stale ({age}d, {pdate})"))
                 continue
             rl, rh, pclose = _num(rl), _num(rh), _num(pclose)
             out.rows.append(Row(key, fetched_at, _clamp_rp((pclose - rl) / (rh - rl))))
@@ -460,13 +525,14 @@ def _tv_symbols() -> list["Symbol"]:
                                    *_mfr_first_live(ticker, "trend_signal IS NOT NULL")),
                    (-1, 1)),
             # rp[D] = (close[D-1] - range_low[D]) / (range_high[D] - range_low[D]),
-            # clamped [-0.5, 1.5]; close[D-1] = prior TV session close on BOTH
-            # sides of the splice (hist: features_backfill; live:
-            # rp_live_from_tv_close). Ranges: TV before the boundary, the live
-            # feed's stored row after.
+            # clamped [-0.5, 1.5]; close[D-1] = prior session close — TV bars
+            # on the historical side (features_backfill), the bot's own
+            # eod_close_store on the live side (rp_live_from_stored_close;
+            # validated against TV <=0.01% over the overlap, 2026-09-06).
+            # Ranges: TV before the boundary, the live feed's stored row after.
             Symbol(f"#MFR_{tag}_RP",
                    union_hist_live(tv_hist_feature(ticker, "rp"),
-                                   rp_live_from_tv_close(ticker), *rng_b),
+                                   rp_live_from_stored_close(ticker), *rng_b),
                    (-0.5, 1.5)),
             # LT band + trend levels: TV history only. The feed's
             # ltRangeData.upperRange matches TV exactly but lowerRange drifts
@@ -742,6 +808,12 @@ def run(dry_run: bool, backfill: bool,
 
     mode = f"{'DRY-RUN ' if dry_run else ''}{'backfill' if backfill else 'incremental'}"
     print(f"TS EXPORT — {mode} — {len(symbols)} symbols")
+
+    if not dry_run:
+        # producer step: keep eod_close_store current so live RP needs no
+        # fresh TV CSV (dry runs stay write-free and read stored closes).
+        n_closes = refresh_eod_close_store([t for t, _tag in TV_TICKERS])
+        print(f"eod_close_store: {n_closes} close rows refreshed")
 
     results = extract_all(backfill, symbols)
     print_summary(results, symbols)
