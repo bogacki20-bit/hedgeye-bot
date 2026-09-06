@@ -499,10 +499,46 @@ def _mfr_first_live(ticker: str, cond: str):
             f"WHERE ticker = %s AND {cond}", (ticker,))
 
 
-# (mfr ticker, symbol tag). BATS_TLT_1D.csv lands -> ingest + features, then
-# add ("TLT", "TLT") here.
+# (mfr ticker, symbol tag) — assets whose range symbols SPLICE TV history
+# with the live feed.
 TV_TICKERS = [("SPY", "SPY"), ("UUP", "UUP"), ("^VIX", "VIX"),
               ("USO", "USO"), ("AAAU", "AAAU")]
+
+# TLT (operator waiver, 2026-09-06): the feed's TLT range diverges from the
+# TV indicator on 53/81 overlap dates (0.07-0.29%), so TLT's TrendSpider
+# range symbols are TV-INDICATOR-SOURCED END TO END — history AND live
+# period, NO mfr_snapshots union — keeping train and live on one
+# definition. Rows are flagged source=tv_indicator / feed_verified=false at
+# staging (migration 088). The trading desk (REPORT/SCREEN) keeps the feed
+# as TLT's source of truth; this waiver is TrendSpider-only.
+TV_ONLY_TICKERS = [("TLT", "TLT")]
+TLT_TV_ONLY_RANGE_SYMBOLS = [
+    f"#MFR_TLT_{s}" for s in ("LO", "HI", "TREND", "RP", "LTLO", "LTHI",
+                              "LTRP", "BULL", "BEAR", "BULLDIST")]
+
+# Round-2 full-indicator features (tradingview_ingest_full.py):
+# (symbol suffix, tv_features_history feature, bounds). Notes: vixfix is
+# exported with its native NEGATIVE sign; TRADE2/TREND2 are OPAQUE
+# volatility-like metrics (NOT duration counters — Step 0, 2026-09-06);
+# BUY is a real fire flag (22-84 fires per ticker, not all zeros).
+FULL_EXPORT_FEATURES = [
+    ("HURST64",  "hurst64",    (0.0, 1.0)),
+    ("HURST256", "hurst256",   (0.0, 1.0)),
+    ("TRENDLVL", "trend_lvl",  (1e-9, 1e6)),
+    ("TRADELVL", "trade_lvl",  (1e-9, 1e6)),
+    ("BUY",      "buy",        (0.0, 1.0)),
+    ("MEGABUY",  "mega_buy",   (0.0, 1.0)),
+    ("SELL",     "sell",       (0.0, 1.0)),
+    ("MEGASELL", "mega_sell",  (0.0, 1.0)),
+    ("VOLAT",    "volatility", (0.0, 100.0)),
+    ("VIXFIX",   "vixfix",     (-400.0, 0.0)),
+    ("UPT1",     "up_t1",      (1e-9, 1e6)),
+    ("DNT1",     "down_t1",    (-100.0, 1e6)),
+    ("TRADE2",   "trade2",     (0.0, 100.0)),
+    ("TREND2",   "trend2",     (0.0, 100.0)),
+]
+FULL_TICKERS = [("SPY", "SPY"), ("UUP", "UUP"), ("USO", "USO"),
+                ("AAAU", "AAAU"), ("TLT", "TLT")]
 
 
 def _tv_symbols() -> list["Symbol"]:
@@ -572,6 +608,35 @@ def _tv_symbols() -> list["Symbol"]:
                            ("#CORR_UUP_AAAU30", "corr30_aaau"),
                            ("#CORR_UUP_AAAU90", "corr90_aaau")]:
         syms.append(Symbol(sym_name, tv_hist_feature("UUP", feat), (-1, 1)))
+    # TLT: TV-only range set (waiver — see TV_ONLY_TICKERS). Everything from
+    # tv_mfr_history / tv_features_history, including the live period; only
+    # #SHADOW_TLT_HURST splices to shadow_snapshots (the bot's OWN hurst,
+    # one definition on both sides — not a feed value).
+    for ticker, tag in TV_ONLY_TICKERS:
+        syms += [
+            Symbol(f"#MFR_{tag}_LO", tv_hist_column(ticker, "range_low"), (1e-9, 1e6)),
+            Symbol(f"#MFR_{tag}_HI", tv_hist_column(ticker, "range_high"), (1e-9, 1e6)),
+            Symbol(f"#MFR_{tag}_TREND", tv_hist_column(ticker, "trend_tag"), (-1, 1)),
+            Symbol(f"#MFR_{tag}_RP", tv_hist_feature(ticker, "rp"), (-0.5, 1.5)),
+            Symbol(f"#MFR_{tag}_LTLO", tv_hist_column(ticker, "lt_range_low"), (1e-9, 1e6)),
+            Symbol(f"#MFR_{tag}_LTHI", tv_hist_column(ticker, "lt_range_high"), (1e-9, 1e6)),
+            Symbol(f"#MFR_{tag}_LTRP", tv_hist_feature(ticker, "lt_rp"), (-0.5, 1.5)),
+            Symbol(f"#MFR_{tag}_BULL", tv_hist_column(ticker, "bull_level"), (1e-9, 1e6)),
+            Symbol(f"#MFR_{tag}_BEAR", tv_hist_column(ticker, "bear_level"), (1e-9, 1e6)),
+            Symbol(f"#MFR_{tag}_BULLDIST", tv_hist_feature(ticker, "bull_dist"), (-3.0, 1.0)),
+            Symbol(f"#SHADOW_{tag}_HURST",
+                   union_hist_live(tv_hist_feature(ticker, "shadow_hurst"),
+                                   shadow_hurst_live(ticker),
+                                   "SELECT min(snapshot_date)::text FROM shadow_snapshots "
+                                   "WHERE ticker = %s AND status = 'ok' "
+                                   "AND shadow_hurst IS NOT NULL", (ticker,)),
+                   (0.0, 1.0)),
+        ]
+    # Round-2 full-indicator feature symbols, five assets.
+    for ticker, tag in FULL_TICKERS:
+        for suffix, feat, bounds in FULL_EXPORT_FEATURES:
+            syms.append(Symbol(f"#MFR_{tag}_{suffix}",
+                               tv_hist_feature(ticker, feat), bounds))
     return syms
 
 
@@ -849,6 +914,23 @@ def run(dry_run: bool, backfill: bool,
 
     staged = stage_rows(results)
     print(f"\nstaged/refreshed {staged} rows in ts_export_log")
+
+    # Provenance flags (migration 088): TLT range rows are TV-indicator-
+    # sourced and never verified against the live feed (operator waiver).
+    flagged = [s for s in TLT_TV_ONLY_RANGE_SYMBOLS
+               if any(sym.name == s for sym in symbols)]
+    if flagged:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE ts_export_log SET source = 'tv_indicator', "
+                "feed_verified = false WHERE symbol = ANY(%s) "
+                "AND (source IS DISTINCT FROM 'tv_indicator' "
+                "OR feed_verified IS DISTINCT FROM false)",
+                (flagged,))
+            n_flag = cur.rowcount
+            conn.commit()
+        print(f"flagged {n_flag} TLT range rows source=tv_indicator, "
+              f"feed_verified=false")
 
     batch_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     n_posts = 0

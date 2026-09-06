@@ -154,7 +154,8 @@ def derive_trend(body: list[dict]) -> list:
     return tags
 
 
-def repaint_check(cur, ticker: str, body: list[dict]) -> None:
+def repaint_check(cur, ticker: str, body: list[dict],
+                  waive: bool = False) -> None:
     cur.execute(
         """SELECT snapshot_date, range_low, range_high FROM mfr_snapshots
             WHERE ticker=%s AND range_low IS NOT NULL AND range_high IS NOT NULL""",
@@ -191,10 +192,18 @@ def repaint_check(cur, ticker: str, body: list[dict]) -> None:
         detail = "\n  ".join(
             f"{d}: csv {rl:.4f}/{rh:.4f}  live {L[0]:.4f}/{L[1]:.4f} ({rel * 100:.3f}%)"
             for d, rl, rh, L, rel in fails[:20])
+        if waive:
+            # Operator waiver (2026-09-06, TLT): the TV indicator is the
+            # symbol's SOLE TrendSpider source — history and live period —
+            # so feed divergence no longer blocks. The rows still export
+            # flagged source=tv_indicator / feed_verified=false.
+            print(f"  WAIVED repaint drift on {len(fails)} date(s) "
+                  f"(--waive-repaint):\n  {detail}")
+            return
         raise IngestError(f"{ticker}: repaint drift beyond logged tolerance:\n  {detail}")
 
 
-def ingest(path: Path, ticker: str, dry_run: bool) -> int:
+def ingest(path: Path, ticker: str, dry_run: bool, waive: bool = False) -> int:
     rows, body, n_warm = load_csv(path)
     print(f"\n{path.name} -> {ticker}: {len(rows)} rows "
           f"({rows[0]['date']} .. {rows[-1]['date']}), warm-up skipped {n_warm}, "
@@ -202,7 +211,7 @@ def ingest(path: Path, ticker: str, dry_run: bool) -> int:
     validate(ticker, rows, body)
     tags = derive_trend(body)
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        repaint_check(cur, ticker, body)
+        repaint_check(cur, ticker, body, waive=waive)
         if dry_run:
             print(f"  [dry-run] would upsert {len(body)} rows "
                   f"(trend_tag NULL on {sum(1 for t in tags if t is None)})")
@@ -250,6 +259,10 @@ def main() -> int:
     ap.add_argument("--all", action="store_true",
                     help="ingest every mapped file present in data/tradingview/")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--waive-repaint", action="store_true",
+                    help="downgrade repaint FAILURES to loud warnings — only "
+                         "for a ticker the operator has declared TV-indicator-"
+                         "sourced end to end (TLT, 2026-09-06)")
     args = ap.parse_args()
 
     jobs: list[tuple[Path, str]] = []
@@ -266,7 +279,7 @@ def main() -> int:
     total = 0
     try:
         for path, ticker in jobs:
-            total += ingest(path, ticker, args.dry_run)
+            total += ingest(path, ticker, args.dry_run, waive=args.waive_repaint)
     except IngestError as e:
         print(f"\nERROR: {e}")
         return 1
