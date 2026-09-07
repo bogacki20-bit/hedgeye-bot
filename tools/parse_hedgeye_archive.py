@@ -49,6 +49,13 @@ MPATH_RE = re.compile(
     r"[\s\-'/.]{0,3}(\d{2,4})?\s*[=:→\-]{0,2}>?\s*#?Q(?:uad)?\s*([1-4])", re.I)
 PROSE_RE = re.compile(r"#?Quad\s*([1-4])", re.I)
 QTR_NEAR_RE = re.compile(r"\b([1-4])Q(\d{2})E?\b")
+# prose-window guards: promo boilerplate and non-US quad attributions
+PROMO_RE = re.compile(
+    r"click here|upgrade your access|learn more|subscri|free access|"
+    r"add to calendar|webcast|invite", re.I)
+NON_US_RE = re.compile(
+    r"\bchina|europe|eurozone|japan|germany|\buk\b|india|canada|mexico|"
+    r"brazil|australia|korea|emerging market", re.I)
 NOWCAST_RE = re.compile(
     r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
     r"[\s\-'/.]{0,3}(\d{2,4})?[^%\n]{0,60}?(\d{1,2}\.\d{1,2})\s*%", re.I)
@@ -111,6 +118,8 @@ def parse_quads(text, note_date, product):
         if GIP_RE.search(window) or GIP_SHORT_RE.search(window) \
                 or MPATH_RE.search(window):
             continue                        # already captured structurally
+        if PROMO_RE.search(window) or NON_US_RE.search(window):
+            continue                        # promo copy / non-US attribution
         qn = QTR_NEAR_RE.search(window)
         if qn:
             scope, period = "quarterly", f"{qn.group(1)}Q{qn.group(2)}"
@@ -151,7 +160,7 @@ def main() -> int:
         rows = rows[:args.limit]
 
     from parser_risk_range import parse_risk_range_email
-    quad_rows, now_rows, rr_rows = [], [], []
+    quad_rows, now_rows, rr_rows = {}, [], []
     stats = {"rr_mails": 0, "rr_rows": 0, "quad_mails": 0, "quad_obs": 0,
              "nowcast_mails": 0, "nowcast_obs": 0, "errors": 0}
     for r in rows:
@@ -187,8 +196,13 @@ def main() -> int:
                 stats["quad_mails"] += 1
                 stats["quad_obs"] += len(obs)
             for scope, period, quad, g, i, sn in obs:
-                quad_rows.append((nd, r["product"], scope, period, quad,
-                                  g, i, uid, sn[:400], dt))
+                key = (nd, r["product"], scope, period, quad)
+                if key in quad_rows:
+                    old = quad_rows[key]
+                    quad_rows[key] = (old[0] or g, old[1] or i, old[2],
+                                      old[3], old[4], old[5] + 1)
+                else:
+                    quad_rows[key] = (g, i, uid, sn[:400], dt, 1)
     print(f"parsed: {stats}")
     if args.dry_run:
         return 0
@@ -201,12 +215,17 @@ def main() -> int:
                 "VALUES %s ON CONFLICT (ticker, signal_date) DO NOTHING",
                 rr_rows[i:i + 500], page_size=500)
             conn.commit()
-        for i in range(0, len(quad_rows), 500):
+        qvals = [(k[0], k[1], k[2], k[3], k[4], v[0], v[1], v[2], v[3],
+                  v[4], v[5]) for k, v in quad_rows.items()]
+        for i in range(0, len(qvals), 500):
             execute_values(cur,
                 "INSERT INTO hedgeye_quad_stated (note_date, product, scope, "
-                "period, quad, gdp_est, cpi_est, source_uid, snippet, known_at) "
-                "VALUES %s ON CONFLICT DO NOTHING",
-                quad_rows[i:i + 500], page_size=500)
+                "period, quad, gdp_est, cpi_est, source_uid, snippet, "
+                "known_at, n_hits) VALUES %s "
+                "ON CONFLICT (note_date, product, scope, period, quad) "
+                "DO UPDATE SET n_hits = GREATEST(hedgeye_quad_stated.n_hits, "
+                "EXCLUDED.n_hits)",
+                qvals[i:i + 500], page_size=500)
             conn.commit()
         for i in range(0, len(now_rows), 500):
             execute_values(cur,
@@ -219,8 +238,26 @@ def main() -> int:
         cur.execute("SELECT bar_date FROM px_daily WHERE ticker='SPY' "
                     "ORDER BY bar_date")
         days = [r[0] for r in cur.fetchall()]
-        cur.execute("SELECT note_date, scope, period, quad FROM "
-                    "hedgeye_quad_stated ORDER BY note_date")
+        # majority vote per note_date: a note can emit several (occasionally
+        # conflicting) prose observations; the dial moves only on a clear
+        # winner about the CURRENT month/quarter, ties keep the prior value
+        cur.execute("""
+            WITH votes AS (
+                SELECT note_date, scope, quad, sum(n_hits) AS hits
+                FROM hedgeye_quad_stated
+                WHERE (scope='monthly' AND period = to_char(note_date, 'YYYY-MM'))
+                   OR (scope='quarterly' AND period =
+                       extract(quarter FROM note_date)::int || 'Q' ||
+                       to_char(note_date, 'YY'))
+                GROUP BY note_date, scope, quad
+            ), win AS (
+                SELECT DISTINCT ON (note_date, scope) note_date, scope, quad
+                FROM votes ORDER BY note_date, scope, hits DESC, quad
+            )
+            SELECT note_date,
+                   max(quad) FILTER (WHERE scope='monthly'),
+                   max(quad) FILTER (WHERE scope='quarterly')
+            FROM win GROUP BY note_date ORDER BY note_date""")
         stated = cur.fetchall()
         daily = []
         mq = qq = src = None
@@ -228,14 +265,11 @@ def main() -> int:
         cur_row = next(it, None)
         for d in days:
             while cur_row and cur_row[0] <= d:
-                _nd, scope, period, quad = cur_row
-                # only statements about the CURRENT month/quarter move the dial
-                if scope == "monthly" and period == f"{_nd.year}-{_nd.month:02d}":
-                    mq, src = quad, _nd
-                if scope == "quarterly":
-                    qn = f"{(_nd.month - 1) // 3 + 1}Q{str(_nd.year)[2:]}"
-                    if period == qn:
-                        qq, src = quad, _nd
+                _nd, m_quad, q_quad = cur_row
+                if m_quad is not None:
+                    mq, src = m_quad, _nd
+                if q_quad is not None:
+                    qq, src = q_quad, _nd
                 cur_row = next(it, None)
             daily.append((d, mq, qq, src))
         execute_values(cur,
