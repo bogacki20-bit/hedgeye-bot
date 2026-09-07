@@ -216,6 +216,33 @@ def ss_tag(t: str, ss_now: set, drops: dict) -> str:
     return t
 
 
+# ── B(b)/B(c) class-fit layer (operator decision 2026-09-07) ────────────────
+# The Phase-B regime study found the LRR/dip template SIGNIFICANTLY NEGATIVE
+# for these names (XLU worst, regime-broad), and robustly positive only for
+# commodity names while VIX sits 20-30. Display-layer only: the state
+# machine is untouched; the three worst names are suppressed from FIRED
+# lists (per the operator — an explicit exception to flag-don't-hide),
+# everything else renders with a fit marker.
+CLASS_UNFIT = {"XLU", "XLP", "XLRE", "XLB", "XLF"}   # ✗ template anti-fit
+FIRED_SUPPRESS = {"XLU", "XLP", "XLRE"}              # dropped from fired lists
+COMMODITY_FIT = {"USO", "GLD", "AAAU"}               # ✓ only when VIX 20-30
+
+
+def class_fit(t: str, vix) -> str:
+    """'✗' anti-fit names · '✓' commodity names while VIX in [20, 30] ·
+    '' otherwise (incl. when no VIX level is available)."""
+    if t in CLASS_UNFIT:
+        return "✗"
+    if t in COMMODITY_FIT and vix is not None and 20 <= vix <= 30:
+        return "✓"
+    return ""
+
+
+def _latest_vix(series) -> float | None:
+    rows = series.get("^VIX")
+    return float(rows[-1][1]) if rows and rows[-1][1] is not None else None
+
+
 def _scan(series, loose: bool):
     """(fired {t: setups}, brewing [(t, stage)], latest_date)."""
     fired, brewing, last = {}, [], []
@@ -239,11 +266,13 @@ def snapshot(loose: bool = True, recent_days: int = 3) -> str:
         ss = _ss_now(cur)
         drops = _ss_recent_drops(cur)
     fired, brewing, latest = _scan(series, loose)
+    vix = _latest_vix(series)
 
-    recent = sorted(f"{ss_tag(t, ss, drops)}@{s['date']}"
+    recent = sorted(f"{ss_tag(t, ss, drops)}{class_fit(t, vix)}@{s['date']}"
                     for t, ss_ in fired.items() for s in ss_
-                    if latest and (latest - s["date"]).days <= recent_days)
-    brew = sorted(f"{ss_tag(t, ss, drops)}({st_[0]})"
+                    if t not in FIRED_SUPPRESS
+                    and latest and (latest - s["date"]).days <= recent_days)
+    brew = sorted(f"{ss_tag(t, ss, drops)}{class_fit(t, vix)}({st_[0]})"
                   for t, st_ in brewing)                       # (T)/(P)
     mode = "loose" if loose else "strict"
     lines = [f"⚡KEITH add-pattern [{mode} · UNVALIDATED — paper signal, "
@@ -254,7 +283,9 @@ def snapshot(loose: bool = True, recent_days: int = 3) -> str:
              + (f" +{len(brew) - 30} more" if len(brew) > 30 else ""),
              "pattern: bullish TREND · pullback · HELD trade support · "
              "closed up. ·SS = on Signal Strength now · ✗SSdrop = dropped "
-             "from SS ≤14d (invalidation tell). Your rules decide."]
+             "from SS ≤14d (invalidation tell). ✗ = template anti-fit "
+             "(B(b) study) · ✓ = commodity fit while VIX 20-30 · "
+             "XLU/XLP/XLRE suppressed from fired (B(b)). Your rules decide."]
     return "\n".join(lines)
 
 
@@ -275,8 +306,10 @@ def weekly_report() -> str:
                     "WHERE event='add'")
         ss_adds = cur.fetchall()
     fired, brewing, latest = _scan(series, loose=True)
+    vix = _latest_vix(series)
     week = [(t, s) for t, ss_ in fired.items() for s in ss_
-            if latest and (latest - s["date"]).days <= 7]
+            if t not in FIRED_SUPPRESS
+            and latest and (latest - s["date"]).days <= 7]
 
     def hits(adds, lead):
         h = cov = 0
@@ -294,8 +327,8 @@ def weekly_report() -> str:
     lines = [f"⚡KEITH WEEKLY [{latest}] — paper-trade progress "
              f"(UNVALIDATED until recall proves out)",
              f"fired this week ({len(week)}): "
-             + (" ".join(sorted(f"{ss_tag(t, ss, drops)}@{s['date']}"
-                                for t, s in week)) or "none"),
+             + (" ".join(sorted(f"{ss_tag(t, ss, drops)}{class_fit(t, vix)}"
+                                f"@{s['date']}" for t, s in week)) or "none"),
              f"validation: PS-add recall {ps_h}/{ps_c} (7d lead) · "
              f"SS-add recall {ss_h}/{ss_c} (14d lead) — evaluable only; "
              f"corpora deepen weekly",
