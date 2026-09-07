@@ -137,11 +137,20 @@ def parse_nowcast(text, note_date):
         v = float(val)
         if not (0.0 < v < 15.0):
             continue
-        y = _year(yy, note_date)
-        window = text[max(0, m.start() - 60):m.end() + 40].lower()
+        window = text[max(0, m.start() - 80):m.end() + 60].lower()
+        # only genuine nowcast statements — drops realized-stat prose like
+        # "services ex. shelter decelerated to 4.49%"
+        if "nowcast" not in window and "calling for" not in window:
+            continue
         scen = ("upside" if "upside" in window else
                 "downside" if "downside" in window else "base")
-        out.append((date(y, MONTHS[mon.lower()[:3]], 1), v, scen,
+        y = _year(yy, note_date)
+        mo = MONTHS[mon.lower()[:3]]
+        # nowcasts describe the current/just-ended month, never ~a year out:
+        # "December nowcast" in a Jan-2 note means the December just past
+        if not yy and (date(y, mo, 1) - note_date).days > 45:
+            y -= 1
+        out.append((date(y, mo, 1), v, scen,
                     text[max(0, m.start() - 40):m.end() + 20]))
     return out
 
