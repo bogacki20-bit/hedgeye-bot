@@ -56,7 +56,9 @@ PROMO_RE = re.compile(
     r"add to calendar|webcast|invite", re.I)
 NON_US_RE = re.compile(
     r"\bchina|europe|eurozone|japan|germany|\buk\b|india|canada|mexico|"
-    r"brazil|australia|korea|emerging market", re.I)
+    r"brazil|australia|korea|emerging market|\bg20\b|\bg-20\b|france|"
+    r"italy|spain|argentina|turkey|indonesia|saudi|russia|south africa|"
+    r"nikkei|\bdax\b", re.I)
 NOWCAST_RE = re.compile(
     r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
     r"[\s\-'/.]{0,3}(\d{2,4})?[^%\n]{0,60}?(\d{1,2}\.\d{1,2})\s*%", re.I)
@@ -123,7 +125,21 @@ def parse_quads(text, note_date, product):
             continue                        # already captured structurally
         if PROMO_RE.search(window) or NON_US_RE.search(window):
             continue                        # promo copy / non-US attribution
-        qn = QTR_NEAR_RE.search(window)
+        # quarter attribution needs the token ATTACHED to the quad
+        # (<=30 chars away) and not a headline artifact ("2Q24
+        # Mid-Quarter Macro Themes: ... #Quad 3" is a title, not a
+        # statement about 2Q24 — the A1 audit's one parser miss)
+        off = m.start() - max(0, m.start() - 30)   # quad pos inside `near`
+        near = text[max(0, m.start() - 30):m.end() + 30]
+        qn, best_d = None, 10 ** 9
+        for cand in QTR_NEAR_RE.finditer(near):
+            trail = near[cand.end():cand.end() + 22].lower()
+            if "mid-quarter" in trail or "mid quarter" in trail \
+                    or "macro themes" in trail or trail.lstrip().startswith("themes"):
+                continue
+            d = min(abs(cand.start() - off), abs(cand.end() - off))
+            if d < best_d:
+                qn, best_d = cand, d
         if qn:
             scope, period = "quarterly", f"{qn.group(1)}Q{qn.group(2)}"
         else:
@@ -166,7 +182,12 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--skip-rr", action="store_true",
                     help="skip Risk Range mails (quad/nowcast reparse only)")
+    ap.add_argument("--rebuild-stated", action="store_true",
+                    help="delete hedgeye_quad_stated before insert so "
+                         "tightened extraction rules also REMOVE stale rows")
     args = ap.parse_args()
+    if args.rebuild_stated and (args.product or args.limit):
+        ap.error("--rebuild-stated needs the full corpus (no --product/--limit)")
 
     rows = list(csv.DictReader((ARCH / "manifest.csv").open(encoding="utf-8")))
     rows = [r for r in rows if r["file"]
@@ -233,6 +254,9 @@ def main() -> int:
                 "VALUES %s ON CONFLICT (ticker, signal_date) DO NOTHING",
                 rr_rows[i:i + 500], page_size=500)
             conn.commit()
+        if args.rebuild_stated:
+            cur.execute("DELETE FROM hedgeye_quad_stated")
+            print(f"rebuild: cleared {cur.rowcount} stale stated rows")
         qvals = [(k[0], k[1], k[2], k[3], k[4], v[0], v[1], v[2], v[3],
                   v[4], v[5], v[6]) for k, v in quad_rows.items()]
         for i in range(0, len(qvals), 500):

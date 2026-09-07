@@ -8,8 +8,9 @@ average) vs the prior quarter: Q1 G+I- / Q2 G+I+ / Q3 G-I+ / Q4 G-I-.
 Every month of the quarter carries the quarter's quad. known_at =
 first day of the SECOND month after quarter end (conservative stand-in for
 the BEA advance release + 1; we carry no ALFRED vintages — later is the
-safe direction). Zero deltas count as "down" (G flat -> not rising;
-I flat -> not accelerating) — printed when they occur.
+safe direction). Zero G deltas count as "down"; CPI ties |dI| <= 2bp
+count as DECELERATION (Hedgeye's convention, operator rule 2026-09-08) —
+printed when they occur.
 
     py ml/load_quad.py [--dry-run]
 """
@@ -66,9 +67,12 @@ def main() -> int:
         i = i_roc.get(qstart)
         if g != g or i is None or i != i or qstart.year < 2016:
             continue
-        if g == 0 or i == 0:
+        if g == 0 or abs(i) <= 0.02:
             flats.append(str(qstart.date()))
-        g_up, i_up = g > 0, i > 0
+        # tie rule (operator, 2026-09-08): |dCPI| <= 2bp counts as
+        # DECELERATION, matching Hedgeye's convention (their printed
+        # actuals call 1Q24 and 1Q25 - both knife-edge CPI - Quad 4)
+        g_up, i_up = g > 0, i > 0.02
         quad = 1 if (g_up and not i_up) else 2 if (g_up and i_up) \
             else 3 if (not g_up and i_up) else 4
         # known_at: first day of the SECOND month after quarter end
