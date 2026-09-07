@@ -32,7 +32,8 @@ sys.path.insert(0, str(REPO))
 import db_pg  # noqa: E402
 from psycopg2.extras import execute_values  # noqa: E402
 
-TICKERS = ["SPY", "UUP", "USO", "AAAU", "TLT"]
+from ml.universe import TICKERS  # noqa: E402
+
 TP, SL, RR_WIN = 0.05, 0.025, 30
 
 

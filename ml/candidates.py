@@ -26,7 +26,8 @@ sys.path.insert(0, str(REPO))
 
 import db_pg  # noqa: E402
 
-TICKERS = ["SPY", "UUP", "USO", "AAAU", "TLT"]
+from ml.universe import TICKERS  # noqa: E402
+
 RP_BASE, RP_LOOSE = 0.35, 0.45
 
 
@@ -42,9 +43,14 @@ def load():
     return f.sort_values(["ticker", "bar_date"]).reset_index(drop=True)
 
 
+def lrr_mask(f, rp_max):
+    return (f["above_trend"] == 1) & (f["rp"] < rp_max)
+
+
 def dip_mask(f, rp_max):
-    return ((f["above_trend"] == 1) & (f["rp"] < rp_max)
-            & (f["decel_streak"] >= 2) & (f["distribution"] == 0))
+    """Operator redefinition 2026-09-07: setup_dip = setup_lrr AND
+    decel_streak >= 1 (distribution stays a FEATURE, not a gate)."""
+    return lrr_mask(f, rp_max) & (f["decel_streak"] >= 1)
 
 
 def year_table(f, mask):
@@ -75,18 +81,24 @@ def megabuy_share(f, rp_max):
 
 def main() -> int:
     f = load()
-    n_base = int(dip_mask(f, RP_BASE).sum())
-    rp_max = RP_BASE if n_base >= 300 else RP_LOOSE
-    if rp_max != RP_BASE:
-        print(f"setup_dip @ rp<{RP_BASE} yields only {n_base} rows (<300) — "
-              f"LOOSENED to rp<{RP_LOOSE} per the brief.")
-    print(f"setup_any rows (rp defined): {int(f['rp'].notna().sum())}")
-    print(f"setup_dip total @ rp<{RP_BASE}: {n_base}   "
-          f"@ rp<{RP_LOOSE}: {int(dip_mask(f, RP_LOOSE).sum())}   "
-          f"-> ACTIVE threshold rp<{rp_max}")
-    print("\nsetup_dip candidates by ticker x year (active threshold):")
-    print(year_table(f, dip_mask(f, rp_max)).to_string())
-    hit, tot = megabuy_share(f, rp_max)
+    rp_max = RP_LOOSE   # operator decision 2026-09-07: rp<0.45 stands
+    # coverage flag: a ticker whose rp exists ONLY in the live-feed window
+    # (hidden-range export / repaint-held) has no trainable history — its
+    # candidates are a live-window artifact until the re-export lands.
+    cov = f[f["rp"].notna()].groupby("ticker")["bar_date"].agg(["count", "min"])
+    partial = sorted(cov[(cov["count"] < 500)].index)
+    if partial:
+        print(f"PARTIAL-COVERAGE tickers (rp only in the live window — "
+              f"EXCLUDE from walk-forward until re-export): {partial}")
+    full = ~f["ticker"].isin(partial)
+    print(f"setup_any rows (rp defined, full-coverage universe): "
+          f"{int((f['rp'].notna() & full).sum())}")
+    for name, m in (("setup_lrr", lrr_mask(f, rp_max) & full),
+                    ("setup_dip", dip_mask(f, rp_max) & full)):
+        print(f"\n{name} (rp<{rp_max}, full-coverage) total: {int(m.sum())} "
+              f"— by ticker x year:")
+        print(year_table(f, m).to_string())
+    hit, tot = megabuy_share(f[full], rp_max)
     print(f"\nmega_buy within +/-3 bars of a setup_dip candidate: "
           f"{hit}/{tot} = {hit / tot * 100:.1f}%  (diagnostic only — the +3 "
           f"side is future information, never a feature)")

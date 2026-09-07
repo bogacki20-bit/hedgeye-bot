@@ -15,6 +15,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 REPO = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO))
 
@@ -27,8 +29,13 @@ TV_TICKERS = {
     "TVC_VIX_1D.csv": "^VIX_TV",  # kept for reference; ^VIX index comes from yfinance
     "BATS_USO_1D.csv": "USO", "BATS_AAAU_1D.csv": "AAAU",
     "BATS_TLT_1D.csv": "TLT",
+    **{f"BATS_{t}_1D_full.csv": t for t in
+       ("XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP", "XLU", "XLB",
+        "XLRE", "XLC", "QQQ", "IWM", "GLD", "HYG", "EEM")},
 }
-YF_TICKERS = ["HYG", "^VIX"]
+# HYG bars now come from the TV export (model ticker); yfinance keeps only
+# ^VIX so the two sources never fight over one primary key.
+YF_TICKERS = ["^VIX"]
 YF_PERIOD = "9y"
 
 
@@ -49,7 +56,14 @@ def yf_rows():
                      group_by="ticker", auto_adjust=False, progress=False,
                      threads=True)
     for t in YF_TICKERS:
-        sub = df[t] if len(YF_TICKERS) > 1 else df
+        try:
+            sub = df[t]
+        except KeyError:
+            sub = df
+        if isinstance(sub.columns, pd.MultiIndex):
+            lvl = 0 if "Close" in sub.columns.get_level_values(0) else -1
+            sub = sub.copy()
+            sub.columns = sub.columns.get_level_values(lvl)
         for idx, row in sub.iterrows():
             c = float(row["Close"])
             if c != c:

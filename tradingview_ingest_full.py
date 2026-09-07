@@ -50,6 +50,9 @@ FULL_FILES = {
     "BATS_USO_1D_full.csv":  "USO",
     "BATS_AAAU_1D_full.csv": "AAAU",
     "BATS_TLT_1D_full.csv":  "TLT",
+    **{f"BATS_{t}_1D_full.csv": t for t in
+       ("XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP", "XLU", "XLB",
+        "XLRE", "XLC", "QQQ", "IWM", "GLD", "HYG", "EEM")},
 }
 
 # feature name -> CSV column index (positional; duplicate header names)

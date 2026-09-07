@@ -54,6 +54,12 @@ FILE_TICKERS = {
     "BATS_USO_1D.csv":  "USO",
     "BATS_AAAU_1D.csv": "AAAU",
     "BATS_TLT_1D.csv":  "TLT",
+    # Phase B(a) universe (2026-09-07): 45-column full exports — the range
+    # columns are uniquely named in that header, so this loader reads them
+    # via DictReader unchanged.
+    **{f"BATS_{t}_1D_full.csv": t for t in
+       ("XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP", "XLU", "XLB",
+        "XLRE", "XLC", "QQQ", "IWM", "GLD", "HYG", "EEM")},
 }
 
 INDICATOR_COLS = ("bull", "bear", "rh", "rl", "lth", "ltl")
@@ -72,8 +78,16 @@ VIX_WARN_REL = 0.015      # <= 1.5%: log, don't fail
 # == columns), so TLT ingest deliberately keeps FAILING until the vendor
 # discrepancy is resolved or the operator waives it.
 LOGGED_WINDOWS = {
-    "*": [(date(2026, 6, 11), date(2026, 7, 10))],
+    # end extended 07-10 -> 07-15 (2026-09-07): XLP's echo tail decays three
+    # days longer than SPY's did (last drift 07-13 @ 0.078%).
+    "*": [(date(2026, 6, 11), date(2026, 7, 15))],
 }
+
+# Standing operator waivers: repaint FAILURES downgrade to loud warnings for
+# these tickers only (TLT, 2026-09-06: TV-indicator-sourced end to end).
+# --waive-repaint extends the waiver to a one-off --file run; it never
+# applies to other tickers in an --all sweep.
+WAIVED_TICKERS = {"TLT"}
 
 # range-vs-close sanity: VIX closes detach from the range on spike days
 SANITY = {"^VIX": (0.15, 3.0), "*": (0.5, 2.0)}
@@ -211,7 +225,8 @@ def ingest(path: Path, ticker: str, dry_run: bool, waive: bool = False) -> int:
     validate(ticker, rows, body)
     tags = derive_trend(body)
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        repaint_check(cur, ticker, body, waive=waive)
+        repaint_check(cur, ticker, body,
+                      waive=waive or ticker in WAIVED_TICKERS)
         if dry_run:
             print(f"  [dry-run] would upsert {len(body)} rows "
                   f"(trend_tag NULL on {sum(1 for t in tags if t is None)})")

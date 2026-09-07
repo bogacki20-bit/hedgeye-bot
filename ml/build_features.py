@@ -41,7 +41,7 @@ from tools.volume_signal import (decel_streak, down_day_volume_slope,  # noqa: E
                                  price_change)
 
 NY = ZoneInfo("America/New_York")
-TICKERS = ["SPY", "UUP", "USO", "AAAU", "TLT"]
+from ml.universe import ASSET_CLASS, TICKERS  # noqa: E402
 
 FEATURES = [
     "rp", "rp_dev20", "bulldist", "rng_width", "ltrp", "hurst64", "hurst256",
@@ -236,7 +236,8 @@ def main() -> int:
             ka = datetime(d.year, d.month, d.day, 16, 0, tzinfo=NY)
             vals = [None if (row[k] != row[k]) else float(row[k])
                     for k in FEATURES]
-            all_rows.append((t, d.date(), ka, row["source"], *vals))
+            all_rows.append((t, d.date(), ka, row["source"],
+                             ASSET_CLASS[t], *vals))
 
     # ── validation report ──
     print(f"{'ticker':<7} {'rows':>5}  span")
@@ -267,7 +268,8 @@ def main() -> int:
     if args.dry_run:
         print(f"\n[dry-run] {len(all_rows)} rows, no writes")
         return 0
-    cols = "ticker, bar_date, known_at, source, " + ", ".join(FEATURES)
+    cols = ("ticker, bar_date, known_at, source, asset_class, "
+            + ", ".join(FEATURES))
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         for i in range(0, len(all_rows), 500):
             execute_values(
@@ -275,7 +277,7 @@ def main() -> int:
                 f"INSERT INTO ml_features ({cols}) VALUES %s "
                 f"ON CONFLICT (ticker, bar_date) DO UPDATE SET "
                 + ", ".join(f"{k}=EXCLUDED.{k}" for k in
-                            ["known_at", "source"] + FEATURES)
+                            ["known_at", "source", "asset_class"] + FEATURES)
                 + ", built_at=now()",
                 all_rows[i:i + 500], page_size=500)
             conn.commit()
