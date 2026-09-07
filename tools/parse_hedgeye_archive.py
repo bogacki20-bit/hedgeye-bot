@@ -36,6 +36,7 @@ db_pg._load_dotenv_fallback()
 from psycopg2.extras import execute_values  # noqa: E402
 
 ARCH = REPO / "data" / "hedgeye_mail"
+_MRANK = {"gip": 0, "qtag": 1, "mtag": 1, "prose": 9}
 MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun",
      "jul", "aug", "sep", "oct", "nov", "dec"])}
@@ -88,24 +89,26 @@ def _year(y, note_date):
 
 
 def parse_quads(text, note_date, product):
-    """[(scope, period, quad, gdp, cpi, snippet)] — every observation."""
+    """[(scope, period, quad, gdp, cpi, snippet, method)] — every
+    observation. method: gip/qtag/mtag (explicit period-tagged) vs
+    prose (bare mention attributed by context)."""
     out = []
     for m in GIP_RE.finditer(text):
         q, yy, g, i, quad = m.groups()
         out.append(("quarterly", f"{q}Q{yy}", int(quad), float(g), float(i),
-                    text[max(0, m.start() - 20):m.end() + 20]))
+                    text[max(0, m.start() - 20):m.end() + 20], "gip"))
     for m in GIP_SHORT_RE.finditer(text):
         q, yy, quad = m.groups()
         period = f"{q}Q{yy}"
         if not any(p == period for _s, p, *_ in out):
             out.append(("quarterly", period, int(quad), None, None,
-                        text[max(0, m.start() - 40):m.end() + 40]))
+                        text[max(0, m.start() - 40):m.end() + 40], "qtag"))
     for m in MPATH_RE.finditer(text):
         mon, yy, quad = m.groups()
         y = _year(yy, note_date)
         period = f"{y}-{MONTHS[mon.lower()[:3]]:02d}"
         out.append(("monthly", period, int(quad), None, None,
-                    text[max(0, m.start() - 40):m.end() + 40]))
+                    text[max(0, m.start() - 40):m.end() + 40], "mtag"))
     # prose fallback: bare Quad mentions with a nearby quarter token, else
     # attributed to the note's own month (per the brief)
     seen_spans = set()
@@ -125,7 +128,8 @@ def parse_quads(text, note_date, product):
             scope, period = "quarterly", f"{qn.group(1)}Q{qn.group(2)}"
         else:
             scope, period = "monthly", f"{note_date.year}-{note_date.month:02d}"
-        out.append((scope, period, int(m.group(1)), None, None, window))
+        out.append((scope, period, int(m.group(1)), None, None, window,
+                    "prose"))
     return out
 
 
@@ -160,11 +164,14 @@ def main() -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--product")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--skip-rr", action="store_true",
+                    help="skip Risk Range mails (quad/nowcast reparse only)")
     args = ap.parse_args()
 
     rows = list(csv.DictReader((ARCH / "manifest.csv").open(encoding="utf-8")))
     rows = [r for r in rows if r["file"]
-            and (not args.product or r["product"] == args.product)]
+            and (not args.product or r["product"] == args.product)
+            and not (args.skip_rr and r["product"] == "Risk Range")]
     if args.limit:
         rows = rows[:args.limit]
 
@@ -204,14 +211,16 @@ def main() -> int:
             if obs:
                 stats["quad_mails"] += 1
                 stats["quad_obs"] += len(obs)
-            for scope, period, quad, g, i, sn in obs:
+            for scope, period, quad, g, i, sn, method in obs:
                 key = (nd, r["product"], scope, period, quad)
                 if key in quad_rows:
                     old = quad_rows[key]
+                    best = (method if _MRANK[method] < _MRANK[old[6]]
+                            else old[6])
                     quad_rows[key] = (old[0] or g, old[1] or i, old[2],
-                                      old[3], old[4], old[5] + 1)
+                                      old[3], old[4], old[5] + 1, best)
                 else:
-                    quad_rows[key] = (g, i, uid, sn[:400], dt, 1)
+                    quad_rows[key] = (g, i, uid, sn[:400], dt, 1, method)
     print(f"parsed: {stats}")
     if args.dry_run:
         return 0
@@ -225,15 +234,15 @@ def main() -> int:
                 rr_rows[i:i + 500], page_size=500)
             conn.commit()
         qvals = [(k[0], k[1], k[2], k[3], k[4], v[0], v[1], v[2], v[3],
-                  v[4], v[5]) for k, v in quad_rows.items()]
+                  v[4], v[5], v[6]) for k, v in quad_rows.items()]
         for i in range(0, len(qvals), 500):
             execute_values(cur,
                 "INSERT INTO hedgeye_quad_stated (note_date, product, scope, "
                 "period, quad, gdp_est, cpi_est, source_uid, snippet, "
-                "known_at, n_hits) VALUES %s "
+                "known_at, n_hits, method) VALUES %s "
                 "ON CONFLICT (note_date, product, scope, period, quad) "
                 "DO UPDATE SET n_hits = GREATEST(hedgeye_quad_stated.n_hits, "
-                "EXCLUDED.n_hits)",
+                "EXCLUDED.n_hits), method = EXCLUDED.method",
                 qvals[i:i + 500], page_size=500)
             conn.commit()
         for i in range(0, len(now_rows), 500):
@@ -247,18 +256,27 @@ def main() -> int:
         cur.execute("SELECT bar_date FROM px_daily WHERE ticker='SPY' "
                     "ORDER BY bar_date")
         days = [r[0] for r in cur.fetchall()]
-        # majority vote per note_date: a note can emit several (occasionally
-        # conflicting) prose observations; the dial moves only on a clear
-        # winner about the CURRENT month/quarter, ties keep the prior value
+        # per-note vote about the CURRENT month/quarter moves the dial;
+        # explicit period-tagged statements (gip/qtag/mtag) outrank bare
+        # prose within a note, then mention frequency (n_hits) decides
         cur.execute("""
-            WITH votes AS (
-                SELECT note_date, scope, quad, sum(n_hits) AS hits
+            WITH t AS (
+                SELECT note_date, scope, quad, n_hits,
+                       CASE WHEN method IN ('gip','qtag','mtag') THEN 1
+                            ELSE 2 END AS mrank
                 FROM hedgeye_quad_stated
                 WHERE (scope='monthly' AND period = to_char(note_date, 'YYYY-MM'))
                    OR (scope='quarterly' AND period =
                        extract(quarter FROM note_date)::int || 'Q' ||
                        to_char(note_date, 'YY'))
-                GROUP BY note_date, scope, quad
+            ), best AS (
+                SELECT note_date, scope, min(mrank) AS mr
+                FROM t GROUP BY note_date, scope
+            ), votes AS (
+                SELECT t.note_date, t.scope, t.quad, sum(t.n_hits) AS hits
+                FROM t JOIN best USING (note_date, scope)
+                WHERE t.mrank = best.mr
+                GROUP BY t.note_date, t.scope, t.quad
             ), win AS (
                 SELECT DISTINCT ON (note_date, scope) note_date, scope, quad
                 FROM votes ORDER BY note_date, scope, hits DESC, quad
