@@ -33,9 +33,19 @@ TV_TICKERS = {
        ("XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP", "XLU", "XLB",
         "XLRE", "XLC", "QQQ", "IWM", "GLD", "HYG", "EEM")},
 }
-# HYG bars now come from the TV export (model ticker); yfinance keeps only
-# ^VIX so the two sources never fight over one primary key.
-YF_TICKERS = ["^VIX"]
+# HYG bars now come from the TV export (model ticker); yfinance carries
+# ^VIX plus the T2 underlying/tag-only closes — none collide with a TV
+# ticker name, so the two sources never fight over one primary key.
+# T2 underlyings (Keith's ranges are quoted on these, not the ETFs):
+#   GC=F gold, SI=F silver, CL=F WTI, BZ=F brent, NG=F natgas, HG=F
+#   copper, DX-Y.NYB dollar index, ^GSPC SPX, ^IXIC COMPQ, ^RUT RUT,
+#   ^TYX 30y yield; tag-only extension: 8 megacaps + ^GDAXI + ^N225.
+YF_TICKERS = ["^VIX",
+              "GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "HG=F",
+              "DX-Y.NYB", "^GSPC", "^IXIC", "^RUT", "^TYX",
+              "^GDAXI", "^N225",
+              "AAPL", "AMZN", "GOOGL", "META", "MSFT", "NFLX",
+              "NVDA", "TSLA"]
 YF_PERIOD = "9y"
 
 
