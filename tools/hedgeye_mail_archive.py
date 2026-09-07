@@ -193,11 +193,24 @@ def main() -> int:
                              or r["product"] in PARSE_PRODUCTS)]
                 for n, key in enumerate(pend):
                     r = rows[key]
-                    typ, parts = conn.uid("fetch", r["uid"], "(BODY.PEEK[])")
-                    if typ != "OK" or not parts or parts[0] is None:
-                        print(f"    body uid {r['uid']}: {typ} — skipped")
+                    try:
+                        typ, parts = conn.uid("fetch", r["uid"],
+                                              "(BODY.PEEK[])")
+                    except Exception:
+                        save_manifest(rows)   # connection died — keep progress
+                        raise
+                    # iCloud sometimes interleaves flat bytes lines with the
+                    # (meta, body) tuple — scan for the tuple, don't index
+                    raw = None
+                    for part in (parts or []):
+                        if (isinstance(part, tuple) and len(part) >= 2
+                                and isinstance(part[1], (bytes, bytearray))):
+                            raw = bytes(part[1])
+                            break
+                    if typ != "OK" or raw is None:
+                        print(f"    body uid {r['uid']}: {typ} "
+                              f"(no body payload) — skipped")
                         continue
-                    raw = parts[0][1]
                     fname = f"{r['date']}_{slug(r['subject'])}_{r['uid']}.eml"
                     (OUT / fname).write_bytes(raw)
                     r["file"] = fname
