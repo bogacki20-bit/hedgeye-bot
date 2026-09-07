@@ -25,10 +25,11 @@ REPO = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO))
 
 import db_pg  # noqa: E402
-from ml.universe import PHASE_A  # noqa: E402
+from ml.universe import ASSET_CLASS, TICKERS as ALL_TICKERS  # noqa: E402
 
 YEARS = list(range(2021, 2027))
 NBOOT = 10_000
+MIN_RP_ROWS = 500   # coverage gate: below this, rp exists only in the live window
 
 
 def load(tickers):
@@ -69,12 +70,23 @@ def boot_ci(rule_hits, any_hits, rng):
     return float(np.percentile(diffs, 5)), float(np.percentile(diffs, 95))
 
 
+def full_coverage(tickers):
+    with db_pg.get_conn() as conn:
+        cov = pd.read_sql(
+            "SELECT ticker, count(rp) AS n FROM ml_features "
+            "WHERE ticker = ANY(%s) GROUP BY ticker", conn, params=(tickers,))
+    return sorted(cov[cov.n >= MIN_RP_ROWS].ticker)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tickers", default=",".join(PHASE_A))
+    ap.add_argument("--tickers", default=None,
+                    help="comma list; default = full-coverage universe")
     args = ap.parse_args()
-    tickers = args.tickers.split(",")
+    tickers = (args.tickers.split(",") if args.tickers
+               else full_coverage(ALL_TICKERS))
     f = load(tickers)
+    f["asset_class"] = f["ticker"].map(ASSET_CLASS)
     rng = np.random.default_rng(7)
     masks = rules(f)
     any_hits = (f["fwd_ret_20"] > 0).astype(float).to_numpy()
@@ -104,7 +116,7 @@ def main() -> int:
                     _n, h, r, _s = stats(g)
                     cells.append(f"{_n:>3} {h*100:4.0f}% {r*100:+5.1f}%")
             print(f"   {t:<6} " + "  ".join(cells))
-        # per-ticker pooled with CI
+        # per-ticker pooled with CI (vs the ticker's own setup_any)
         for t in tickers:
             g = d[d.ticker == t]
             ga = f[f.ticker == t]
@@ -115,6 +127,17 @@ def main() -> int:
             ci = boot_ci((g["fwd_ret_20"] > 0).astype(float).to_numpy(),
                          (ga["fwd_ret_20"] > 0).astype(float).to_numpy(), rng)
             print(f"   {t}: n={_n} hit={h*100:.1f}% ret={r*100:+.2f}% "
+                  f"sharpe={s:+.3f} CI[{ci[0]*100:+.1f},{ci[1]*100:+.1f}]pts")
+        # per-asset-class pooled with CI (vs the class's own setup_any)
+        for ac in sorted(d["asset_class"].dropna().unique()):
+            g = d[d.asset_class == ac]
+            ga = f[f.asset_class == ac]
+            if len(g) < 5:
+                continue
+            _n, h, r, s = stats(g)
+            ci = boot_ci((g["fwd_ret_20"] > 0).astype(float).to_numpy(),
+                         (ga["fwd_ret_20"] > 0).astype(float).to_numpy(), rng)
+            print(f"   [{ac}]: n={_n} hit={h*100:.1f}% ret={r*100:+.2f}% "
                   f"sharpe={s:+.3f} CI[{ci[0]*100:+.1f},{ci[1]*100:+.1f}]pts")
     return 0
 

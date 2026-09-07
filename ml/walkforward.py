@@ -44,8 +44,9 @@ REPO = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(REPO))
 
 import db_pg  # noqa: E402
+from ml.universe import TICKERS as ALL_TICKERS  # noqa: E402
 
-TICKERS = ["SPY", "UUP", "USO", "AAAU", "TLT"]
+MIN_RP_ROWS = 500   # coverage gate: below this, rp exists only in the live window
 TEST_YEARS = [2021, 2022, 2023, 2024, 2025, 2026]
 PURGE_BARS = 30
 WINSOR = 5.0
@@ -68,12 +69,19 @@ def load():
         f = pd.read_sql(
             "SELECT f.*, t.fwd_ret_20, t.fwd_sharpe_20, t.rr_hit_5_2p5_30 "
             "FROM ml_features f JOIN ml_targets t USING (ticker, bar_date) "
-            "WHERE f.ticker = ANY(%s)", conn, params=(TICKERS,))
+            "WHERE f.ticker = ANY(%s)", conn, params=(ALL_TICKERS,))
     f["bar_date"] = pd.to_datetime(f["bar_date"])
     for c in f.columns:
-        if c not in ("ticker", "bar_date", "known_at", "source", "built_at"):
+        if c not in ("ticker", "bar_date", "known_at", "source",
+                     "asset_class", "built_at"):
             f[c] = f[c].astype(float)
     f["year"] = f["bar_date"].dt.year
+    cov = f.groupby("ticker")["rp"].count()
+    keep = sorted(cov[cov >= MIN_RP_ROWS].index)
+    dropped = sorted(set(cov.index) - set(keep))
+    if dropped:
+        print(f"coverage gate: excluded {dropped} (rp rows < {MIN_RP_ROWS})")
+    f = f[f["ticker"].isin(keep)]
     f = f.sort_values(["ticker", "bar_date"]).reset_index(drop=True)
     return f
 
@@ -101,21 +109,24 @@ def split(f, test_year):
 def xmat(df, for_linear=False):
     X = df[FEATURES].copy()
     if for_linear:
-        X = pd.get_dummies(pd.concat([X, df["ticker"]], axis=1),
-                           columns=["ticker"], dtype=float)
+        X = pd.get_dummies(
+            pd.concat([X, df[["ticker", "asset_class"]]], axis=1),
+            columns=["ticker", "asset_class"], dtype=float)
     else:
         X["ticker"] = df["ticker"].astype("category")
+        X["asset_class"] = df["asset_class"].astype("category")
     return X
 
 
-def decile_stats(pred, test):
-    """(top-decile mean fwd_ret_20, hit rate, base mean, base hit, n_top)."""
+def decile_stats(pred, test, k_div=10):
+    """(top-bucket mean fwd_ret_20, hit rate, base mean, base hit, n_top)
+    for the top 1/k_div of predictions."""
     ok = np.isfinite(pred) & test["fwd_ret_20"].notna().to_numpy()
-    if ok.sum() < 10:
+    if ok.sum() < k_div:
         return (np.nan,) * 4 + (0,)
     r = test.loc[ok, "fwd_ret_20"].to_numpy()
     p = pred[ok]
-    k = max(1, len(p) // 10)
+    k = max(1, len(p) // k_div)
     top = r[np.argsort(-p)[:k]]
     return (float(top.mean()), float((top > 0).mean()),
             float(r.mean()), float((r > 0).mean()), int(k))
@@ -134,14 +145,15 @@ def fit_fold(tr, te, rng):
     ytr_cls = (tr["fwd_ret_20"] > 0).astype(int)
 
     Xtr, Xte = xmat(tr), xmat(te)
+    CATS = ["ticker", "asset_class"]
     reg = LGBMRegressor(**LGBM_PARAMS)
-    reg.fit(Xtr, ytr_reg, categorical_feature=["ticker"])
+    reg.fit(Xtr, ytr_reg, categorical_feature=CATS)
     out["lgbm_reg"] = reg.predict(Xte)
     gain = dict(zip(Xtr.columns,
                     [float(x) for x in reg.booster_.feature_importance("gain")]))
 
     cls = LGBMClassifier(**LGBM_PARAMS)
-    cls.fit(Xtr, ytr_cls, categorical_feature=["ticker"])
+    cls.fit(Xtr, ytr_cls, categorical_feature=CATS)
     out["lgbm_cls"] = cls.predict_proba(Xte)[:, 1]
 
     Xtr_l, Xte_l = xmat(tr, True), xmat(te, True)
@@ -153,7 +165,7 @@ def fit_fold(tr, te, rng):
 
     rnd = LGBMRegressor(**LGBM_PARAMS)
     rnd.fit(Xtr, rng.permutation(ytr_reg.to_numpy()),
-            categorical_feature=["ticker"])
+            categorical_feature=CATS)
     out["random"] = rnd.predict(Xte)
     return out, gain
 
@@ -174,10 +186,11 @@ def evaluate(pred, te, is_prob=False):
     else:
         m["auc"] = None
     top_mean, top_hit, base_mean, base_hit, k = decile_stats(pred, te)
-    m.update(top_mean=None if top_mean != top_mean else top_mean,
-             top_hit=None if top_hit != top_hit else top_hit,
-             base_mean=None if base_mean != base_mean else base_mean,
-             base_hit=None if base_hit != base_hit else base_hit, n_top=k,
+    q_mean, q_hit, _bm, _bh, kq = decile_stats(pred, te, k_div=4)
+    nz = lambda x: None if x != x else x
+    m.update(top_mean=nz(top_mean), top_hit=nz(top_hit),
+             base_mean=nz(base_mean), base_hit=nz(base_hit), n_top=k,
+             topq_mean=nz(q_mean), topq_hit=nz(q_hit), n_topq=kq,
              n_test=int(okc.sum()))
     return m
 
@@ -215,7 +228,7 @@ def main() -> int:
                          n_train=len(tr), n_test=len(te))
                 folds.append(m)
             te_keep = te[["ticker", "bar_date", "fwd_ret_20",
-                          "fwd_sharpe_20", "decel_streak"]].copy()
+                          "fwd_sharpe_20", "decel_streak", "rp"]].copy()
             te_keep["pred"] = preds["lgbm_reg"]
             te_keep["pred_rnd"] = preds["random"]
             te_keep["test_year"] = ty
@@ -244,6 +257,23 @@ def main() -> int:
             per_ticker[t] = {"n": len(g),
                              "ic": None if ic != ic else round(float(ic), 4)}
         summaries[setup] = {"per_ticker": per_ticker}
+
+    # quintile diagnostic (operator ask 2026-09-07): setup_lrr pooled OOS
+    # rows bucketed by predicted score and by rp — is the anti-signal
+    # monotonic or just the bottom bucket?
+    if "setup_lrr" in preds_store:
+        dfp = preds_store["setup_lrr"]
+        quint = {}
+        for key, col in (("by_pred", "pred"), ("by_rp", "rp")):
+            b = pd.qcut(dfp[col], 5, labels=False, duplicates="drop")
+            rows = []
+            for q in sorted(b.dropna().unique()):
+                g = dfp[b == q]
+                rows.append({"bucket": int(q) + 1, "n": len(g),
+                             "mean_ret": round(float(g["fwd_ret_20"].mean()), 5),
+                             "hit": round(float((g["fwd_ret_20"] > 0).mean()), 4)})
+            quint[key] = rows
+        summaries["lrr_quintiles"] = quint
 
     # dip-as-subset inside the LRR model's own predictions
     if "setup_lrr" in preds_store:
@@ -303,6 +333,31 @@ def main() -> int:
     print(f"\nrun {run_id} stored ({len(folds)} fold rows)")
     for s, pf in passfail.items():
         print(f"  {s}: {pf['verdict']}  model {pf['model']}  random {pf['random']}")
+
+    for setup in ("setup_lrr", "setup_dip"):
+        print(f"\n{setup} lgbm_reg vs random, per test year "
+              f"(decile | quartile | base):")
+        for x in folds:
+            if x.get("setup") != setup or x.get("skipped") \
+                    or x.get("model") not in ("lgbm_reg", "random"):
+                continue
+            fmtp = lambda v: "  —  " if v is None else f"{v*100:5.1f}%"
+            print(f"  {x['year']} {x['model']:<8} n={x['n_test']:>4} "
+                  f"IC={x['ic'] if x['ic'] is not None else float('nan'):+.3f}  "
+                  f"D:{fmtp(x['top_mean'])}/{fmtp(x['top_hit'])} "
+                  f"Q:{fmtp(x['topq_mean'])}/{fmtp(x['topq_hit'])} "
+                  f"B:{fmtp(x['base_mean'])}/{fmtp(x['base_hit'])}")
+    if "lrr_quintiles" in summaries:
+        print("\nsetup_lrr quintile diagnostic (pooled OOS):")
+        for key, rows in summaries["lrr_quintiles"].items():
+            print(f"  {key}: " + " | ".join(
+                f"Q{r['bucket']} n={r['n']} ret={r['mean_ret']*100:+.2f}% "
+                f"hit={r['hit']*100:.0f}%" for r in rows))
+    if "dip_subset_of_lrr" in summaries:
+        d = summaries["dip_subset_of_lrr"]
+        print(f"\ndip subset of LRR: n={d['n']} ret={d['mean_fwd_ret_20']*100:+.2f}% "
+              f"hit={d['hit']*100:.1f}% vs LRR all {d['lrr_all_mean']*100:+.2f}%/"
+              f"{d['lrr_all_hit']*100:.1f}%")
     return 0
 
 
