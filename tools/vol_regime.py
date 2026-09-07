@@ -37,6 +37,51 @@ _WIDTH_BAND = 0.10          # ±10% width change = steady
 
 _MAP = {"trendBullish": "BULLISH", "trendBearish": "BEARISH",
         "trendNeutral": "NEUTRAL"}
+
+# ── Phase B(c) display layer (operator, 2026-09-07) ─────────────────────────
+# Tercile bands (2018-2026 in-sample; ml/vol_regime_study.py) for the
+# commodity vol indices, and the commodity-dip marker: a commodity name
+# that is trend-bullish, rp < 0.45, with its OWN vol index in the top band
+# — the one robust positive cell family from the Phase-B regime studies.
+# DISPLAY ONLY: nothing gates on this.
+OWN_VOL_BANDS = {"OVX": (33.0, 42.0), "GVZ": (15.0, 18.0)}
+_COMMODITY_OWN = {"USO": "OVX", "GLD": "GVZ", "AAAU": "GVZ"}
+
+
+def own_vol_band(index_name: str, level: float) -> str:
+    lo, hi = OWN_VOL_BANDS[index_name]
+    return "low" if level < lo else "mid" if level <= hi else "high"
+
+
+def _commodity_dip_names(d, own_vol: dict) -> list:
+    """Commodity names meeting the B(c) dip cell at the anchor date:
+    trend bullish + rp<0.45 (session-vintage mfr row, same anchor as the
+    rest of this block) + own vol index band 'high'. Best-effort — an
+    empty list on any failure, never an exception into a render path."""
+    try:
+        import db_pg
+        names = [t for t, idx in _COMMODITY_OWN.items()
+                 if own_vol.get(idx) == "high"]
+        if not names:
+            return []
+        out = []
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT DISTINCT ON (ticker) ticker, price::float,
+                          range_low::float, range_high::float, trend_signal
+                   FROM mfr_snapshots WHERE ticker = ANY(%s)
+                     AND snapshot_date <= %s
+                   ORDER BY ticker, snapshot_date DESC""", (names, d))
+            for t, px, lo, hi, ts in cur.fetchall():
+                if ts != "trendBullish" or px is None or lo is None \
+                        or hi is None or hi <= lo:
+                    continue
+                if (px - lo) / (hi - lo) < 0.45:
+                    out.append(t)
+        return sorted(out)
+    except Exception as e:
+        log.warning("commodity-dip marker unavailable: %s", e)
+        return []
 _MOM = {"momentumBullish": "BULLISH", "momentumBearish": "BEARISH",
         "momentumNeutral": "NEUTRAL", "momentumNeutralDanger": "NEUTRAL"}
 
@@ -196,11 +241,18 @@ def regime_line(d: date | None = None) -> str:
         return "VOL: no regime data"
     short = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT", None: "?"}
     parts = []
+    own_vol = {}
     for name, tr, rp, ph, price, range_low, range_high, _as_of in sorted(rows):
         lvl = f"{float(price):.1f}" if price is not None else "?"
         rng = f" [{float(range_low):.1f}-{float(range_high):.1f}]" if (range_low is not None and range_high is not None) else ""
         rp_s = f" rp={float(rp):.2f}" if rp is not None else ""
-        parts.append(f"{name} {lvl}{rng}{rp_s} {short.get(tr,'?')} {ph}")
+        band = ""
+        if name in OWN_VOL_BANDS and price is not None:
+            b = own_vol_band(name, float(price))
+            own_vol[name] = b
+            band = f"·{b}"
+        parts.append(f"{name} {lvl}{rng}{rp_s} {short.get(tr,'?')} {ph}{band}")
+    dip_names = _commodity_dip_names(d, own_vol)
     # State which regime rows were used AND what the anchor is. Without the
     # date, a phase that changes while price/range/rp stay identical is
     # unexplainable from the output. Without the anchor semantics, a reader
@@ -212,7 +264,8 @@ def regime_line(d: date | None = None) -> str:
     used = sorted({str(r[7]) for r in rows if len(r) > 7 and r[7]})
     stamp = ((" (anchor: %s session close — stored daily rows, not live)"
               % ", ".join(used)) if used else "")
-    return "VOL: " + " · ".join(parts) + stamp
+    dip = (" · commodity-dip ✓: " + " ".join(dip_names)) if dip_names else ""
+    return "VOL: " + " · ".join(parts) + dip + stamp
 
 
 def backfill(dry_run: bool = False) -> dict:

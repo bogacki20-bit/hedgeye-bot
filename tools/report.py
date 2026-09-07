@@ -880,12 +880,14 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
                          f"figure below as unverified.")
         delta_idx = len(lines)          # Δ line inserted here after assembly
         try:
-            from tools.quad_regime import last_quad_confirm, market_date
+            from tools.quad_regime import (last_quad_confirm, market_date,
+                                           realized_quad_suffix)
             mq, qq = _quad_for(cur, today)
             conf = last_quad_confirm(cur)
             conf_d = market_date(conf)
             lines.append(f"QUAD: monthly={mq or '?'} quarterly={qq or '?'} "
-                         f"(last confirm {conf_d if conf_d else 'NONE'})")
+                         f"(last confirm {conf_d if conf_d else 'NONE'})"
+                         + realized_quad_suffix(cur, qq))
         except Exception as e:
             lines.append(f"QUAD: unavailable ({e})")
         try:
@@ -1245,12 +1247,14 @@ def build_report_legacy(kind: str = "on-demand") -> str:
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         # ── header: date · quad (+confirm date) · vol line ──
         today = date.today()
-        from tools.quad_regime import last_quad_confirm, market_date
+        from tools.quad_regime import (last_quad_confirm, market_date,
+                                       realized_quad_suffix)
         mq, qq = _quad_for(cur, today)
         conf_d = market_date(last_quad_confirm(cur))
         lines.append(f"REPORT {today} [{kind}]")
         lines.append(f"QUAD: monthly={mq or '?'} quarterly={qq or '?'} "
-                     f"(last confirm {conf_d if conf_d else 'NONE'})")
+                     f"(last confirm {conf_d if conf_d else 'NONE'})"
+                     + realized_quad_suffix(cur, qq))
         try:
             from tools.vol_regime import regime_line
             from tools.trading_calendar import last_completed_session

@@ -179,6 +179,30 @@ def quad_staleness(effective_at, asof=None) -> dict:
     return out
 
 
+def realized_quad_suffix(cur, hand_quarterly) -> str:
+    """' (realized: Qn, 2Q26, as of YYYY-MM-DD)' from quad_monthly — the
+    FRED realized series (migration 093; sign of D-YoY-GDP x D-YoY-CPI vs
+    prior quarter, known only from ~its GDP advance release). Appends
+    ' ≠hand-set' when it disagrees with the hand-set quarterly, which
+    STAYS AUTHORITATIVE — this suffix is context, never an override.
+    Reconciliation record (2026-09-07): realized 2Q26 = Quad 3 matches
+    Hedgeye's own 8/13 mid-quarter restatement (their June Quad-4 nowcast
+    was the miss — first data point for the roadmap-§2 back-parse)."""
+    try:
+        cur.execute("SELECT month, quad, known_at FROM quad_monthly "
+                    "WHERE known_at <= now() ORDER BY month DESC LIMIT 1")
+        r = cur.fetchone()
+        if not r:
+            return " (realized: none loaded)"
+        month, quad, ka = r
+        qlabel = f"{(month.month - 1) // 3 + 1}Q{str(month.year)[2:]}"
+        digits = "".join(c for c in str(hand_quarterly or "") if c.isdigit())
+        neq = " ≠hand-set" if digits and digits != str(quad) else ""
+        return f" (realized: Q{quad}, {qlabel}, as of {ka.date()}{neq})"
+    except Exception as e:
+        return f" (realized: unavailable ({e}))"
+
+
 def last_quad_confirm(cur):
     """The most recent moment a human vouched for the current Quad, from BOTH
     stores that can hold one.
