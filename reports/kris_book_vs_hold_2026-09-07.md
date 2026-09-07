@@ -510,6 +510,6 @@ Individual  V      L 2026-07-17 2026-07-21    2   358.46   358.36    4       -0 
 Individual  UDN    L 2026-02-04 2026-02-24   18    18.38    18.38   20        0   0.0%  -0.4%   0.0%  -0.5%   0.2%
 Individual  COAL   S 2026-07-13 2026-07-20    5    23.29    23.29    7       -0  -0.0%  -2.0%  -1.8% -21.6%  -0.9%
 
-PNG: t7_book_vs_spy_2026-09-07.png. Final: book +616 USD vs SPY +9,739 USD on the same daily capital.
+PNG: t7_book_vs_spy_2026-09-07.png. Final: book -623 USD vs SPY +9,739 USD on the same daily capital.
 
 Caveats: dividends excluded on both sides (unadjusted closes); episode return = P&L / peak invested; options bucket cash-flow only; pre-window and reverse-split episodes excluded (flagged above); split fields None when no bridgeable Hedgeye instrument.

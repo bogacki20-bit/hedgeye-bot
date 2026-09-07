@@ -371,18 +371,22 @@ def main() -> int:
         c = px.get(e["symbol"])
         if c is None or (e["account"], e["symbol"], e["open"].date()) in bad:
             continue
-        end = e["close"] or MTM_DATE
-        qty = cash = costq = 0.0
+        qty = cash = 0.0
         legs = iter(sorted(e["legs"]))
         nxt = next(legs, None)
-        sub = c[(c.index >= e["open"]) & (c.index <= end)].reindex(cal).dropna()
-        for d0, price in sub.items():
+        # realized P&L persists after close: mark cash+qty*price for every
+        # day from open through the end of the calendar (qty goes to 0 at
+        # close, cash then carries the realized result forward)
+        cc = c.reindex(cal).ffill()
+        for d0 in cal[cal >= e["open"]]:
             while nxt is not None and nxt[0] <= d0:
                 _d, q, p, a = nxt
                 qty += q
                 cash += a
-                costq += (-a if q > 0 else abs(a) if qty < 0 else 0)
                 nxt = next(legs, None)
+            price = cc.loc[d0]
+            if price != price:
+                continue
             book[d0] += cash + qty * price
             inv[d0] += abs(qty) * price
     spy_ret = spy.reindex(cal).pct_change().fillna(0.0)
