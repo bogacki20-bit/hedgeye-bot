@@ -48,7 +48,14 @@ PRODUCTS = [
     ("macro themes", "Themes/MidQ/Monitor"),
     ("mid-quarter", "Themes/MidQ/Monitor"), ("mid quarter", "Themes/MidQ/Monitor"),
     ("monthly monitor", "Themes/MidQ/Monitor"),
+    ("inflation nowcast", "Inflation Nowcast"),
+    ("risk range", "Risk Range"),
 ]
+
+# Lean-pull set (operator, 2026-09-07): bodies only for the parse-relevant
+# products; everything else stays manifest-only.
+PARSE_PRODUCTS = {"Early Look", "Macro Show", "The Call", "ETF Pro/Re-Rank",
+                  "Themes/MidQ/Monitor", "Inflation Nowcast", "Risk Range"}
 
 
 def product_guess(subject: str) -> str:
@@ -68,6 +75,8 @@ def load_manifest() -> dict:
     if MANIFEST.exists():
         with MANIFEST.open(newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
+                # reclassify on load so new product rules apply retroactively
+                r["product"] = product_guess(r["subject"])
                 rows[(r["folder"], r["uidvalidity"], r["uid"])] = r
     return rows
 
@@ -125,6 +134,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest-only", action="store_true")
     ap.add_argument("--counts", action="store_true")
+    ap.add_argument("--all-bodies", action="store_true",
+                    help="pull every body (default: PARSE_PRODUCTS only)")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     rows = load_manifest()
@@ -172,11 +183,14 @@ def main() -> int:
                         "from": msg.get("From", ""), "subject": subj,
                         "product": product_guess(subj), "file": ""}
                 save_manifest(rows)
-            # body pass (.eml), resumable
+            # body pass (.eml), resumable — lean pull: parse products only
+            # unless --all-bodies
             if not args.manifest_only:
                 pend = [k for k, r in rows.items()
                         if k[0] == folder and k[1] == uidvalidity
-                        and not r["file"]]
+                        and not r["file"]
+                        and (args.all_bodies
+                             or r["product"] in PARSE_PRODUCTS)]
                 for n, key in enumerate(pend):
                     r = rows[key]
                     typ, parts = conn.uid("fetch", r["uid"], "(BODY.PEEK[])")
