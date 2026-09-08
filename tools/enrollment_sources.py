@@ -84,6 +84,33 @@ KNOWN_UNCOVERABLE = {
                                     #   retail names it bare
     "GLASF",                        # Glass House Brands — OTC, in ticker_tags
                                     #   (CANNABIS) and SS roster; no yahoo data
+
+    # ── Risk-range INSTRUMENT names from the roadmap-§2 archive backfill
+    # (2026-09-08). The 2b backfill put Keith's spot/index instrument names
+    # into hedgeye_risk_ranges/signal_changes; they are not tickers, and
+    # their tradeable proxies are enrolled (bridges: SPX→SPY, COMPQ→QQQ,
+    # RUT→IWM, GOLD→GLD/AAAU, WTIC/BRENT→USO, SILVER→SLV/SIVR,
+    # COPPER→CPER/ICOP, NATGAS→UNG, BITCOIN→IBIT, NIKK/SSEC→EWJ-class,
+    # VIX = index). Same class as the UST yields above: legitimately in the
+    # signal tables, permanently un-enrollable under these names.
+    "SPX", "COMPQ", "RUT", "NIKK", "SSEC", "VIX", "GOLD", "SILVER",
+    "COPPER", "WTIC", "BRENT", "NATGAS", "BITCOIN",
+    "BSE",                          # Sensex per its own RR rows (2023-25 era)
+    "NYXBT",                        # NYSE Bitcoin index — pre-'BITCOIN' name
+                                    #   in the early RR archive; both usually
+                                    #   die at the quote gate, parked so the
+                                    #   backlog is deterministic either way
+
+    # ── Renames and junk (2026-09-08) ──────────────────────────────────────
+    "VSCO",                         # Victoria's Secret RENAMED → VSXY
+                                    #   (operator). VSXY is active in MFR;
+                                    #   the 06-29 posmon seed (no live feed)
+                                    #   still carries the dead symbol.
+    "N",                            # single-letter residue in the SS roster;
+                                    #   no live quote, not enrollable
+    "SSNLF",                        # Samsung OTC ADR-ish pink sheet from
+                                    #   iichanges — quotes exist but stale/
+                                    #   thin; operator: skip
 }
 
 # Crypto names PARKED for the BTC Quant source — NOT uncoverable, just routed elsewhere.
