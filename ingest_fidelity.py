@@ -268,7 +268,48 @@ def parse_positions(path, snapshot_date, keep_cash, accounts):
     groups: dict = {}
     for p in out:
         groups.setdefault((p["account_number"], p["symbol"]), []).append(p)
-    return [_agg_lots(g) for g in groups.values()], anomalies
+    rows = [_agg_lots(g) for g in groups.values()]
+    # Stamp the export's own download time (CSV footer). v_book_effective
+    # uses it to decide whether same-DATE fills are already inside this
+    # snapshot (post-close download) or must overlay (pre-market download —
+    # the 5 AM convention; NULL is treated as pre-market).
+    ts = _downloaded_at(path)
+    for p in rows:
+        p["snapshot_downloaded_at"] = ts
+    return rows, anomalies
+
+
+def _downloaded_at(path):
+    """ISO timestamp (ET) from the footer's 'Date downloaded ...' line, or
+    None. Two footer dialects:
+      'Date downloaded Sep-08-2026 5:06 a.m ET'
+      'Date downloaded 09/08/2026 05:05 am'"""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - 4096))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    m = re.search(r"Date downloaded\s+([A-Za-z]{3})-(\d{1,2})-(20\d{2})\s+"
+                  r"(\d{1,2}):(\d{2})\s*([ap])\.?\s*m", tail, re.I)
+    mn = {m2: i + 1 for i, m2 in enumerate(
+        ["jan", "feb", "mar", "apr", "may", "jun",
+         "jul", "aug", "sep", "oct", "nov", "dec"])}
+    if m:
+        mo = mn.get(m.group(1).lower())
+        if not mo:
+            return None
+        hh = int(m.group(4)) % 12 + (12 if m.group(6).lower() == "p" else 0)
+        return (f"{m.group(3)}-{mo:02d}-{int(m.group(2)):02d} "
+                f"{hh:02d}:{m.group(5)} America/New_York")
+    m = re.search(r"Date downloaded\s+(\d{2})/(\d{2})/(20\d{2})\s+"
+                  r"(\d{1,2}):(\d{2})\s*([ap])m", tail, re.I)
+    if m:
+        hh = int(m.group(4)) % 12 + (12 if m.group(6).lower() == "p" else 0)
+        return (f"{m.group(3)}-{m.group(1)}-{m.group(2)} "
+                f"{hh:02d}:{m.group(5)} America/New_York")
+    return None
 
 
 # ---------------------------------------------------------------------------

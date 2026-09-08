@@ -233,21 +233,37 @@ def batch_live_prices(tickers: list) -> tuple:
         HEDGEYE_TO_YFINANCE = {}
     sym_of = {t: HEDGEYE_TO_YFINANCE.get(t, t) for t in tickers}
     prices = {}
-    try:
-        import yfinance as yf
-        data = yf.download(list(set(sym_of.values())), period="1d",
-                           interval="5m", progress=False, threads=True,
-                           group_by="ticker", auto_adjust=False)
-        for t, sym in sym_of.items():
-            try:
-                frame = data[sym] if len(sym_of) > 1 else data
-                closes = frame["Close"].dropna()
-                if len(closes):
-                    prices[t] = float(closes.iloc[-1])
-            except Exception:
-                continue
-    except Exception as e:
-        log.warning("REPORT NOW: batch price download failed: %s", e)
+    # 1m bars first (2026-09-08, the identical-rp-across-refreshed-screens
+    # report): 5m bars quantize the "live" price to the last 5-minute bar,
+    # so two SCREENs inside one bar print byte-identical rp and look frozen.
+    # 1m shrinks that window to ~a minute; names 1m misses fall back to 5m,
+    # then to the MFR fallback below.
+    def _pull(interval, wanted):
+        got = {}
+        try:
+            import yfinance as yf
+            data = yf.download(sorted({sym_of[t] for t in wanted}),
+                               period="1d", interval=interval,
+                               progress=False, threads=True,
+                               group_by="ticker", auto_adjust=False)
+            for t in wanted:
+                sym = sym_of[t]
+                try:
+                    frame = data[sym] if len(wanted) > 1 else data
+                    closes = frame["Close"].dropna()
+                    if len(closes):
+                        got[t] = float(closes.iloc[-1])
+                except Exception:
+                    continue
+        except Exception as e:
+            log.warning("REPORT NOW: %s price download failed: %s",
+                        interval, e)
+        return got
+
+    prices.update(_pull("1m", tickers))
+    still = [t for t in tickers if t not in prices]
+    if still:
+        prices.update(_pull("5m", still))
     missing = [t for t in tickers if t not in prices]
     if missing and len(missing) <= MFR_FALLBACK_MAX:
         try:

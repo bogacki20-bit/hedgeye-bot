@@ -238,15 +238,17 @@ def compute_fills(cur, sides: dict | None = None,
     account); sim_casheq is a set of pending cash-equivalent flags. Purely
     in-memory — the DB is never touched by simulation.
     """
+    # v_book_effective (migration 102): latest snapshot PLUS post-snapshot
+    # fills from book_activity — the 2026-09-08 book-desync fix. Same shape
+    # as the old latest-snapshot query; the view already scopes to current.
     cur.execute("""
         SELECT underlying, account_number,
                sum(abs(market_value))  AS gmv,
                sum(total_gl_dollar)    AS gl,
                sum(cost_basis)         AS cost,
                max(description)        AS descr
-        FROM book_positions
-        WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
-          AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0
+        FROM v_book_effective
+        WHERE asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0
         GROUP BY underlying, account_number""")
     raw = cur.fetchall()
 
@@ -254,8 +256,7 @@ def compute_fills(cur, sides: dict | None = None,
         SELECT account_number,
                sum(CASE WHEN asset_class = 'cash' THEN COALESCE(market_value, 0)
                         ELSE abs(COALESCE(market_value, 0)) END)
-        FROM book_positions
-        WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
+        FROM v_book_effective
         GROUP BY account_number""")
     acct_total = {an: float(v or 0) for an, v in cur.fetchall()}
 

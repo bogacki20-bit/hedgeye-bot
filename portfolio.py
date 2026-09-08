@@ -373,17 +373,14 @@ def _account_value_pg(account_number: str) -> float | None:
         import db_pg
         with db_pg.get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT MAX(snapshot_date) FROM book_positions")
-                snap = cur.fetchone()[0]
-                if not snap:
-                    return None
-                # count first: an account absent from the current snapshot must
-                # be unresolvable, not a $0 account that caps everything at $0.
+                # v_book_effective (migration 102): snapshot + post-snapshot
+                # fills, so the denominator moves with today's trades too.
+                # count-first semantics unchanged: an account absent from the
+                # current book is unresolvable, never a $0 account.
                 cur.execute(
                     "SELECT count(*), COALESCE(SUM(market_value), 0) "
-                    "FROM book_positions "
-                    "WHERE account_number = %s AND snapshot_date = %s",
-                    (account_number, snap),
+                    "FROM v_book_effective WHERE account_number = %s",
+                    (account_number,),
                 )
                 n, total = cur.fetchone()
                 if not n:

@@ -33,11 +33,12 @@ log = logging.getLogger("book_direction")
 
 _SQL = """
 SELECT underlying, asset_class, is_option, opt_type, quantity, market_value
-FROM book_positions
-WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
-  AND asset_class <> 'cash'
+FROM v_book_effective
+WHERE asset_class <> 'cash'
   AND COALESCE(quantity, 0) <> 0
 """
+# v_book_effective (migration 102): latest snapshot + post-snapshot fills,
+# so sides reflect trades made TODAY, not the pre-market CSV.
 
 
 def compute_sides(rows, links=None) -> dict:
