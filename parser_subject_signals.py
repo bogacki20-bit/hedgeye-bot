@@ -50,6 +50,15 @@ def extract_signals(subject: str, *, normalize: dict[str, str],
     merged: dict[str, dict] = {}
 
     def put(tok: str, *, pct=None, sent=None, raw=""):
+        # Case gate (2026-09-08, the MOMO artifact): real tickers in these
+        # subjects are ALWAYS uppercase; a mixed-case token is prose —
+        # "Momo (-2.9%)" is the momentum basket, not Hello Group — unless
+        # it is an explicitly whitelisted pseudo-token (Mag7 via
+        # `normalize`). MOMO reached hedgeye_momo and then the MFR
+        # enrollment backlog before this gate existed.
+        t = (tok or "").strip().lstrip("₿").lstrip("?")
+        if t != t.upper() and t.upper() not in normalize:
+            return
         key = _norm_token(tok, normalize)
         if not key or len(key) < min_len or key in stop:
             return

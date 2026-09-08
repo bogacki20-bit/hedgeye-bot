@@ -24,7 +24,12 @@ SUBJECT_RE = re.compile(r"^\s*MOMO\s+Tracker\b", re.I)
 _NORMALIZE = {"MAG": "MAG7", "MAG7": "MAG7"}
 _STOP = {"RR", "HATH", "ATH", "ETF", "OPEX", "EPS", "IVOL", "MMF", "AI",
          "US", "USD", "EU", "AND", "THE", "TO", "VS", "DAY", "OPEX",
-         "EPS", "GDP", "PPI", "CPI", "PCE", "ISM", "YTD", "DOD", "WTD"}
+         "EPS", "GDP", "PPI", "CPI", "PCE", "ISM", "YTD", "DOD", "WTD",
+         # "Momo" is this product's own basket word (belt; the case gate
+         # in parser_subject_signals is the braces). Blocking the string
+         # here means even an uppercase "MOMO (-1%)" in a subject can
+         # never enroll Hello Group off the momentum tracker.
+         "MOMO"}
 
 
 def is_momo_subject(subject: str) -> bool:
