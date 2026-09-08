@@ -133,27 +133,32 @@ def parse_positions(path):
     rows = []
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
-        for r in reader:
-            symbol = (r.get("Symbol") or "").strip()
+        # Fidelity re-cased the headers mid-July 2026 ("Account Number" ->
+        # "Account number"); match case-insensitively so both eras parse
+        keymap = {(k or "").strip().lower(): k for k in
+                  (reader.fieldnames or [])}
+        for raw in reader:
+            r = {lk: raw.get(orig) for lk, orig in keymap.items()}
+            symbol = (r.get("symbol") or "").strip()
             if not symbol or symbol in SKIP_SYMBOLS or CASH_SYMBOL_PATTERN.match(symbol):
                 continue
             rows.append({
                 "snapshot_date":   snapshot_date,
-                "account_number":  (r.get("Account Number") or "").strip(),
-                "account_name":    (r.get("Account Name") or "").strip(),
+                "account_number":  (r.get("account number") or "").strip(),
+                "account_name":    (r.get("account name") or "").strip(),
                 "symbol":          symbol,
-                "description":     (r.get("Description") or "").strip(),
-                "quantity":        _num(r.get("Quantity")),
-                "last_price":      _money(r.get("Last Price")),
-                "current_value":   _money(r.get("Current Value")),
-                "today_gl_dollar": _money(r.get("Today's Gain/Loss Dollar")),
-                "today_gl_pct":    _pct(r.get("Today's Gain/Loss Percent")),
-                "total_gl_dollar": _money(r.get("Total Gain/Loss Dollar")),
-                "total_gl_pct":    _pct(r.get("Total Gain/Loss Percent")),
-                "pct_of_account":  _pct(r.get("Percent Of Account")),
-                "cost_basis":      _money(r.get("Cost Basis Total")),
-                "avg_cost_basis":  _money(r.get("Average Cost Basis")),
-                "account_type":    (r.get("Type") or "").strip(),
+                "description":     (r.get("description") or "").strip(),
+                "quantity":        _num(r.get("quantity")),
+                "last_price":      _money(r.get("last price")),
+                "current_value":   _money(r.get("current value")),
+                "today_gl_dollar": _money(r.get("today's gain/loss dollar")),
+                "today_gl_pct":    _pct(r.get("today's gain/loss percent")),
+                "total_gl_dollar": _money(r.get("total gain/loss dollar")),
+                "total_gl_pct":    _pct(r.get("total gain/loss percent")),
+                "pct_of_account":  _pct(r.get("percent of account")),
+                "cost_basis":      _money(r.get("cost basis total")),
+                "avg_cost_basis":  _money(r.get("average cost basis")),
+                "account_type":    (r.get("type") or "").strip(),
             })
     return rows, snapshot_date
 
