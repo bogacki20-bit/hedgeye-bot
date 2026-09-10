@@ -410,6 +410,55 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
     return new_count
 
 
+def _inline_images(html: str) -> str:
+    """Rewrite <img> srcs to base64 data URIs so the .html is SELF-CONTAINED.
+    Telegram's document viewer opens attachments in a sandbox that does not
+    fetch remote resources (9/10: Market Situation Report charts rendered as
+    broken '?' boxes), so every chart must travel inside the file. Fetch
+    failures and oversized images keep their original src — text still reads."""
+    import base64
+
+    import requests
+
+    cache: dict[str, str | None] = {}
+    budget = [0]  # total inlined bytes; Telegram documents cap at 50 MB
+
+    def repl(m):
+        url = m.group(2)
+        if url.startswith("data:"):
+            return m.group(0)
+        # srcs come HTML-escaped (&amp; in query strings) — unescape to fetch
+        import html as _html
+        u = _html.unescape(url)
+        u = "https:" + u if u.startswith("//") else u
+        if u not in cache:
+            cache[u] = None
+            try:
+                r = requests.get(u, timeout=10,
+                                 headers={"User-Agent": "Mozilla/5.0 (HedgeyeBot relay)"})
+                r.raise_for_status()
+                ctype = (r.headers.get("Content-Type") or "").split(";")[0]
+                if not ctype.startswith("image/"):
+                    # CloudFront serves the chart PNGs as binary/octet-stream —
+                    # trust the URL's extension instead of the header
+                    ext = u.split("?")[0].rsplit(".", 1)[-1].lower()
+                    if ext in ("png", "jpg", "jpeg", "gif", "webp"):
+                        ctype = f"image/{'jpeg' if ext == 'jpg' else ext}"
+                    else:
+                        ctype = ""
+                if ctype and len(r.content) <= 3_000_000 \
+                        and budget[0] + len(r.content) <= 35_000_000:
+                    budget[0] += len(r.content)
+                    cache[u] = (f"data:{ctype};base64,"
+                                + base64.b64encode(r.content).decode())
+            except Exception as e:
+                log.warning(f"  relay: could not inline image {u[:90]}: {e}")
+        return m.group(1) + (cache[u] or url) + m.group(3)
+
+    return re.sub(r"(<img[^>]+?src=[\"'])([^\"']+)([\"'])", repl, html,
+                  flags=re.IGNORECASE)
+
+
 def _relay_email_to_telegram(parsed: dict) -> None:
     """Forward the full email to Telegram as a document the operator can send
     to the trading desk: the HTML body as an .html attachment (opens in any
@@ -431,7 +480,7 @@ def _relay_email_to_telegram(parsed: dict) -> None:
             when = ""
         slug = re.sub(r"[^A-Za-z0-9]+", "_", subject).strip("_")[:70] or "hedgeye_email"
         if parsed.get("html_body"):
-            name, payload = f"{slug}.html", parsed["html_body"]
+            name, payload = f"{slug}.html", _inline_images(parsed["html_body"])
         else:
             name, payload = f"{slug}.txt", parsed.get("text_body") or ""
         _send_document(token, chat_id, name, payload,
