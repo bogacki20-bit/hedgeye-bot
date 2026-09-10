@@ -52,6 +52,13 @@ CHECK_INTERVAL  = int(os.getenv("EMAIL_CHECK_INTERVAL", "900"))
 LOOKBACK_DAYS   = int(os.getenv("EMAIL_LOOKBACK_DAYS", "90"))
 BACKFILL_MODE   = os.environ.get("BACKFILL_MODE", "off").lower()
 
+# Relay every new Hedgeye email to Telegram as an .html attachment (Early
+# Look, MOMO tracker, …) so the operator can forward it straight to the
+# trading desk — the email-flavored sibling of the SpotGamma morning
+# captures. Set EMAIL_TELEGRAM_RELAY=0 to turn off. Respects BACKFILL_MODE
+# silent, so historical backfills never blast the chat.
+EMAIL_TELEGRAM_RELAY = os.getenv("EMAIL_TELEGRAM_RELAY", "1") != "0"
+
 # Cap the number of full-body fetches per cycle to avoid hammering iCloud IMAP
 # with 1500+ rapid-fire fetches when the lake is fresh. Header peeks (cheap)
 # are not capped — only full RFC822 fetches that actually pull the body.
@@ -403,6 +410,36 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
     return new_count
 
 
+def _relay_email_to_telegram(parsed: dict) -> None:
+    """Forward the full email to Telegram as a document the operator can send
+    to the trading desk: the HTML body as an .html attachment (opens in any
+    browser with formatting and images), falling back to .txt when an email
+    is plaintext-only. LOUD on failure in the log, never raises into the
+    pipeline — a relay hiccup must not cost classification."""
+    if not EMAIL_TELEGRAM_RELAY:
+        return
+    try:
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+        if not token or not chat_id:
+            return
+        from telegram_handler import _send_document
+        subject = parsed.get("subject") or "Hedgeye email"
+        try:
+            when = parsed["received_at"].astimezone().strftime("%m/%d %I:%M %p")
+        except Exception:
+            when = ""
+        slug = re.sub(r"[^A-Za-z0-9]+", "_", subject).strip("_")[:70] or "hedgeye_email"
+        if parsed.get("html_body"):
+            name, payload = f"{slug}.html", parsed["html_body"]
+        else:
+            name, payload = f"{slug}.txt", parsed.get("text_body") or ""
+        _send_document(token, chat_id, name, payload,
+                       caption=f"📧 {subject}\n{when}".strip())
+    except Exception as e:
+        log.error(f"  telegram relay failed for {parsed.get('message_id')}: {e}")
+
+
 def _process_new_email(parsed: dict) -> None:
     """For a freshly-saved email, run classifier + notifier + recommender.
 
@@ -424,6 +461,7 @@ def _process_new_email(parsed: dict) -> None:
 
     if notify:
         send_pushover(item["subject"] or "Hedgeye email", item["body"])
+        _relay_email_to_telegram(parsed)
 
     try:
         item = classify_and_extract(item)
