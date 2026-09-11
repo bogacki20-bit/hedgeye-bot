@@ -26,6 +26,7 @@ SENTINELS = ("MARKET", "MARKET UPDATE", "MKT")
 INDEXES = ["SPY", "QQQ", "IWM"]
 SECTORS = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE",
            "XLU", "XLV", "XLY"]
+THEMES = ["SMH", "DRAM", "XHB", "ITB"]  # semis, memory, homebuilders (operator ask 9/11)
 COMMODITIES = ["GLD", "SLV", "CPER", "USO", "UNG", "CORN", "WEAT", "GDX",
                "IBIT", "BITCOIN"]
 MACRO = ["TLT", "LQD", "HYG", "UUP"]
@@ -49,7 +50,7 @@ def _rows(sql, args=None):
 def _fetch() -> dict:
     """{ticker: {rp, trend, iv, rv}} for the universe, v_screener first,
     Hedgeye RR fallback for the composites (rp from prev_close in band)."""
-    univ = INDEXES + SECTORS + COMMODITIES + MACRO
+    univ = INDEXES + SECTORS + THEMES + COMMODITIES + MACRO
     out = {}
     for t, rp, trend, iv, rv in _rows(
             "SELECT ticker, range_pos, trend_dir, iv, rv FROM v_screener "
@@ -93,7 +94,7 @@ def build_market_update() -> str:
     now = dt.datetime.now().strftime("%m/%d %I:%M %p")
 
     add_long, add_short, stretched = [], [], []
-    for t in INDEXES + SECTORS + COMMODITIES + MACRO:
+    for t in INDEXES + SECTORS + THEMES + COMMODITIES + MACRO:
         d = data.get(t)
         if not d or d.get("rp") is None or not d.get("trend"):
             continue
@@ -117,6 +118,7 @@ def build_market_update() -> str:
         lines.append("  range edge (trim/cover): " + ", ".join(stretched))
 
     for title, group in (("INDEXES", INDEXES), ("SECTORS", SECTORS),
+                         ("THEMES", THEMES),
                          ("COMMODITIES", COMMODITIES),
                          ("RATES/CREDIT/USD", MACRO)):
         lines.append("")
