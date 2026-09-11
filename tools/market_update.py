@@ -32,6 +32,16 @@ COMMODITIES = ["GLD", "SLV", "CPER", "USO", "UNG", "CORN", "WEAT", "GDX",
 MACRO = ["TLT", "LQD", "HYG", "UUP"]
 RR_EXTRAS = ["VIX", "UST10Y"]          # no MFR listing — Hedgeye RR only
 
+# PM mirror: sector ETF header over each grouping, Hedgeye's active/top-idea
+# longs and shorts listed under it (operator ask 9/11 — 'mirror the position
+# monitor'). ● marks a top idea. Bench names are left out to keep it readable.
+SECTOR_ETF = [("XLB", "Materials"), ("XLC", "Communication Services"),
+              ("XLE", "Energy"), ("XLF", "Financials"),
+              ("XLI", "Industrials"), ("XLK", "Technology"),
+              ("XLP", "Consumer Staples"), ("XLRE", "Real Estate"),
+              ("XLU", "Utilities"), ("XLV", "Health Care"),
+              ("XLY", "Consumer Discretionary"), ("IBIT", "Digital Assets")]
+
 ADD_LONG_RP = 0.35
 ADD_SHORT_RP = 0.65
 STRETCH_HI = 0.85
@@ -67,6 +77,26 @@ def _fetch() -> dict:
             rp = float((px - lo) / (hi - lo))
         out[t] = {"rp": rp, "trend": trend, "iv": None, "rv": None,
                   "band": (lo, hi), "px": px}
+    return out
+
+
+def _pm_buckets() -> dict:
+    """{gics_sector: {'long': [t…], 'short': [t…]}} from the PM buckets —
+    active + top-idea only, ● prefix on top ideas, top ideas listed first."""
+    rows = _rows(
+        "SELECT ticker, COALESCE(gics_sector,'(untagged)'), hedgeye_bucket_0629 "
+        "FROM ticker_tags WHERE hedgeye_bucket_0629 IN "
+        "('active_long','active_short','top_idea_long','top_idea_short') "
+        "ORDER BY ticker")
+    out: dict = {}
+    for t, sec, b in rows:
+        side = "long" if b.endswith("_long") else "short"
+        top = b.startswith("top_idea")
+        d = out.setdefault(sec, {"long": [], "short": []})
+        d[side].append(("●" + t) if top else t)
+    for d in out.values():
+        for side in ("long", "short"):
+            d[side].sort(key=lambda s: (not s.startswith("●"), s.lstrip("●")))
     return out
 
 
@@ -117,9 +147,29 @@ def build_market_update() -> str:
     if stretched:
         lines.append("  range edge (trim/cover): " + ", ".join(stretched))
 
-    for title, group in (("INDEXES", INDEXES), ("SECTORS", SECTORS),
-                         ("THEMES", THEMES),
-                         ("COMMODITIES", COMMODITIES),
+    lines.append("")
+    lines.append("INDEXES")
+    for t in INDEXES:
+        if t in data:
+            lines.append("  " + _line(t, data[t]))
+
+    # ── PM mirror: sector ETF header, Hedgeye longs/shorts under it ──
+    buckets = _pm_buckets()
+    lines.append("")
+    lines.append("SECTORS — Hedgeye PM (● top idea)")
+    for etf, sector in SECTOR_ETF:
+        b = buckets.get(sector)
+        if not b and etf not in data:
+            continue
+        lines.append("")
+        lines.append(_line(etf, data[etf]) if etf in data else f"· {etf}")
+        if b:
+            if b["long"]:
+                lines.append("  L: " + " ".join(b["long"]))
+            if b["short"]:
+                lines.append("  S: " + " ".join(b["short"]))
+
+    for title, group in (("THEMES", THEMES), ("COMMODITIES", COMMODITIES),
                          ("RATES/CREDIT/USD", MACRO)):
         lines.append("")
         lines.append(title)
