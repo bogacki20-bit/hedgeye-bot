@@ -578,10 +578,19 @@ WITH mem AS (SELECT DISTINCT unnest(%(members)s::text[]) AS ticker),
         -- feed. A name parked in the #OutBucket stops appearing in the main
         -- table, so its last main-table row must NOT be served forever —
         -- the out_bucket/trend_change row is the live tag (migration 077).
+        -- STALENESS GATE (migration 103): either source older than 7 days is
+        -- not a live fact — NULL falls through to MFR (trend AND source),
+        -- mirroring the window hdg_band already applies to ranges. The XLI
+        -- lesson: a May BULLISH outranked fresh MFR BEARISH for months.
         SELECT ticker,
                CASE WHEN ch.signal_date IS NOT NULL
+                     AND ch.signal_date >= CURRENT_DATE - 7
                      AND (rr.signal_date IS NULL OR ch.signal_date >= rr.signal_date)
-                    THEN ch.trend ELSE rr.trend END AS trend
+                    THEN ch.trend
+                    WHEN rr.signal_date IS NOT NULL
+                     AND rr.signal_date >= CURRENT_DATE - 7
+                    THEN rr.trend
+                    ELSE NULL END AS trend
         FROM hedgeye_rr rr
         FULL OUTER JOIN hedgeye_chg ch USING (ticker)),
      hdg_band AS (
