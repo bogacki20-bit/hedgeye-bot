@@ -177,6 +177,15 @@ stage that hit 0.
   writes to MFR** (read API only, enroll-never-remove).
   *(handler: `tools/enrollment.py`)*
 
+### `MARKET` (aliases: `MARKET UPDATE`, `MKT`)
+- One-glance market snapshot: indexes, all 11 sector SPDRs, commodities/
+  crypto, rates/credit/USD — each with range position (rp, 0=low 1=high),
+  trend from the gated signal stack (fresh Hedgeye > MFR), IV-vs-RV vol
+  tag (`vol$` rich / `vol¢` cheap); VIX + UST10Y ride along from the RR
+  table. Leads with 🎯 ZONES: add-LONG (bull, rp<=0.35), add-SHORT (bear,
+  rp>=0.65), range-edge trim/cover (rp>=0.85 or <=0.05). Read-only.
+  *(handler: `tools/market_update.py`)*
+
 ### `WRAP` / `WRAP LIST`
 - Lists unmapped wrapper proposals (see write form below). Read-only.
 

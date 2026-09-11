@@ -356,13 +356,18 @@ def _dispatch_message(token, chat_id, text):
     def _wk():   from tools.weekend_report import handle_weekend_command; return handle_weekend_command(text)
     def _eod():  from tools.eod_stat_pack import handle_eod_command;      return handle_eod_command(text)
     def _sc():   from tools.shadow_scorecard import handle_scorecard_command; return handle_scorecard_command(text)
+    def _mkt():  from tools.market_update import handle_market_command;   return handle_market_command(text)
 
     # report runs BEFORE screen: report owns exact sentinels (REPORT*, BOOK
     # FULL) while screen's orphan-modifier catcher claims loose words like
     # 'book' — exact commands must win (live miss 7/12: 'book full' ate by
     # the screener's no-active-screen reply).
+    # market runs BEFORE screen for the same reason report does: MARKET is an
+    # exact sentinel and the screener's orphan-modifier catcher grabs loose
+    # words (the 7/12 'book full' lesson).
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
-                     ("quad", _quad), ("report", _rpt), ("screen", _scr),
+                     ("quad", _quad), ("report", _rpt), ("market", _mkt),
+                     ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("coverage", _cov),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),
