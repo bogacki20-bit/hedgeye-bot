@@ -58,15 +58,17 @@ def _rows(sql, args=None):
 
 
 def _fetch() -> dict:
-    """{ticker: {rp, trend, iv, rv}} for the universe, v_screener first,
-    Hedgeye RR fallback for the composites (rp from prev_close in band)."""
+    """{ticker: {rp, trend, iv, rv, px, band}} for the universe, v_screener
+    first, Hedgeye RR fallback for the composites (rp from prev_close in band)."""
     univ = INDEXES + SECTORS + THEMES + COMMODITIES + MACRO
     out = {}
-    for t, rp, trend, iv, rv in _rows(
-            "SELECT ticker, range_pos, trend_dir, iv, rv FROM v_screener "
+    for t, rp, trend, iv, rv, px, lo, hi in _rows(
+            "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
+            "       range_low, range_high FROM v_screener "
             "WHERE ticker = ANY(%s)", (univ,)):
         out[t] = {"rp": float(rp) if rp is not None else None,
-                  "trend": trend, "iv": iv, "rv": rv}
+                  "trend": trend, "iv": iv, "rv": rv, "px": px,
+                  "band": (lo, hi) if lo is not None and hi is not None else None}
     for t, trend, lo, hi, px, sd in _rows(
             "SELECT DISTINCT ON (ticker) ticker, trend, buy_trade, sell_trade, "
             "       prev_close, signal_date FROM hedgeye_risk_ranges "
@@ -111,12 +113,30 @@ def _vol_tag(iv, rv) -> str:
     return ""
 
 
+def _px(v) -> str:
+    """Compact price: 7,646 · 174.12 · 4.95 — enough precision, no noise."""
+    v = float(v)
+    if abs(v) >= 1000:
+        return f"{v:,.0f}"
+    if abs(v) >= 100:
+        return f"{v:.1f}"
+    return f"{v:.2f}"
+
+
 def _line(t: str, d: dict) -> str:
     rp = d.get("rp")
     rp_s = f"{rp:+.2f}" if rp is not None and rp < 0 else \
            (f"{rp:.2f}" if rp is not None else "  ? ")
     tr = d.get("trend") or "?"
-    return f"{_ARROW.get(tr, '·')} {t:<8}{rp_s:<6}{tr[:4]}{_vol_tag(d.get('iv'), d.get('rv'))}"
+    band = d.get("band")
+    px = d.get("px")
+    rng = ""
+    if px is not None and band:
+        rng = f"  {_px(px)} [{_px(band[0])}-{_px(band[1])}]"
+    elif px is not None:
+        rng = f"  {_px(px)}"
+    return (f"{_ARROW.get(tr, '·')} {t:<8}{rp_s:<6}{tr[:4]}"
+            f"{rng}{_vol_tag(d.get('iv'), d.get('rv'))}")
 
 
 def build_market_update() -> str:
@@ -181,16 +201,12 @@ def build_market_update() -> str:
     t10 = data.get("UST10Y")
     lines.append("")
     lines.append("VOLATILITY / RATES")
-    if vix and vix.get("band"):
-        lo, hi = vix["band"]
-        rp_s = f"rp {vix['rp']:.2f}" if vix.get("rp") is not None else "rp ?"
-        lines.append(f"  VIX {vix.get('px')} in [{lo}-{hi}] {rp_s} "
-                     f"{vix.get('trend') or ''}".rstrip())
-    if t10 and t10.get("band"):
-        lo, hi = t10["band"]
-        rp_s = f"rp {t10['rp']:.2f}" if t10.get("rp") is not None else "rp ?"
-        lines.append(f"  UST10Y {t10.get('px')} in [{lo}-{hi}] {rp_s} "
-                     f"{t10.get('trend') or ''}".rstrip())
+    for label, d in (("VIX", vix), ("UST10Y", t10)):
+        if d and d.get("band"):
+            lo, hi = d["band"]
+            rp_s = f"rp {d['rp']:.2f}" if d.get("rp") is not None else "rp ?"
+            lines.append(f"  {label} {_px(d['px'])} [{_px(lo)}-{_px(hi)}] {rp_s} "
+                         f"{d.get('trend') or ''}".rstrip())
     rich = sum(1 for t in SECTORS
                if data.get(t, {}).get("iv") and data.get(t, {}).get("rv")
                and float(data[t]["iv"]) > float(data[t]["rv"]))
