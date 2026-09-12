@@ -57,9 +57,39 @@ def _rows(sql, args=None):
         return cur.fetchall()
 
 
-def _fetch() -> dict:
-    """{ticker: {rp, trend, iv, rv, px, band}} for the universe, v_screener
-    first, Hedgeye RR fallback for the composites (rp from prev_close in band)."""
+def _live_prices(tickers: list[str], budget_s: float = 20.0) -> dict:
+    """{ticker: live_price} via the bot's price-feed dispatcher, fetched in
+    parallel under a hard time budget. Anything slow/failed is simply absent —
+    the caller keeps the last-sync price. Never raises."""
+    out: dict = {}
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        import yfinance_client
+
+        def one(t):
+            try:
+                d = yfinance_client.fetch_raw(t)
+                return t, (d or {}).get("price")
+            except Exception:
+                return t, None
+
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futs = [ex.submit(one, t) for t in tickers]
+            for f in as_completed(futs, timeout=budget_s):
+                t, px = f.result()
+                if px:
+                    out[t] = px
+    except Exception:
+        pass  # budget exhausted or feed down — snapshot prices still stand
+    return out
+
+
+def _fetch(live: bool = True) -> dict:
+    """{ticker: {rp, trend, iv, rv, px, band, live}} for the universe,
+    v_screener first, Hedgeye RR fallback for the composites. MFR prices are
+    from the DAILY sync — a 4pm MARKET was showing 10am prices (9/12), so
+    px is refreshed from the live feed and rp recomputed against the band."""
     univ = INDEXES + SECTORS + THEMES + COMMODITIES + MACRO
     out = {}
     for t, rp, trend, iv, rv, px, lo, hi in _rows(
@@ -69,6 +99,15 @@ def _fetch() -> dict:
         out[t] = {"rp": float(rp) if rp is not None else None,
                   "trend": trend, "iv": iv, "rv": rv, "px": px,
                   "band": (lo, hi) if lo is not None and hi is not None else None}
+    if live:
+        fresh = _live_prices([t for t in out])
+        for t, px in fresh.items():
+            d = out[t]
+            d["px"], d["live"] = px, True
+            if d["band"]:
+                lo, hi = float(d["band"][0]), float(d["band"][1])
+                if hi > lo:
+                    d["rp"] = (float(px) - lo) / (hi - lo)
     for t, trend, lo, hi, px, sd in _rows(
             "SELECT DISTINCT ON (ticker) ticker, trend, buy_trade, sell_trade, "
             "       prev_close, signal_date FROM hedgeye_risk_ranges "
@@ -139,7 +178,22 @@ def _line(t: str, d: dict) -> str:
             f"{rng}{_vol_tag(d.get('iv'), d.get('rv'))}")
 
 
-def build_market_update() -> str:
+def _pm_name_rows(names: list[str]) -> dict:
+    """v_screener rows for PM names (MARKET FULL / sector drill-down)."""
+    out = {}
+    if not names:
+        return out
+    for t, rp, trend, iv, rv, px, lo, hi in _rows(
+            "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
+            "       range_low, range_high FROM v_screener "
+            "WHERE ticker = ANY(%s)", (names,)):
+        out[t] = {"rp": float(rp) if rp is not None else None,
+                  "trend": trend, "iv": iv, "rv": rv, "px": px,
+                  "band": (lo, hi) if lo is not None and hi is not None else None}
+    return out
+
+
+def build_market_update(full: bool = False) -> str:
     data = _fetch()
     now = dt.datetime.now().strftime("%m/%d %I:%M %p")
 
@@ -173,8 +227,15 @@ def build_market_update() -> str:
         if t in data:
             lines.append("  " + _line(t, data[t]))
 
-    # ── PM mirror: sector ETF header, Hedgeye longs/shorts under it ──
+    # ── PM mirror: sector ETF header, Hedgeye longs/shorts under it.
+    #    Compact mode lists tickers; FULL mode gives every name its own
+    #    ranged line (arrives as several chunked Telegram messages). ──
     buckets = _pm_buckets()
+    name_rows = {}
+    if full:
+        all_names = [t.lstrip("●") for b in buckets.values()
+                     for t in b["long"] + b["short"]]
+        name_rows = _pm_name_rows(all_names)
     lines.append("")
     lines.append("SECTORS — Hedgeye PM (● top idea)")
     for etf, sector in SECTOR_ETF:
@@ -183,11 +244,24 @@ def build_market_update() -> str:
             continue
         lines.append("")
         lines.append(_line(etf, data[etf]) if etf in data else f"· {etf}")
-        if b:
+        if not b:
+            continue
+        if not full:
             if b["long"]:
                 lines.append("  L: " + " ".join(b["long"]))
             if b["short"]:
                 lines.append("  S: " + " ".join(b["short"]))
+            continue
+        for label, side in (("L:", "long"), ("S:", "short")):
+            if not b[side]:
+                continue
+            lines.append(f"  {label}")
+            for marked in b[side]:
+                t = marked.lstrip("●")
+                star = "●" if marked.startswith("●") else " "
+                d = name_rows.get(t)
+                lines.append("  " + star + (_line(t, d)[2:] if d
+                             else f"{t:<8}(no range data)"))
 
     for title, group in (("THEMES", THEMES), ("COMMODITIES", COMMODITIES),
                          ("RATES/CREDIT/USD", MACRO)):
@@ -264,6 +338,15 @@ def handle_market_command(text: str):
     up = text.strip().upper()
     if up in SENTINELS:
         return build_market_update()
+    if up in ("MARKET FULL", "MKT FULL"):
+        # Delivered as a .txt attachment (the BOOK FULL pattern) — ~11K chars
+        # of per-name ranges must never spam the chat as 4 chunked messages.
+        full = build_market_update(full=True)
+        zones = "\n".join(l for l in full.splitlines()[:8] if l.strip())
+        return {"document_name":
+                    f"market_full_{dt.date.today().isoformat()}.txt",
+                "document_text": full,
+                "caption": zones[:1024]}
     parts = up.split()
     if len(parts) == 2 and parts[0] in ("MARKET", "MKT") \
             and parts[1] in dict(SECTOR_ETF):
