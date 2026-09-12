@@ -184,6 +184,9 @@ stage that hit 0.
   tag (`vol$` rich / `vol¢` cheap); VIX + UST10Y ride along from the RR
   table. Leads with 🎯 ZONES: add-LONG (bull, rp<=0.35), add-SHORT (bear,
   rp>=0.65), range-edge trim/cover (rp>=0.85 or <=0.05). Read-only.
+- **`MARKET <ETF>`** (e.g. `MARKET XLE`) — sector drill-down: every PM name
+  in that sector with price, range, rp and trend (the overview keeps the
+  name lists compact; this is where per-name ranges live).
   *(handler: `tools/market_update.py`)*
 
 ### `WRAP` / `WRAP LIST`

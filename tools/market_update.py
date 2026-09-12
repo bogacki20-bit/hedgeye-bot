@@ -215,11 +215,60 @@ def build_market_update() -> str:
     return "\n".join(lines)
 
 
+def build_sector_detail(etf: str) -> str:
+    """MARKET <ETF> drill-down: every PM name in that sector WITH price,
+    range, rp and trend. The overview keeps the name lists compact (229
+    ranged lines would blow Telegram's 4096); this is where the ranges live."""
+    etf = etf.upper()
+    sector = dict(SECTOR_ETF).get(etf)
+    if sector is None:
+        return (f"Unknown sector ETF {etf}. One of: "
+                + " ".join(e for e, _ in SECTOR_ETF))
+    b = _pm_buckets().get(sector, {"long": [], "short": []})
+    names = [t.lstrip("●") for t in b["long"] + b["short"]]
+    tops = {t.lstrip("●") for t in b["long"] + b["short"] if t.startswith("●")}
+    data = {}
+    if names:
+        for t, rp, trend, iv, rv, px, lo, hi in _rows(
+                "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
+                "       range_low, range_high FROM v_screener "
+                "WHERE ticker = ANY(%s)", (names,)):
+            data[t] = {"rp": float(rp) if rp is not None else None,
+                       "trend": trend, "iv": iv, "rv": rv, "px": px,
+                       "band": (lo, hi) if lo is not None and hi is not None else None}
+    etf_data = _fetch().get(etf)
+    lines = [f"📸 {etf} — {sector} (Hedgeye PM, ● top idea)"]
+    if etf_data:
+        lines.append(_line(etf, etf_data))
+    for label, side in (("LONGS", "long"), ("SHORTS", "short")):
+        if not b[side]:
+            continue
+        lines.append("")
+        lines.append(label)
+        for marked in b[side]:
+            t = marked.lstrip("●")
+            star = "●" if t in tops and marked.startswith("●") else " "
+            d = data.get(t)
+            if d:
+                lines.append(" " + star + _line(t, d)[2:])
+            else:
+                lines.append(f" {star} {t:<8}(no range data)")
+    return "\n".join(lines)[:4000]
+
+
 def handle_market_command(text: str):
-    """Telegram entry — owns MARKET / MARKET UPDATE / MKT, declines the rest."""
-    if not text or text.strip().upper() not in SENTINELS:
+    """Telegram entry — owns MARKET / MARKET UPDATE / MKT and the sector
+    drill-down MARKET <ETF> (e.g. MARKET XLE); declines everything else."""
+    if not text:
         return None
-    return build_market_update()
+    up = text.strip().upper()
+    if up in SENTINELS:
+        return build_market_update()
+    parts = up.split()
+    if len(parts) == 2 and parts[0] in ("MARKET", "MKT") \
+            and parts[1] in dict(SECTOR_ETF):
+        return build_sector_detail(parts[1])
+    return None
 
 
 if __name__ == "__main__":
