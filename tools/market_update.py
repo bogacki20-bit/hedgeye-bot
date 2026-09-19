@@ -20,6 +20,7 @@ Telegram:  MARKET  (or MARKET UPDATE)
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 SENTINELS = ("MARKET", "MARKET UPDATE", "MKT")
 
@@ -286,6 +287,14 @@ def build_market_update(full: bool = False) -> str:
     if tilt:
         lines.append("")
         lines.extend(tilt)
+        # Backtest 9/19 (n=238 rp-low buys): +0.86% fwd5 on tilt<1 days vs
+        # -0.21% on tilt>=1 days — zone entries need the regime filter.
+        m = re.search(r"SPX (\d+\.\d+)", tilt[0])
+        if m:
+            lines.append("  → zone entries "
+                         + ("FAVORED today (SPX short-gamma: backtest +0.86% fwd5)"
+                            if float(m.group(1)) < 1 else
+                            "half-size today (SPX pinned: backtest -0.21% fwd5)"))
 
     lines.append("")
     lines.append("INDEXES")
