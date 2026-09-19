@@ -177,6 +177,14 @@ stage that hit 0.
   writes to MFR** (read API only, enroll-never-remove).
   *(handler: `tools/enrollment.py`)*
 
+### `NOTE` / `NOTE FULL` — the institutional desk note
+- STANCE (net/gross/L-S/cash/regime) · EXPOSURE by sleeve · ATTRIBUTION vs
+  prior snapshot (held-unchanged only; traded names excluded, not guessed) ·
+  DELTAS (wall moves on held names, SS roster changes) · CATALYSTS (earnings
+  14d + option expiries) · thesis-card FLAGS (trend-against, at-wall, range
+  edges). `NOTE FULL` = .txt with a card for every position. Read-only,
+  point-in-time, provenance-tagged. *(handler: `tools/desk_note.py`)*
+
 ### `MARKET` (aliases: `MARKET UPDATE`, `MKT`)
 - One-glance market snapshot: indexes, all 11 sector SPDRs, commodities/
   crypto, rates/credit/USD — each with range position (rp, 0=low 1=high),
