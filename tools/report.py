@@ -386,8 +386,15 @@ def build_book_table(fills: dict) -> str:
     and upload-mode appendix. One row per account leg + TOTAL row on splits."""
     rows = fills.get("per_acct", [])
     agg = fills.get("agg", {})
+    # SG dealer walls + IV rank per ticker (EquityHub daily capture) — the
+    # LLM-paste artifact should carry the dealer picture too (operator 9/19)
+    try:
+        from tools.screener import _sg_for
+        sg = _sg_for({r[0] for r in rows})
+    except Exception:
+        sg = {}
     out = [f"{'tkr':<8}{'acct':<6}{'acct%':>7}{'tgt%':>7} {'src':<11}"
-           f"{'fill%':>7}  {'bucket':<9}{'pl%':>8}"]
+           f"{'fill%':>7}  {'bucket':<9}{'pl%':>8}  sg⋄call/hedge/put·ivr"]
 
     def _n(v, fmt=".1f", suf="%"):
         return f"{v:{fmt}}{suf}" if v is not None else "?"
@@ -396,7 +403,7 @@ def build_book_table(fills: dict) -> str:
     for t, acct, pct, tgt, src, fill, bucket, pl, _g in rows:
         out.append(f"{t:<8}{acct:<6}{_n(pct):>7}{_n(tgt):>7} "
                    f"{(src or 'set'):<11}{_n(fill, '.0f'):>7}  {bucket:<9}"
-                   f"{_n(pl, '+.1f'):>8}")
+                   f"{_n(pl, '+.1f'):>8}{sg.get(t, '')}")
     for t in sorted(split):
         c = agg[t]
         out.append(f"{t:<8}{'TOTAL':<6}{_n(c['acct_pct']):>7}{'—':>7} "
