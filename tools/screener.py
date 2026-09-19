@@ -842,7 +842,39 @@ def _ivpd_tag(r, ivpct):
     return f"({p}%)" if p is not None else ""
 
 
-def _fmt_row(r, corr, vol=None, ivpct=None) -> str:
+def _sg_for(tickers) -> dict:
+    """{ticker: ' ⋄cw/hw/pw ivr..'} — SpotGamma dealer walls + IV rank from
+    the daily EquityHub capture (spotgamma_snapshots, fresh <=3d). Operator
+    ask 9/19: SG options data on every screen so the LLM sees the dealer
+    picture per liquid-options asset. Missing/illiquid names get ''."""
+    if not tickers:
+        return {}
+    out = {}
+    try:
+        def g(v):
+            v = float(v)
+            return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:g}"
+        for r in _rows(  # _rows returns DICTS (the 9/19 'hedge_wall' float bug)
+                "SELECT DISTINCT ON (ticker) ticker, call_wall, put_wall, "
+                "       hedge_wall, iv_rank FROM spotgamma_snapshots "
+                "WHERE ticker = ANY(%s) AND snapshot_date >= CURRENT_DATE - 3 "
+                "ORDER BY ticker, snapshot_date DESC", (list(tickers),)):
+            try:
+                cw, pw, hw, ivr = (r["call_wall"], r["put_wall"],
+                                   r["hedge_wall"], r["iv_rank"])
+                if cw is None or pw is None:
+                    continue
+                hw_s = f"/{g(hw)}" if hw is not None else ""
+                ivr_s = f" ivr={float(ivr)*100:.0f}%" if ivr is not None else ""
+                out[r["ticker"]] = f" ⋄{g(cw)}{hw_s}/{g(pw)}{ivr_s}"
+            except (TypeError, ValueError, KeyError):
+                continue
+    except Exception as e:
+        log.warning("sg walls lookup failed: %s", e)
+    return out
+
+
+def _fmt_row(r, corr, vol=None, ivpct=None, sg=None) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
     rp = _rp_str(r)
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
@@ -876,7 +908,8 @@ def _fmt_row(r, corr, vol=None, ivpct=None) -> str:
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
             f"rp={rp:<8} px={_px_str(r):<7} rng={_rng_str(r):<17} mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)}{_ivpd_tag(r, ivpct)} "
-            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}{div}{book}{cloud}{side}{wrap}{th}{warn}{volmark}")
+            f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}"
+            f"{(sg or {}).get(r['ticker'], '')}{div}{book}{cloud}{side}{wrap}{th}{warn}{volmark}")
 
 
 _RP_LIVE_MIN, _RP_LIVE_MAX = 0.2, 5.0
@@ -1276,7 +1309,8 @@ def run_screen_q(q: dict) -> str:
     if result:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
         lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
-        lines += [_fmt_row(r, corr, vol, ivpct) for r in result]
+        sg = _sg_for([r["ticker"] for r in result])
+        lines += [_fmt_row(r, corr, vol, ivpct, sg) for r in result]
         _stale = [r for r in result if r.get("_snap_stale")]
         if _stale:
             names = " ".join(sorted(r["ticker"] for r in _stale))

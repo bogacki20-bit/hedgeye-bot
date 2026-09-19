@@ -108,6 +108,8 @@ def _fetch(live: bool = True) -> dict:
                 lo, hi = float(d["band"][0]), float(d["band"][1])
                 if hi > lo:
                     d["rp"] = (float(px) - lo) / (hi - lo)
+    for t, sg in _sg_snaps(list(out)).items():
+        out[t]["sg"] = sg
     for t, trend, lo, hi, px, sd in _rows(
             "SELECT DISTINCT ON (ticker) ticker, trend, buy_trade, sell_trade, "
             "       prev_close, signal_date FROM hedgeye_risk_ranges "
@@ -150,6 +152,53 @@ def _pm_buckets(include_bench: bool = False) -> dict:
     return out
 
 
+def _sg_snaps(tickers: list[str]) -> dict:
+    """{ticker: {cw, pw, hw, pcr, ivr, dpi}} from the daily EquityHub capture
+    (spotgamma_snapshots) — dealer walls + options context per asset, fresh
+    rows only (<=3 days). Operator ask 9/19: SG options data on every screen
+    so the LLM gets the full picture per liquid-options asset."""
+    if not tickers:
+        return {}
+    rows = _rows(
+        "SELECT DISTINCT ON (ticker) ticker, call_wall, put_wall, hedge_wall, "
+        "       put_call_oi_ratio, iv_rank, dpi "
+        "FROM spotgamma_snapshots WHERE ticker = ANY(%s) "
+        "  AND snapshot_date >= CURRENT_DATE - 3 "
+        "ORDER BY ticker, snapshot_date DESC", (tickers,))
+    return {t: {"cw": cw, "pw": pw, "hw": hw, "pcr": pcr, "ivr": ivr, "dpi": dpi}
+            for t, cw, pw, hw, pcr, ivr, dpi in rows}
+
+
+def _tilt_lines() -> list[str]:
+    """GAMMA REGIME lines from sg_tilt (indices_capture stores daily).
+    tilt > 1 = dealers long gamma -> pinning, fade the range edges;
+    tilt < 1 = short gamma -> moves amplify, follow."""
+    rows = _rows(
+        "SELECT DISTINCT ON (sym) sym, trade_date, gamma_tilt FROM sg_tilt "
+        "ORDER BY sym, trade_date DESC")
+    if not rows:
+        return []
+    parts = []
+    for sym, d, gt in sorted(rows):
+        gt = float(gt)
+        tag = "FADE" if gt >= 1.1 else ("fade-lean" if gt >= 0.95
+              else ("follow" if gt >= 0.6 else "FOLLOW (short-gamma)"))
+        parts.append(f"{sym} {gt:.2f} {tag}")
+    return [f"⚖ GAMMA REGIME ({rows[0][1]}): " + " · ".join(parts),
+            "  tilt>1 dealers long gamma = pin/fade · <1 short gamma = follow"]
+
+
+def _sg_suffix(d: dict) -> str:
+    sg = d.get("sg")
+    if not sg or sg.get("cw") is None or sg.get("pw") is None:
+        return ""
+    def g(v):
+        v = float(v)
+        return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:g}"
+    hw = f"/{g(sg['hw'])}" if sg.get("hw") is not None else ""
+    return f"  ⋄{g(sg['cw'])}{hw}/{g(sg['pw'])}"
+
+
 def _vol_tag(iv, rv) -> str:
     if iv is None or rv is None or not rv:
         return ""
@@ -184,11 +233,11 @@ def _line(t: str, d: dict) -> str:
     elif px is not None:
         rng = f"  {_px(px)}"
     return (f"{_ARROW.get(tr, '·')} {t:<8}{rp_s:<6}{tr[:4]}"
-            f"{rng}{_vol_tag(d.get('iv'), d.get('rv'))}")
+            f"{rng}{_sg_suffix(d)}{_vol_tag(d.get('iv'), d.get('rv'))}")
 
 
 def _pm_name_rows(names: list[str]) -> dict:
-    """v_screener rows for PM names (MARKET FULL / sector drill-down)."""
+    """v_screener rows + SG walls for PM names (MARKET FULL / drill-down)."""
     out = {}
     if not names:
         return out
@@ -199,6 +248,8 @@ def _pm_name_rows(names: list[str]) -> dict:
         out[t] = {"rp": float(rp) if rp is not None else None,
                   "trend": trend, "iv": iv, "rv": rv, "px": px,
                   "band": (lo, hi) if lo is not None and hi is not None else None}
+    for t, sg in _sg_snaps(list(out)).items():
+        out[t]["sg"] = sg
     return out
 
 
@@ -221,6 +272,7 @@ def build_market_update(full: bool = False) -> str:
 
     lines = [f"📸 MARKET UPDATE — {now} ET",
              "rp: 0=range low · 1=range high (gated stack: fresh Hedgeye > MFR)",
+             "⋄ = SG walls call/hedge/put (EquityHub)",
              ""]
     lines.append("🎯 ZONES")
     lines.append("  add-LONG  (bull, low in range):  "
@@ -229,6 +281,10 @@ def build_market_update(full: bool = False) -> str:
                  + (", ".join(add_short) or "none"))
     if stretched:
         lines.append("  range edge (trim/cover): " + ", ".join(stretched))
+    tilt = _tilt_lines()
+    if tilt:
+        lines.append("")
+        lines.extend(tilt)
 
     lines.append("")
     lines.append("INDEXES")
