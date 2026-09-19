@@ -121,20 +121,29 @@ def _fetch(live: bool = True) -> dict:
     return out
 
 
-def _pm_buckets() -> dict:
-    """{gics_sector: {'long': [t…], 'short': [t…]}} from the PM buckets —
-    active + top-idea only, ● prefix on top ideas, top ideas listed first."""
+def _pm_buckets(include_bench: bool = False) -> dict:
+    """{gics_sector: {'long': […], 'short': […], 'long_bench': […],
+    'short_bench': […]}} from the PM buckets. Compact MARKET shows active +
+    top-idea only (readability); include_bench=True adds the bench tiers —
+    MARKET FULL carries the WHOLE monitor (operator ask 9/19: 'there is
+    about 450'). ● prefix marks top ideas, listed first."""
+    buckets = ["active_long", "active_short", "top_idea_long", "top_idea_short"]
+    if include_bench:
+        buckets += ["long_bench", "short_bench"]
     rows = _rows(
         "SELECT ticker, COALESCE(gics_sector,'(untagged)'), hedgeye_bucket_0629 "
-        "FROM ticker_tags WHERE hedgeye_bucket_0629 IN "
-        "('active_long','active_short','top_idea_long','top_idea_short') "
-        "ORDER BY ticker")
+        "FROM ticker_tags WHERE hedgeye_bucket_0629 = ANY(%s) "
+        "ORDER BY ticker", (buckets,))
     out: dict = {}
     for t, sec, b in rows:
-        side = "long" if b.endswith("_long") else "short"
-        top = b.startswith("top_idea")
-        d = out.setdefault(sec, {"long": [], "short": []})
-        d[side].append(("●" + t) if top else t)
+        d = out.setdefault(sec, {"long": [], "short": [],
+                                 "long_bench": [], "short_bench": []})
+        if b in ("long_bench", "short_bench"):
+            d[b].append(t)
+        else:
+            side = "long" if b.endswith("_long") else "short"
+            top = b.startswith("top_idea")
+            d[side].append(("●" + t) if top else t)
     for d in out.values():
         for side in ("long", "short"):
             d[side].sort(key=lambda s: (not s.startswith("●"), s.lstrip("●")))
@@ -230,11 +239,12 @@ def build_market_update(full: bool = False) -> str:
     # ── PM mirror: sector ETF header, Hedgeye longs/shorts under it.
     #    Compact mode lists tickers; FULL mode gives every name its own
     #    ranged line (arrives as several chunked Telegram messages). ──
-    buckets = _pm_buckets()
+    buckets = _pm_buckets(include_bench=full)
     name_rows = {}
     if full:
         all_names = [t.lstrip("●") for b in buckets.values()
-                     for t in b["long"] + b["short"]]
+                     for t in b["long"] + b["short"]
+                     + b.get("long_bench", []) + b.get("short_bench", [])]
         name_rows = _pm_name_rows(all_names)
     lines.append("")
     lines.append("SECTORS — Hedgeye PM (● top idea)")
@@ -252,8 +262,9 @@ def build_market_update(full: bool = False) -> str:
             if b["short"]:
                 lines.append("  S: " + " ".join(b["short"]))
             continue
-        for label, side in (("L:", "long"), ("S:", "short")):
-            if not b[side]:
+        for label, side in (("L:", "long"), ("S:", "short"),
+                            ("L-bench:", "long_bench"), ("S-bench:", "short_bench")):
+            if not b.get(side):
                 continue
             lines.append(f"  {label}")
             for marked in b[side]:
