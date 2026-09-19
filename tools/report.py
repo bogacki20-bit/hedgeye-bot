@@ -414,6 +414,8 @@ def build_book_table(fills: dict) -> str:
     if ce:
         out.append("cash-equiv (parked, excluded): "
                    + " ".join(f"{t} ${v:,.0f}" for t, v in sorted(ce.items())))
+    out.append("sg⋄ = SpotGamma dealer walls call/hedge/put + IV rank (EquityHub) — "
+               "reliable on liquid options (indexes, megacaps); sparse-OI names = noise.")
     return "\n".join(out)
 
 

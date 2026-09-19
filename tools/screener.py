@@ -1326,6 +1326,8 @@ def run_screen_q(q: dict) -> str:
             lines.append("⚠ = top idea on MFR trend only, no Hedgeye TREND — lower-confidence.")
         lines.append("cSPY/cUUP = bot-computed Pearson vs SPY/UUP daily returns (calc, not MFR); "
                      "? = <20 overlapping days.")
+        lines.append("⋄ = SG dealer walls call/hedge/put + IV rank (EquityHub) — "
+                     "reliable on liquid options; sparse-OI names = noise.")
     else:
         near_lbl = f"near_{q['near']}" if q["near"] else "range gate (none)"
         if src and src != "posmon":

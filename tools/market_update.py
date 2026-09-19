@@ -272,7 +272,8 @@ def build_market_update(full: bool = False) -> str:
 
     lines = [f"📸 MARKET UPDATE — {now} ET",
              "rp: 0=range low · 1=range high (gated stack: fresh Hedgeye > MFR)",
-             "⋄ = SG walls call/hedge/put (EquityHub)",
+             "⋄ = SG walls call/hedge/put (EquityHub) — reliable on liquid "
+             "options (indexes, megacaps); sparse-OI names = noise",
              ""]
     lines.append("🎯 ZONES")
     lines.append("  add-LONG  (bull, low in range):  "
