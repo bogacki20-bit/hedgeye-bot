@@ -37,6 +37,7 @@ evening total packet 6:45 PM · Saturday walls scorecard 10:00.
 | say | you get |
 |---|---|
 | `RP SMH` (any ticker) | single-name range position, inline |
+| `SHELF` | the watch shelf: covered shorts eligible to re-rent — 🔔 fires (roster + BEARISH + rp≥0.65), watching list, expiries, lifetime stats. Fires also ride the 9:40 note |
 | `CAP PSX 500` | pre-trade check: does $500 more PSX bust a sector/country cap? (`CAP <tkr> [dollars] [account]`) |
 | `MOVES` / `MOVES 14` | bucket transitions in the last 7 / n days |
 | `MFR COVERAGE` | wanted vs enrolled vs served — the range-feed health check |
