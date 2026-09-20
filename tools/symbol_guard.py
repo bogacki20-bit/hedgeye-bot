@@ -222,10 +222,22 @@ def validate_for_storage(tokens, source: str, probe_unknown: bool = True):
     return kept, dropped
 
 
+# Renamed symbols: Hedgeye copy lags exchange renames, so parser output is
+# normalized to the LIVE ticker here — one map for every parser that runs
+# through filter_rows. VSCO->VSXY confirmed against live quotes 9/20 (VSCO
+# returns no bars; VSXY trades — the 7/11 rename note was right).
+SYMBOL_ALIASES = {"VSCO": "VSXY"}
+
+
 def filter_rows(rows, source: str, key: str = "ticker",
                 probe_unknown: bool = True):
     """Convenience for the parsers' row-dict shape: keep rows whose
-    row[key] validates. Returns (kept_rows, dropped_symbols)."""
+    row[key] validates, with renamed symbols normalized to the live
+    ticker first (SYMBOL_ALIASES). Returns (kept_rows, dropped_symbols)."""
+    for r in rows:
+        t = (r.get(key) or "").strip().upper()
+        if t in SYMBOL_ALIASES and SYMBOL_ALIASES[t] != t:
+            r[key] = SYMBOL_ALIASES[t]
     kept_syms, _ = validate_for_storage([r.get(key) for r in rows], source,
                                         probe_unknown)
     allowed = set(s.strip().upper() for s in kept_syms if s)
