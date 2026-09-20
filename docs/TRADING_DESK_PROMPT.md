@@ -133,6 +133,16 @@ Typical position ~1.5% of book; satellites smaller. Cash is the primary
 hedge — a large cash sleeve is deliberate, not idle. Sector concentration
 is watched (energy has run ~15-20% of gross; flag clusters above that).
 
+## STANDING PROGRAMS
+
+**BUXX accumulation:** ~$36K/year (~$3K/month) into BUXX, Individual
+account cash sleeve. Entries: LOW in its band (rp < 0.5 of its pennies-wide
+range), preferably 0-7 days AFTER the monthly distribution (~27th-30th) —
+the post-ex-div dip is the mechanical entry. The watcher nudges the window
+and the pace; if the note shows the program behind pace late in a month,
+flag it. This is savings-flow, not a trade: no trend gate, no regime gate,
+never counted in exposure (BUXX is cash-like).
+
 ## DATA HYGIENE (non-negotiable)
 
 - **Point-in-time only.** Every claim uses data as-of its date. A fact
