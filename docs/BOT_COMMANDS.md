@@ -51,6 +51,9 @@ evening total packet 6:45 PM · Saturday walls scorecard 10:00.
 - `SCREEN shorts near the top`
 - `SCREEN held momentum`
 - `SCREEN etf pro longs` · `SCREEN keiths` · `SCREEN signal strength`
+- `SCREEN retail pro shorts` · `SCREEN financials pro longs` ·
+  `SCREEN capital allocation` (the sector-pro rosters — also as SECTOR
+  PRO overlays on `MARKET XLY` / `MARKET XLF`)
 - `SCREEN everything financials` (full universe, not just the monitor)
 - add `show gated` to include stale-range names
 
