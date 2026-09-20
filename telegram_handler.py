@@ -358,6 +358,7 @@ def _dispatch_message(token, chat_id, text):
     def _sc():   from tools.shadow_scorecard import handle_scorecard_command; return handle_scorecard_command(text)
     def _mkt():  from tools.market_update import handle_market_command;   return handle_market_command(text)
     def _note(): from tools.desk_note import handle_note_command;         return handle_note_command(text)
+    def _shlf(): from tools.short_shelf import handle_shelf_command;      return handle_shelf_command(text)
 
     # report runs BEFORE screen: report owns exact sentinels (REPORT*, BOOK
     # FULL) while screen's orphan-modifier catcher claims loose words like
@@ -368,7 +369,7 @@ def _dispatch_message(token, chat_id, text):
     # words (the 7/12 'book full' lesson).
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
                      ("quad", _quad), ("report", _rpt), ("market", _mkt),
-                     ("note", _note), ("screen", _scr),
+                     ("note", _note), ("shelf", _shlf), ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("coverage", _cov),
                      ("sources", _src), ("wrap", _wrap), ("targets", _tgt),

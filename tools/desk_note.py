@@ -246,6 +246,24 @@ def build_note(full: bool = False):
     if not earns and not expiries:
         L.append("  none on held names")
 
+    # ── WATCH SHELF: covered shorts eligible to re-rent (9/20) — the
+    #    recycle half of the short doctrine, off the operator's memory ──
+    try:
+        from tools.short_shelf import evaluate, sweep
+        sweep()
+        ev = evaluate()
+        if ev["fires"]:
+            L.append("")
+            L.append(f"🗄 SHELF — {len(ev['fires'])} re-entry trigger(s) live "
+                     f"(roster + BEARISH + rp≥0.65):")
+            L.extend("  🔔 " + f for f in ev["fires"])
+        elif ev["watching"]:
+            L.append("")
+            L.append(f"🗄 SHELF: {len(ev['watching'])} covered short(s) "
+                     f"watching, none at re-entry (text SHELF for the list)")
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── standing programs: BUXX accumulation ($36K/yr, buy the post-
     #    distribution dip; watcher nudges the window — this line keeps the
     #    program visible on every card) ──
