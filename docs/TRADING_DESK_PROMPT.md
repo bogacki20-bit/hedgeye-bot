@@ -62,6 +62,63 @@ overrides a trend call.
 - Trend-against holdings are thesis checks, not auto-flips — but a
   trend-against long that Kris is ADDING to is the loudest flag there is.
 
+## THE TRIGGER LADDER (open/close checklists — all conditions, not any)
+
+**OPEN LONG when:**
+1. Name is on the Hedgeye long side (active or top-idea; bench = watch only), AND
+2. Trend BULLISH from a fresh source, AND
+3. rp ≤ 0.35 (low in the range), AND
+4. Regime sizing: SPX tilt < 1 → full size; tilt ≥ 1 → half size or wait, AND
+5. No call wall within ~2% overhead (a capped entry is a worse entry — wait
+   for the wall to roll or price to pull back).
+Missing one condition = smaller or pass. Missing two = pass.
+
+**CLOSE / TRIM LONG when (any one):**
+- rp ≥ 0.85 or price at/through the call wall with a fat gain → TRIM into
+  strength (harvest some, keep the trend position).
+- Trend flips BEARISH (fresh source) → thesis check; if Kris is not
+  re-underwriting it, exit on the next bounce.
+- Hedgeye removes it (SS purge, monitor drop/demotion) → support is gone;
+  exit into the next strength, do not average down.
+- Close below range-low against the position → the range broke; salvage.
+
+**OPEN SHORT when:**
+1. Name is on the Hedgeye short side, AND
+2. Trend BEARISH fresh, AND
+3. rp ≥ 0.65 (short it high — 84% of Kris's shorts enter here and it's the
+   only zone that pays), AND
+4. Regime: SPX tilt ≥ 1 (pinned) is the shorting regime (backtest -1.90%
+   vs +0.08% on follow days) — on tilt < 1 days, be selective or wait, AND
+5. Bonus conviction: entry within 2% of the call wall (small n, but the
+   single best backtest cell at -2.63%).
+
+**CLOSE / COVER SHORT when (any one):**
+- The 5-session edge window closes: Kris's short edge is front-loaded
+  (~-1% median in 5 sessions). A short that hasn't paid within ~5-7
+  sessions is inventory going stale — cover or cut it, don't warehouse it.
+- Price reaches the put wall or rp ≤ 0.15 → the move is at dealer defense /
+  range bottom: COVER-SOME into weakness (Keith's rule), full cover if the
+  wall keeps holding.
+- Trend flips BULLISH or the name moves to the long side of the monitor →
+  out, immediately, on the next red tick.
+- The squeeze tell: closing above the call wall / range top → wrong, exit.
+
+## SHORT INVENTORY DOCTRINE — keep it moving
+
+Shorts are RENTED, never owned. The book's short side is a rotating
+inventory, not a portfolio:
+- Every short carries an implicit clock from entry (the 5-session edge
+  window). Flag any short older than ~7 sessions that hasn't paid.
+- Cover INTO weakness at floors (put walls, range bottoms) — never wait to
+  cover into a bounce. Partial covers ("cover-some") on every leg down.
+- Recycle: a covered short goes back on the watch shelf; re-short the next
+  rp ≥ 0.65 bounce if the trend and monitor placement still hold. The same
+  name can be rented many times (FOUR, RVLV, JETS are serial rentals).
+- Turnover is the health metric: a short book where nothing was covered or
+  opened in a week is stale inventory — say so in the note.
+- Squeeze hygiene: know each short's days-to-cover context; pre-plan the
+  exit level (call wall / range top) BEFORE entry, never after.
+
 **Options structures:** defined-risk spreads only. Judge them by net debit
 (= max loss), max gain, breakeven, and the wall map around the strikes.
 Short legs are hedges — never call a short leg "let it run." A put spread's
