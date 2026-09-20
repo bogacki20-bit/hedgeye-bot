@@ -422,6 +422,43 @@ def build_sector_detail(etf: str) -> str:
                 lines.append(" " + star + _line(t, d)[2:])
             else:
                 lines.append(f" {star} {t:<8}(no range data)")
+
+    # SECTOR PRO overlay (operator 9/20): the sector-analyst rosters beyond
+    # the Monday Position Monitor — Retail Pro sided tags on XLY, Keith's
+    # Financials list on XLF. Names already shown above are skipped.
+    _PRO = {"XLY": ("Retail Pro", "retailpro"),
+            "XLF": ("Financials Pro (Keith's list)", "finpro")}
+    if etf in _PRO:
+        label, kind = _PRO[etf]
+        try:
+            from tools.source_registry import retailpro_side, sigstr_side
+            fn = retailpro_side if kind == "retailpro" else sigstr_side
+            shown = set(names)
+            extra = []
+            for side in ("long", "short"):
+                for t in sorted(fn(side) - shown):
+                    extra.append((t, side))
+            if extra:
+                lines.append("")
+                lines.append(f"SECTOR PRO — {label} (beyond the monitor)")
+                xdata = {}
+                for t, rp, trend, iv, rv, px, lo, hi in _rows(
+                        "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
+                        "range_low, range_high FROM v_screener "
+                        "WHERE ticker = ANY(%s)", ([t for t, _ in extra],)):
+                    xdata[t] = {"rp": float(rp) if rp is not None else None,
+                                "trend": trend, "iv": iv, "rv": rv, "px": px,
+                                "band": (lo, hi) if lo is not None and
+                                        hi is not None else None}
+                for t, side in extra:
+                    d = xdata.get(t)
+                    tag = "S" if side == "short" else "L"
+                    if d:
+                        lines.append(f"  {tag} " + _line(t, d)[2:])
+                    else:
+                        lines.append(f"  {tag} {t:<8}(no range data)")
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"  (sector-pro overlay unavailable: {e})")
     return "\n".join(lines)[:4000]
 
 

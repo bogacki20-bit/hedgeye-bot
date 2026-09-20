@@ -93,6 +93,11 @@ def _tickers_from(segment: str) -> list[str]:
 # min 2 chars: the scan path runs over free text where 1-letter all-caps
 # tokens ("L" from a bullet, "K") are noise, not tickers.
 _SCAN_RE = re.compile(r"\b[A-Z]{2,5}(?:\.[A-Z]{1,3})?\b")
+# "DECK (Active Short)" / "LULU (Top Idea Short)" / "REAL (New Long)" —
+# the inline monitor-status tag the retail team started shipping ~9/8.
+_STATUS_RE = re.compile(
+    r"\b([A-Z]{2,5})\s*\(\s*(Active|Bench|Top\s+Idea|New)?\s*(Long|Short)\s*\)",
+    re.I)
 
 
 def _scan_tickers(text: str) -> list[str]:
@@ -117,11 +122,25 @@ def parse_retail(subject: str, body_text_or_html: str) -> list[dict]:
     rows: list[dict] = []
     seen: set[str] = set()
 
-    def add(tk: str, side: Optional[str]):
+    def add(tk: str, side: Optional[str], tier: Optional[str] = None):
         if tk in seen:
+            if side or tier:                   # upgrade an unsided mention
+                for r in rows:
+                    if r["ticker"] == tk:
+                        r["side"] = r["side"] or side
+                        r["tier"] = r.get("tier") or tier
             return
         seen.add(tk)
-        rows.append({"ticker": tk, "product": product, "side": side})
+        rows.append({"ticker": tk, "product": product, "side": side,
+                     "tier": tier})
+
+    # Status tags: since ~9/8 the emails tag each story's ticker with its
+    # CURRENT monitor status inline — "DECK (Active Short)", "LULU (Top
+    # Idea Short)". This is the sided+tiered roster the sector-pro lens
+    # runs on, and it appears in every product, so scan it first.
+    for m in _STATUS_RE.finditer(body):
+        tier = re.sub(r"\s+", "_", (m.group(2) or "").strip().lower()) or None
+        add(m.group(1).upper(), m.group(3).lower(), tier)
 
     if product == "soundbites":
         m = re.search(r"Callouts\s+Include\s*:\s*(?P<list>.+?)"
@@ -209,16 +228,17 @@ def upsert_rows(rows: list[dict], signal_date: date, feed_item_id: int | None,
                     cur.execute(
                         """
                         INSERT INTO hedgeye_retail
-                            (signal_date, ticker, product, side, feed_item_id,
-                             source_email_id, parsed_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                            (signal_date, ticker, product, side, tier,
+                             feed_item_id, source_email_id, parsed_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
                         ON CONFLICT (signal_date, ticker, product, source_email_id)
                         DO UPDATE SET side=COALESCE(EXCLUDED.side,
                                                     hedgeye_retail.side),
+                            tier=COALESCE(EXCLUDED.tier, hedgeye_retail.tier),
                             feed_item_id=EXCLUDED.feed_item_id, parsed_at=NOW()
                         """,
                         (signal_date, r["ticker"], r["product"], r["side"],
-                         feed_item_id, message_id),
+                         r.get("tier"), feed_item_id, message_id),
                     )
                     written += 1
                 except Exception as e:

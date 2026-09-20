@@ -125,6 +125,16 @@ def _roster(tickers: list[str]) -> dict:
     for (t,) in _rows("SELECT ticker FROM ss_roster_current WHERE ticker=ANY(%s)",
                       (tickers,)):
         out[t]["ss"] = True
+    # sector-pro rosters (operator 9/20): Retail Pro sided tags + Keith's
+    # financials list — both explicitly sided, both count as short rosters
+    try:
+        from tools.source_registry import retailpro_side, sigstr_side
+        for t in retailpro_side("short") & set(tickers):
+            out[t]["retailpro"] = True
+        for t in sigstr_side("short") & set(tickers):
+            out[t]["finpro"] = True
+    except Exception as e:  # noqa: BLE001
+        log.warning("sector-pro roster lookup failed: %s", e)
     for t, rk in _rows("SELECT ticker, rank FROM hedgeye_portfolio_solutions "
                        "WHERE ticker=ANY(%s) AND snapshot_date = "
                        "(SELECT max(snapshot_date) FROM hedgeye_portfolio_solutions)",
@@ -152,9 +162,10 @@ def evaluate() -> dict:
         m = ros.get(tkr, {})
         rp, trend, _src, cur_px = scr.get(tkr, (None, None, None, None))
         rp = float(rp) if rp is not None else None
-        on_roster = (m.get("posmon") or m.get("etfpro")
-                     or (m.get("ss") and trend == "BEARISH"))
-        tags = "/".join(k for k in ("posmon", "etfpro", "ss") if m.get(k)) or "none"
+        on_roster = (m.get("posmon") or m.get("etfpro") or m.get("retailpro")
+                     or m.get("finpro") or (m.get("ss") and trend == "BEARISH"))
+        tags = "/".join(k for k in ("posmon", "etfpro", "retailpro",
+                                    "finpro", "ss") if m.get(k)) or "none"
         if m.get("ps_rank") is not None:
             tags += f" ps#{m['ps_rank']}"
 

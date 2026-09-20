@@ -879,12 +879,53 @@ def _sg_for(tickers) -> dict:
     return out
 
 
-def _fmt_row(r, corr, vol=None, ivpct=None, sg=None) -> str:
+def _corridor_for(tickers) -> dict:
+    """{ticker: (bull_level, bear_level, age_days)} — the DAILY trend
+    corridor from the TradingView MFR export (tv_mfr_history). Desk decode
+    9/20: trend = close vs these lines, so the LEVEL is what belongs on an
+    action list ('BULLISH (breaks 349.62)'), not just the label. Freshness
+    gated ≤10d — a stale corridor level on an action list is worse than
+    none. Coverage = whatever TV exports have been ingested (~21 names);
+    the MFR API itself ships only the labels."""
+    if not tickers:
+        return {}
+    out = {}
+    try:
+        for r in _rows(
+                "SELECT DISTINCT ON (ticker) ticker, bull_level, bear_level, "
+                "       (CURRENT_DATE - bar_date) age FROM tv_mfr_history "
+                "WHERE ticker = ANY(%s) AND bar_date >= CURRENT_DATE - 10 "
+                "  AND (bull_level IS NOT NULL OR bear_level IS NOT NULL) "
+                "ORDER BY ticker, bar_date DESC", (list(tickers),)):
+            out[r["ticker"]] = (r["bull_level"], r["bear_level"], r["age"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("corridor lookup failed: %s", e)
+    return out
+
+
+def _corridor_tag(trend_dir, cor) -> str:
+    """' (breaks 349.62)' for the state's break level, aged when >1d."""
+    if not cor:
+        return ""
+    bull, bear, age = cor
+    if trend_dir == "BULLISH" and bull is not None:
+        s = f" (breaks {float(bull):g}"
+    elif trend_dir == "BEARISH" and bear is not None:
+        s = f" (reclaims {float(bear):g}"
+    elif bull is not None and bear is not None:      # NEUT: the corridor
+        s = f" (corridor {float(bear):g}-{float(bull):g}"
+    else:
+        return ""
+    return s + (f" ·{age}d)" if age and age > 1 else ")")
+
+
+def _fmt_row(r, corr, vol=None, ivpct=None, sg=None, cor=None) -> str:
     tier = _tier(r["hedgeye_bucket_0629"])
     rp = _rp_str(r)
     md = {"BULLISH": "BULL", "BEARISH": "BEAR", "NEUTRAL": "NEUT"}.get(r.get("momentum_dir"), "?")
     src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
-    trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "")
+    trend = f"{r['trend_dir'] or '-'}" + (f"·{src}" if src else "") \
+        + _corridor_tag(r.get("trend_dir"), (cor or {}).get(r["ticker"]))
     cs, cu = corr.get(r["ticker"], (None, None))
     div = f" ⚡DIV({r['divergence']})" if r.get("divergence") else ""
     book = " 📗own" if r["held"] else ""
@@ -1132,6 +1173,11 @@ def run_screen_q(q: dict) -> str:
             if _sided_keiths(src, q["direction"]):
                 from tools.source_registry import sigstr_side
                 members = sigstr_side(q["direction"])
+            elif src == "retailpro" and q["direction"]:
+                # Retail Sector Pro is sided the same way (9/20): a
+                # direction query reads the side straight off the roster.
+                from tools.source_registry import retailpro_side
+                members = retailpro_side(q["direction"])
             else:
                 members = _reg_members(src)
             slice_ = _fetch_source_slice(members, q["sector"])
@@ -1315,7 +1361,8 @@ def run_screen_q(q: dict) -> str:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
         lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
         sg = _sg_for([r["ticker"] for r in result])
-        lines += [_fmt_row(r, corr, vol, ivpct, sg) for r in result]
+        cor = _corridor_for([r["ticker"] for r in result])
+        lines += [_fmt_row(r, corr, vol, ivpct, sg, cor) for r in result]
         _stale = [r for r in result if r.get("_snap_stale")]
         if _stale:
             names = " ".join(sorted(r["ticker"] for r in _stale))

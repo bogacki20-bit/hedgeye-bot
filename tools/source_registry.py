@@ -100,6 +100,44 @@ def _finsigstr() -> set:
     """Financials Signal Strength — both sides of Keith's list, for listings."""
     return sigstr_side(None)
 
+
+def retailpro_side(direction=None) -> set:
+    """Retail Sector Pro roster (operator 9/20) — from the inline monitor-
+    status tags the retail team ships in every email since ~9/8
+    ('DECK (Active Short)'). Current membership = each ticker's LATEST
+    sided print inside 21 days (daily mentions accumulate; a name whose
+    last status was short is short until re-tagged or aged out)."""
+    rows = []
+    try:
+        import db_pg
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (ticker) ticker, side FROM hedgeye_retail
+                WHERE side IS NOT NULL
+                  AND signal_date >= CURRENT_DATE - 21
+                ORDER BY ticker, signal_date DESC, parsed_at DESC""")
+            rows = cur.fetchall()
+    except Exception as e:
+        log.warning("retailpro lookup failed: %s", e)
+    d = (direction or "").lower()
+    if d.startswith("short"):
+        return {t for t, s in rows if s == "short"}
+    if d.startswith("long"):
+        return {t for t, s in rows if s == "long"}
+    return {t for t, _s in rows}
+
+
+def _retailpro() -> set:
+    return retailpro_side(None)
+
+
+def _capalloc() -> set:
+    """Capital Allocation (Model Portfolio Changes) — names acted on in the
+    trailing 14 days. Actions are bought/sold with bps; membership is
+    'recently touched by the model portfolios' (operator 9/20)."""
+    return _members("SELECT DISTINCT ticker FROM hedgeye_portfolio_actions "
+                    "WHERE action_date >= CURRENT_DATE - 14")
+
 def _posmon() -> set:
     return _members("SELECT ticker FROM ticker_tags WHERE hedgeye_bucket_0629 IS NOT NULL")
 
@@ -174,8 +212,20 @@ REGISTRY = [
     # sorts by descending length, so these match first.
     Source("finsigstr", "Financials Signal Strength", _finsigstr,
            ["financials signal strength", "financial signal strength",
-            "financials sigstr", "fin signal strength", "financials ss"],
+            "financials sigstr", "fin signal strength", "financials ss",
+            # operator 9/20: the Financials Sector Pro roster IS Keith's
+            # weekly sided list — these aliases make 'financials pro' land
+            "financials pro", "financial pro", "fin pro", "finpro"],
            "SELECT max(signal_date) FROM hedgeye_keiths_signals"),
+    # Retail Sector Pro (operator 9/20): sided+tiered roster accumulated
+    # from the inline status tags in the daily retail emails.
+    Source("retailpro", "Retail Sector Pro", _retailpro,
+           ["retail pro", "retailpro", "retail sector pro", "mcgough"],
+           "SELECT max(signal_date) FROM hedgeye_retail WHERE side IS NOT NULL"),
+    Source("capalloc", "Capital Allocation", _capalloc,
+           ["capital allocation", "cap alloc", "capalloc", "model portfolio",
+            "model portfolios"],
+           "SELECT max(action_date) FROM hedgeye_portfolio_actions"),
     Source("posmon",  "Position Monitor",    _posmon,
            ["position monitor", "posmon", "pm", "buckets"],
            None),   # static 06-29 seed, no live feed
