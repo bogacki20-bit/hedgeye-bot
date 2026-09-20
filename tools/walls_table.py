@@ -70,6 +70,28 @@ def _snap(tickers: list[str], day: dt.date) -> dict:
     return {row[0]: row for row in r}
 
 
+def gate_walls(cw, hw, pw, spot):
+    """(cw, hw, pw, note) — sanity-gate a dealer-wall triple (9/20 audit).
+
+    - INVERTED MAP: call wall below put wall is structurally impossible
+      (LFST cw 10 / pw 12). The whole map is untrusted -> all None.
+    - HEDGE-WALL NOISE: the Vol Trigger is a dense-chain construct; on
+      sparse single-name chains it parks 39-93% from spot (TXG hw 5 vs
+      $76) or swings >2x in a week (DELL 40->400->500->40). Gate hw when
+      it sits >35% from spot; calls/puts stay (they were stable on the
+      same names). Index/sector ETF walls never tripped either test.
+    """
+    cw = float(cw) if cw is not None else None
+    hw = float(hw) if hw is not None else None
+    pw = float(pw) if pw is not None else None
+    spot = float(spot) if spot else None
+    if cw is not None and pw is not None and cw < pw:
+        return None, None, None, "walls-inverted"
+    if hw is not None and spot and abs(hw - spot) / spot > 0.35:
+        return cw, None, pw, "hw-gated"
+    return cw, hw, pw, None
+
+
 def _f(v, fmt="{:g}"):
     return fmt.format(float(v)) if v is not None else "·"
 
@@ -84,9 +106,14 @@ def _delta(cur, prev):
 def _line(row) -> str:
     (t, sd, px, cw, hw, pw, ivr, dpi, pc, oim, earn,
      pcw, phw, ppw) = row
-    bits = [f"{t:<6} px {_f(px)}",
-            f"⋄{_f(cw)}{_delta(cw, pcw)}/{_f(hw)}{_delta(hw, phw)}"
-            f"/{_f(pw)}{_delta(pw, ppw)}"]
+    cw, hw, pw, note = gate_walls(cw, hw, pw, px)
+    if note == "walls-inverted":
+        wall_s = "⋄BROKEN-MAP (cw<pw — walls excluded)"
+    else:
+        wall_s = (f"⋄{_f(cw)}{_delta(cw, pcw)}/{_f(hw)}{_delta(hw, phw)}"
+                  f"/{_f(pw)}{_delta(pw, ppw)}"
+                  + (" (hw gated: >35% from spot)" if note == "hw-gated" else ""))
+    bits = [f"{t:<6} px {_f(px)}", wall_s]
     if ivr is not None:
         bits.append(f"ivr {float(ivr) * 100:.0f}%")   # stored as 0-1 fraction
     if dpi is not None:
@@ -142,13 +169,16 @@ def build_walls_week(start: dt.date, end: dt.date) -> str:
         for d in days:
             r = by_day[d].get(t)
             fresh = r is not None and r[1] >= d - dt.timedelta(days=3)
-            for i, idx in enumerate((3, 4, 5, 6)):
-                if not fresh or r[idx] is None:
+            gcw, ghw, gpw, _n = (gate_walls(r[3], r[4], r[5], r[2])
+                                 if fresh else (None, None, None, None))
+            for i, v in enumerate((gcw, ghw, gpw,
+                                   r[6] if fresh else None)):
+                if v is None:
                     paths[i].append("·")
-                elif idx == 6:   # iv_rank stored as 0-1 fraction
-                    paths[i].append(f"{float(r[idx]) * 100:.0f}")
+                elif i == 3:   # iv_rank stored as 0-1 fraction
+                    paths[i].append(f"{float(v) * 100:.0f}")
                 else:
-                    paths[i].append(_f(r[idx]))
+                    paths[i].append(_f(v))
         if all(all(x == "·" for x in p) for p in paths):
             continue
         cw, hw, pw, ivr = ["→".join(p) for p in paths]

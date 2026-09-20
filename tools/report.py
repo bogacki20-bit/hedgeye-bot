@@ -897,6 +897,11 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
             lines.append(f"QUAD: monthly={mq or '?'} quarterly={qq or '?'} "
                          f"(last confirm {conf_d if conf_d else 'NONE'})"
                          + realized_quad_suffix(cur, qq))
+            # mid-month quad changes are invisible to calendar staleness
+            # (the 9/18 Quad 1->2 miss) — flag an aging confirm loudly
+            if conf_d and (today - conf_d).days > 7:
+                lines.append(f"  ⚠ confirm {(today - conf_d).days}d old — "
+                             f"re-verify vs the latest Macro Week Summary")
         except Exception as e:
             lines.append(f"QUAD: unavailable ({e})")
         try:

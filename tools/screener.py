@@ -854,17 +854,22 @@ def _sg_for(tickers) -> dict:
         def g(v):
             v = float(v)
             return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:g}"
+        from tools.walls_table import gate_walls
         for r in _rows(  # _rows returns DICTS (the 9/19 'hedge_wall' float bug)
                 "SELECT DISTINCT ON (ticker) ticker, call_wall, put_wall, "
-                "       hedge_wall, iv_rank FROM spotgamma_snapshots "
+                "       hedge_wall, iv_rank, price FROM spotgamma_snapshots "
                 "WHERE ticker = ANY(%s) AND snapshot_date >= CURRENT_DATE - 3 "
                 "ORDER BY ticker, snapshot_date DESC", (list(tickers),)):
             try:
-                cw, pw, hw, ivr = (r["call_wall"], r["put_wall"],
-                                   r["hedge_wall"], r["iv_rank"])
+                cw, hw, pw, note = gate_walls(r["call_wall"], r["hedge_wall"],
+                                              r["put_wall"], r["price"])
+                ivr = r["iv_rank"]
+                if note == "walls-inverted":
+                    out[r["ticker"]] = " ⋄broken-map"
+                    continue
                 if cw is None or pw is None:
                     continue
-                hw_s = f"/{g(hw)}" if hw is not None else ""
+                hw_s = f"/{g(hw)}" if hw is not None else "/hw-gated"
                 ivr_s = f" ivr={float(ivr)*100:.0f}%" if ivr is not None else ""
                 out[r["ticker"]] = f" ⋄{g(cw)}{hw_s}/{g(pw)}{ivr_s}"
             except (TypeError, ValueError, KeyError):

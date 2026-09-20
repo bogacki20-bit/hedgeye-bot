@@ -53,9 +53,18 @@ SRC_TAG = {"mfr-published": "mfr", "derived-mfr": "drv", "derived-hdg": "hdg",
 
 def resolve_rp(published=None, derived=None, derived_src=None,
                shadow=None, wrapper=None) -> tuple:
-    """Pure. (rp, rp_source) by the five-tier order. derived_src names which
-    band produced `derived` ('derived-mfr' or 'derived-hdg'); it defaults to
-    'derived-mfr'."""
+    """Pure. (rp, rp_source) by the tier order. derived_src names which
+    band produced `derived` ('derived-mfr' or 'derived-hdg'); it defaults
+    to 'derived-mfr'.
+
+    Tier 0 (2026-09-20, the src=mfr-on-all-69 defect): a value derived
+    from a FRESH HEDGEYE BAND outranks MFR-published. The stack is
+    specified Hedgeye-first — v_screener served hdg bands correctly, but
+    this resolver let MFR's own positionOnRange beat them, so the ~36
+    Hedgeye-covered names never took precedence (XLV printed 0.64/mfr
+    where the 9/18 Hedgeye band 163-173 says 0.60/hdg)."""
+    if derived is not None and derived_src == "derived-hdg":
+        return float(derived), "derived-hdg"
     if published is not None:
         return float(published), "mfr-published"
     if derived is not None:

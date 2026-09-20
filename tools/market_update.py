@@ -160,14 +160,19 @@ def _sg_snaps(tickers: list[str]) -> dict:
     so the LLM gets the full picture per liquid-options asset."""
     if not tickers:
         return {}
+    from tools.walls_table import gate_walls
     rows = _rows(
         "SELECT DISTINCT ON (ticker) ticker, call_wall, put_wall, hedge_wall, "
-        "       put_call_oi_ratio, iv_rank, dpi "
+        "       put_call_oi_ratio, iv_rank, dpi, price "
         "FROM spotgamma_snapshots WHERE ticker = ANY(%s) "
         "  AND snapshot_date >= CURRENT_DATE - 3 "
         "ORDER BY ticker, snapshot_date DESC", (tickers,))
-    return {t: {"cw": cw, "pw": pw, "hw": hw, "pcr": pcr, "ivr": ivr, "dpi": dpi}
-            for t, cw, pw, hw, pcr, ivr, dpi in rows}
+    out = {}
+    for t, cw, pw, hw, pcr, ivr, dpi, px in rows:
+        cw, hw, pw, note = gate_walls(cw, hw, pw, px)   # 9/20 sanity gate
+        out[t] = {"cw": cw, "pw": pw, "hw": hw, "pcr": pcr, "ivr": ivr,
+                  "dpi": dpi, "note": note}
+    return out
 
 
 def _tilt_lines() -> list[str]:
@@ -182,16 +187,24 @@ def _tilt_lines() -> list[str]:
     parts = []
     for sym, d, gt in sorted(rows):
         gt = float(gt)
-        tag = "FADE" if gt >= 1.1 else ("fade-lean" if gt >= 0.95
-              else ("follow" if gt >= 0.6 else "FOLLOW (short-gamma)"))
+        # three-state rule (9/20): the week of 9/14 printed 1.04->0.97->
+        # 0.90->0.83->1.04 — a hard 1.00 split flips regime four times on
+        # a 0.21 range. Inside the band the dial isn't distinguishing.
+        tag = ("PINNED/FADE" if gt > 1.10
+               else "FOLLOW" if gt < 0.90 else "MIXED")
         parts.append(f"{sym} {gt:.2f} {tag}")
     return [f"⚖ GAMMA REGIME ({rows[0][1]}): " + " · ".join(parts),
-            "  tilt>1 dealers long gamma = pin/fade · <1 short gamma = follow"]
+            "  >1.10 pinned/fade · <0.90 follow · 0.90-1.10 MIXED "
+            "(unresolved — size between)"]
 
 
 def _sg_suffix(d: dict) -> str:
     sg = d.get("sg")
-    if not sg or sg.get("cw") is None or sg.get("pw") is None:
+    if not sg:
+        return ""
+    if sg.get("note") == "walls-inverted":
+        return "  ⋄broken-map"
+    if sg.get("cw") is None or sg.get("pw") is None:
         return ""
     def g(v):
         v = float(v)
@@ -291,10 +304,15 @@ def build_market_update(full: bool = False) -> str:
         # -0.21% on tilt>=1 days — zone entries need the regime filter.
         m = re.search(r"SPX (\d+\.\d+)", tilt[0])
         if m:
-            lines.append("  → zone entries "
-                         + ("FAVORED today (SPX short-gamma: backtest +0.86% fwd5)"
-                            if float(m.group(1)) < 1 else
-                            "half-size today (SPX pinned: backtest -0.21% fwd5)"))
+            gt = float(m.group(1))
+            if gt < 0.90:
+                hint = "FAVORED today (SPX follow regime: backtest +0.86% fwd5)"
+            elif gt > 1.10:
+                hint = "half-size today (SPX pinned: backtest -0.21% fwd5)"
+            else:
+                hint = (f"MIXED regime (tilt {gt:.2f} inside 0.90-1.10) — "
+                        f"size between, let the walls decide")
+            lines.append("  → zone entries " + hint)
 
     lines.append("")
     lines.append("INDEXES")

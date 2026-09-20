@@ -178,19 +178,24 @@ def build_current_book() -> str:
 def build_buxx_ledger() -> str:
     today = dt.date.today()
     start = dt.date(2026, 9, 1)
+    # Individual account ONLY (9/20): the program is the margined savings/
+    # borrowing base in X96383748 — the Roth's BUXX cannot be margined or
+    # pledged, so it counts toward neither pace nor the program pile.
     buys = _rows("""
         SELECT run_date, quantity, price, amount FROM book_activity
         WHERE underlying='BUXX' AND action_type IN ('buy','reinvest')
+          AND account_number = 'X96383748'
         ORDER BY run_date""")
     divs = _rows("""
         SELECT run_date, amount FROM book_activity
         WHERE underlying='BUXX' AND action_type='income'
+          AND account_number = 'X96383748'
         ORDER BY run_date""")
     held = _rows("""
         SELECT COALESCE(sum(quantity),0), COALESCE(sum(market_value),0)
         FROM book_positions
         WHERE snapshot_date=(SELECT max(snapshot_date) FROM book_positions)
-          AND underlying='BUXX'""")
+          AND underlying='BUXX' AND account_number = 'X96383748'""")
     qty, mv = (float(held[0][0]), float(held[0][1])) if held else (0.0, 0.0)
     since = [b for b in buys if b[0] >= start]
     bought = sum(abs(float(b[3] or 0)) for b in since)
@@ -198,7 +203,9 @@ def build_buxx_ledger() -> str:
     pace = months * 3000.0
     out = [f"# BUXX ACCUMULATION LEDGER — generated {today}",
            "",
-           "Program: **$36,000/year (~$3,000/month)**, start 2026-09-01.",
+           "Program: **$36,000/year (~$3,000/month)**, start 2026-09-01,",
+           "**Individual account (X96383748) only** — the margined",
+           "borrowing base. Roth BUXX is excluded (cannot be pledged).",
            "Buy LOW in the band, preferably 0-7 days after the monthly",
            "distribution (~27th-30th). Savings-flow: EXEMPT from the trigger",
            "ladder, regime filter, and exposure math.",

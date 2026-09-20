@@ -95,8 +95,12 @@ def build_note(full: bool = False):
     tilt_rows = _rows("SELECT DISTINCT ON (sym) sym, trade_date, gamma_tilt "
                       "FROM sg_tilt ORDER BY sym, trade_date DESC")
     spx_tilt = next((float(g) for s, d, g in tilt_rows if s == "SPX"), None)
-    regime = ("fade (pinned)" if spx_tilt and spx_tilt >= 1 else
-              "follow (short-gamma)" if spx_tilt else "?")
+    # three-state rule (9/20): hard 1.00 split flipped regime 4x in the
+    # 9/14 week on a 0.21 tilt range — inside 0.90-1.10 the dial is MIXED.
+    regime = ("?" if spx_tilt is None else
+              "fade (pinned)" if spx_tilt > 1.10 else
+              "follow (short-gamma)" if spx_tilt < 0.90 else
+              "MIXED (0.90-1.10 — unresolved, size between)")
 
     # ── attribution vs prior snapshot ──
     attr: dict = {}
@@ -246,9 +250,12 @@ def build_note(full: bool = False):
     #    distribution dip; watcher nudges the window — this line keeps the
     #    program visible on every card) ──
     try:
+        # Individual account only (9/20): the program is the margined
+        # borrowing base in X96383748; the Roth's BUXX doesn't count.
         prog = _rows("""
             SELECT COALESCE(sum(abs(amount)),0) FROM actions_log
             WHERE normalized_symbol='BUXX' AND run_date >= '2026-09-01'
+              AND account_number = 'X96383748'
               AND action ILIKE 'YOU BOUGHT%%'""")
         bought = float(prog[0][0])
         months = max((today.year - 2026) * 12 + today.month - 9 + 1, 1)

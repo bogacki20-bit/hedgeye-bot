@@ -661,6 +661,17 @@ def _header(asof=None) -> tuple[list, str | None, bool]:
         st = quad_staleness(conf, today)
         lines.append(f"QUAD: monthly={_mq or '?'} quarterly={qq or '?'} "
                      f"(last confirm {st['confirmed_on'] or 'NONE'})")
+        # Mid-month changes are invisible to calendar staleness (the 9/18
+        # Quad 1->2 miss): an old-but-same-month confirm still deserves a
+        # loud header line, because QUAD vs TAPE scores against this value.
+        try:
+            _age = (today - date.fromisoformat(st["confirmed_on"])).days
+            if _age > 7 and not (st["monthly_stale"] or st["quarterly_stale"]):
+                lines.append(f"  ⚠ confirm is {_age}d old — Hedgeye can change "
+                             f"the Quad mid-month; re-verify vs the latest "
+                             f"Macro Week Summary before trusting QUAD vs TAPE.")
+        except Exception:
+            pass
         mq, stale = _mq, st["monthly_stale"]
         if stale or st["quarterly_stale"]:
             # Carried forward UNCHANGED and flagged. Not re-derived, not

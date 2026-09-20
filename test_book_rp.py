@@ -38,8 +38,13 @@ def _row(t, rp=None, side="long", acct="Individ", dark=False, **kw):
 # ─────────────────── D3: the resolution order, four tiers ───────────────────
 
 def test_resolution_order_never_silently_falls_through():
+    # 2026-09-20 (the src=mfr-on-all-69 defect): a FRESH HEDGEYE BAND is
+    # the senior range source by spec — it outranks MFR-published. MFR
+    # published still beats an MFR-derived value.
     assert resolve_rp(0.89, 1.29, "derived-hdg", 0.5, 0.4) == \
-        (0.89, "mfr-published"), "published wins over everything"
+        (1.29, "derived-hdg"), "fresh hedgeye band outranks published"
+    assert resolve_rp(0.89, 1.29, "derived-mfr", 0.5, 0.4) == \
+        (0.89, "mfr-published"), "published beats mfr-derived"
     assert resolve_rp(None, 1.29, "derived-hdg", 0.5, 0.4) == \
         (1.29, "derived-hdg")
     assert resolve_rp(None, 0.72, None, 0.5, 0.4) == (0.72, "derived-mfr")
