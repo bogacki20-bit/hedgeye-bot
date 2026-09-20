@@ -426,13 +426,13 @@ def build_sector_detail(etf: str) -> str:
     # SECTOR PRO overlay (operator 9/20): the sector-analyst rosters beyond
     # the Monday Position Monitor — Retail Pro sided tags on XLY, Keith's
     # Financials list on XLF. Names already shown above are skipped.
-    _PRO = {"XLY": ("Retail Pro", "retailpro"),
-            "XLF": ("Financials Pro (Keith's list)", "finpro")}
+    _PRO = {"XLY": ("Retail Pro monitor", "retailpro"),
+            "XLF": ("Financials Pro monitor", "finmon")}
     if etf in _PRO:
         label, kind = _PRO[etf]
         try:
-            from tools.source_registry import retailpro_side, sigstr_side
-            fn = retailpro_side if kind == "retailpro" else sigstr_side
+            from tools.source_registry import finmon_side, retailpro_side
+            fn = retailpro_side if kind == "retailpro" else finmon_side
             shown = set(names)
             extra = []
             for side in ("long", "short"):

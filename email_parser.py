@@ -835,6 +835,13 @@ def _process_new_email(parsed: dict) -> None:
                 log.info(
                     f"  parser_financials: rows={fin_result.get('rows_parsed')}"
                 )
+            elif re.search(r"Position\s+Monitors\s+Update",
+                           item.get("subject") or "", re.I):
+                # the Sunday all-sector CHANGES email — tier moves per
+                # sector feed the carry-forward sector monitors (9/20)
+                import parser_pm_changes
+                pmc = parser_pm_changes.process_email(item["id"])
+                log.info(f"  parser_pm_changes: rows={pmc.get('rows')}")
             elif re.search(r"Position\s+Monitors?\s*\||Founder'?s?\s+Choice\s*:",
                            item.get("subject") or "", re.I):
                 import parser_position_monitors
@@ -871,6 +878,13 @@ def _process_new_email(parsed: dict) -> None:
                     f"  parser_research_notes: "
                     f"product={rn_result.get('product')}"
                 )
+                # Financials Pro's own Weekly Position Monitor ALSO carries
+                # tier moves — feed the sector-monitor state too (9/20)
+                if re.match(r"\s*Weekly Position Monitor\s*\|",
+                            item.get("subject") or "", re.I):
+                    import parser_pm_changes
+                    pmc = parser_pm_changes.process_email(item["id"])
+                    log.info(f"  parser_pm_changes(fin): rows={pmc.get('rows')}")
             elif source == "hedgai_signals":
                 import parser_hedgai
                 hg_result = parser_hedgai.process_one(

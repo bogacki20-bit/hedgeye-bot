@@ -1173,11 +1173,12 @@ def run_screen_q(q: dict) -> str:
             if _sided_keiths(src, q["direction"]):
                 from tools.source_registry import sigstr_side
                 members = sigstr_side(q["direction"])
-            elif src == "retailpro" and q["direction"]:
-                # Retail Sector Pro is sided the same way (9/20): a
-                # direction query reads the side straight off the roster.
-                from tools.source_registry import retailpro_side
-                members = retailpro_side(q["direction"])
+            elif src in ("retailpro", "finmon") and q["direction"]:
+                # Sector-pro monitors are sided (9/20): a direction query
+                # reads the side straight off the roster.
+                from tools.source_registry import finmon_side, retailpro_side
+                fn = retailpro_side if src == "retailpro" else finmon_side
+                members = fn(q["direction"])
             else:
                 members = _reg_members(src)
             slice_ = _fetch_source_slice(members, q["sector"])

@@ -128,10 +128,11 @@ def _roster(tickers: list[str]) -> dict:
     # sector-pro rosters (operator 9/20): Retail Pro sided tags + Keith's
     # financials list — both explicitly sided, both count as short rosters
     try:
-        from tools.source_registry import retailpro_side, sigstr_side
+        from tools.source_registry import (finmon_side, retailpro_side,
+                                           sigstr_side)
         for t in retailpro_side("short") & set(tickers):
             out[t]["retailpro"] = True
-        for t in sigstr_side("short") & set(tickers):
+        for t in (finmon_side("short") | sigstr_side("short")) & set(tickers):
             out[t]["finpro"] = True
     except Exception as e:  # noqa: BLE001
         log.warning("sector-pro roster lookup failed: %s", e)

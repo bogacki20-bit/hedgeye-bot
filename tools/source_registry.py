@@ -101,12 +101,29 @@ def _finsigstr() -> set:
     return sigstr_side(None)
 
 
+def sector_monitor_side(sector: str, direction=None) -> set:
+    """Carry-forward sector Position Monitor (parser_pm_changes events —
+    the Sunday change emails replayed). The three-monitor model (operator
+    9/20): the 442-name Monday PDF is posmon; Retail Pro and Financials
+    Pro each publish their OWN monitor, reconstructed here."""
+    try:
+        from parser_pm_changes import current_monitor
+        rows = current_monitor(sector)
+    except Exception as e:
+        log.warning("sector monitor %s lookup failed: %s", sector, e)
+        return set()
+    d = (direction or "").lower()
+    if d.startswith("short"):
+        return {t for t, _tier, s, _d in rows if s == "short"}
+    if d.startswith("long"):
+        return {t for t, _tier, s, _d in rows if s == "long"}
+    return {t for t, _tier, _s, _d in rows}
+
+
 def retailpro_side(direction=None) -> set:
-    """Retail Sector Pro roster (operator 9/20) — from the inline monitor-
-    status tags the retail team ships in every email since ~9/8
-    ('DECK (Active Short)'). Current membership = each ticker's LATEST
-    sided print inside 21 days (daily mentions accumulate; a name whose
-    last status was short is short until re-tagged or aged out)."""
+    """Retail Sector Pro roster: the carry-forward RETAIL MONITOR union the
+    inline status tags from the daily emails ('DECK (Active Short)') —
+    the monitor is the spine, the tags keep it fresh mid-week."""
     rows = []
     try:
         import db_pg
@@ -121,10 +138,18 @@ def retailpro_side(direction=None) -> set:
         log.warning("retailpro lookup failed: %s", e)
     d = (direction or "").lower()
     if d.startswith("short"):
-        return {t for t, s in rows if s == "short"}
-    if d.startswith("long"):
-        return {t for t, s in rows if s == "long"}
-    return {t for t, _s in rows}
+        tags = {t for t, s in rows if s == "short"}
+    elif d.startswith("long"):
+        tags = {t for t, s in rows if s == "long"}
+    else:
+        tags = {t for t, _s in rows}
+    return tags | sector_monitor_side("Retail", direction)
+
+
+def finmon_side(direction=None) -> set:
+    """Financials Pro's OWN Position Monitor (Steiner's Sunday email),
+    carry-forward. Distinct from Keith's Signal Longs/Shorts (finsigstr)."""
+    return sector_monitor_side("Financials", direction)
 
 
 def _retailpro() -> set:
@@ -212,11 +237,16 @@ REGISTRY = [
     # sorts by descending length, so these match first.
     Source("finsigstr", "Financials Signal Strength", _finsigstr,
            ["financials signal strength", "financial signal strength",
-            "financials sigstr", "fin signal strength", "financials ss",
-            # operator 9/20: the Financials Sector Pro roster IS Keith's
-            # weekly sided list — these aliases make 'financials pro' land
-            "financials pro", "financial pro", "fin pro", "finpro"],
+            "financials sigstr", "fin signal strength", "financials ss"],
            "SELECT max(signal_date) FROM hedgeye_keiths_signals"),
+    # Financials Pro's OWN Position Monitor (operator 9/20: three-monitor
+    # model — 442-name PDF, Retail Pro's, and this one). Distinct product
+    # from Keith's signals above.
+    Source("finmon", "Financials Pro Monitor", lambda: finmon_side(None),
+           ["financials pro", "financial pro", "fin pro", "finpro",
+            "financials monitor", "steiner"],
+           "SELECT max(signal_date) FROM hedgeye_sector_monitor_events "
+           "WHERE sector ILIKE 'Financials'"),
     # Retail Sector Pro (operator 9/20): sided+tiered roster accumulated
     # from the inline status tags in the daily retail emails.
     Source("retailpro", "Retail Sector Pro", _retailpro,
