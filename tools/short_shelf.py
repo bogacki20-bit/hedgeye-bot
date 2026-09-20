@@ -143,14 +143,14 @@ def evaluate() -> dict:
         return {"fires": [], "watching": [], "expired": []}
     tickers = sorted({r[1] for r in live})
     ros = _roster(tickers)
-    scr = {t: (rp, tr, ts) for t, rp, tr, ts in _rows(
-        "SELECT ticker, range_pos, trend_dir, trend_source FROM v_screener "
-        "WHERE ticker=ANY(%s)", (tickers,))}
+    scr = {t: (rp, tr, ts, px) for t, rp, tr, ts, px in _rows(
+        "SELECT ticker, range_pos, trend_dir, trend_source, price "
+        "FROM v_screener WHERE ticker=ANY(%s)", (tickers,))}
 
     fires, watching, expired = [], [], []
     for rid, tkr, cov_d, cov_px, rpl, partial in live:
         m = ros.get(tkr, {})
-        rp, trend, _src = scr.get(tkr, (None, None, None))
+        rp, trend, _src, cur_px = scr.get(tkr, (None, None, None, None))
         rp = float(rp) if rp is not None else None
         on_roster = (m.get("posmon") or m.get("etfpro")
                      or (m.get("ss") and trend == "BEARISH"))
@@ -171,13 +171,19 @@ def evaluate() -> dict:
             expired.append(f"{tkr} — left every short roster (covered {cov_d})")
             continue
 
+        # the round trip, visible: prior cover price vs where it trades now
         px_s = f"covered {cov_d} @ {float(cov_px):.2f}" if cov_px else f"covered {cov_d}"
+        if cov_px and cur_px:
+            chg = (float(cur_px) - float(cov_px)) / float(cov_px) * 100
+            px_s += f" → now {float(cur_px):.2f} ({chg:+.1f}%)"
         pl_s = f" (banked {float(rpl):+.0f})" if rpl is not None else ""
+        verb = "ADD BACK" if partial else "RE-ENTRY"
         line = (f"{tkr:<5} rp={rp if rp is None else format(rp, '.2f')} "
-                f"{trend or '?'} [{tags}]{' partial' if partial else ''} · "
+                f"{trend or '?'} [{tags}]"
+                f"{' — still holds a piece' if partial else ''} · "
                 f"{px_s}{pl_s}")
         if rp is not None and rp >= REENTRY_RP and trend == "BEARISH":
-            fires.append((tkr, cov_d, line))
+            fires.append((tkr, cov_d, f"{verb}: {line}"))
         else:
             watching.append(line)
     # one fire per ticker: the latest cover, tagged with the rental count
@@ -188,8 +194,7 @@ def evaluate() -> dict:
             by_tkr[tkr] = (cov_d, line, 1 if cur is None else cur[2] + 1)
         else:
             by_tkr[tkr] = (cur[0], cur[1], cur[2] + 1)
-    fired = [f"RE-ENTRY: {line}"
-             + (f" · {n} prior rental(s) on shelf" if n > 1 else "")
+    fired = [line + (f" · {n} prior rental(s) on shelf" if n > 1 else "")
              for _, line, n in by_tkr.values()]
     return {"fires": fired, "watching": watching, "expired": expired}
 

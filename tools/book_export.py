@@ -110,6 +110,11 @@ def build_current_book() -> str:
     snap = pos[0][13]
     today = dt.date.today()
     span = _rows("SELECT min(run_date) FROM book_activity")[0][0]
+    try:
+        from tools.lot_ledger import lots_all
+        _lots = lots_all()
+    except Exception:  # noqa: BLE001
+        _lots = {}
 
     long_mv = short_mv = 0.0
     by_acct: dict[str, list[str]] = {a: [] for a in ACCOUNTS}
@@ -122,7 +127,16 @@ def build_current_book() -> str:
             long_mv += mv if mv > 0 else 0
             short_mv += mv if mv < 0 else 0
         ed, epx, pre = _entry(acct, und, qty, is_opt, oexp, otyp, ostrk)
-        if ed:
+        # equities: the fill LEDGER is authoritative (9/20) — oldest OPEN
+        # lot runs the short clock, and a recent add suppresses it
+        LL = None if is_opt else _lots.get(und)
+        if LL and LL.get("oldest_open"):
+            ed = LL["oldest_open"]
+            entered, held = str(ed), f"{(today - ed).days}d"
+            la = LL.get("last_add")
+            if la and (today - la).days <= 5:
+                held += f" ⏱added {(today - la).days}d ago (clock off)"
+        elif ed:
             entered, held = str(ed), f"{(today - ed).days}d"
         elif pre and span:
             entered, held = f"pre-{span}", f">{(today - span).days}d"

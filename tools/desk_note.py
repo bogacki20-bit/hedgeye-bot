@@ -166,11 +166,16 @@ def build_note(full: bool = False):
         "SELECT DISTINCT ON (ticker) ticker, call_wall, put_wall FROM "
         "spotgamma_snapshots WHERE ticker = ANY(%s) AND snapshot_date >= "
         "CURRENT_DATE - 3 ORDER BY ticker, snapshot_date DESC", (held,))}
-    entries = {r[0]: r[1] for r in _rows(
-        "SELECT normalized_symbol, min(run_date) FROM actions_log "
-        "WHERE normalized_symbol = ANY(%s) AND run_date >= CURRENT_DATE - 120 "
-        "AND action ILIKE 'YOU BOUGHT%%' OR action ILIKE '%%SHORT SALE%%' "
-        "GROUP BY normalized_symbol", (held,))}
+    # oldest OPEN LOT per name from the fill ledger (9/20: blended entry
+    # dates broke the stale-short clock — JETS read 53 sessions while
+    # being scaled into). Also carries last-add for clock suppression.
+    try:
+        from tools.lot_ledger import RECENT_ADD_SESSIONS, lots_all
+        _lots = lots_all()
+    except Exception:  # noqa: BLE001
+        _lots = {}
+    entries = {t: L["oldest_open"] for t, L in _lots.items()
+               if L.get("oldest_open")}
 
     cards, flags = [], []
     for s, q, mv, gl, is_opt, exp, sector, bucket, cb in sorted(
@@ -205,6 +210,15 @@ def build_note(full: bool = False):
                 f"gl={float(gl):+.1f}%" if gl is not None else
                 f"{s:<7}{side:<6}{_money(float(mv)):>9}  {tr[:4]}·rp{rp}{wall}")
         card += f"  in:{ent}" if ent else ""
+        # the stale-short clock, run right (9/20): oldest OPEN lot, and
+        # suppressed while the position is being scaled into
+        if side == "SHORT" and s in _lots:
+            LL = _lots[s]
+            la, oo = LL.get("last_add"), LL.get("oldest_open")
+            if la and (today - la).days <= RECENT_ADD_SESSIONS:
+                card += f"  ⏱scaling (added {(today - la).days}d ago — clock off)"
+            elif oo and (today - oo).days > 7:
+                flag.append(f"stale-clock({(today - oo).days}d)")
         card += ("  🚩" + ",".join(flag)) if flag else ""
         cards.append(card)
         if flag:

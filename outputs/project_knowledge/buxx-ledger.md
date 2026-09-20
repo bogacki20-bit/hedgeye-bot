@@ -1,11 +1,13 @@
 # BUXX ACCUMULATION LEDGER — generated 2026-09-20
 
-Program: **$36,000/year (~$3,000/month)**, start 2026-09-01.
+Program: **$36,000/year (~$3,000/month)**, start 2026-09-01,
+**Individual account (X96383748) only** — the margined
+borrowing base. Roth BUXX is excluded (cannot be pledged).
 Buy LOW in the band, preferably 0-7 days after the monthly
 distribution (~27th-30th). Savings-flow: EXEMPT from the trigger
 ladder, regime filter, and exposure math.
 
-**Held:** 671.393 sh · $13,576
+**Held:** 29.735 sh · $601
 **Bought since program start:** $0 vs $3,000 pace → $3,000 BEHIND
 
 ## Buys (program window)
@@ -16,11 +18,8 @@ ladder, regime filter, and exposure math.
 ## Distributions received
 | date | amount |
 |---|---|
-| 2026-05-29 | $12.08 |
-| 2026-05-29 | $46.14 |
 | 2026-06-01 | $3.88 |
 | 2026-06-01 | $3.88 |
-| 2026-06-30 | $50.20 |
 | 2026-07-01 | $2.30 |
 | 2026-07-01 | $2.30 |
 | 2026-08-03 | $1.88 |

@@ -61,4 +61,16 @@ since = (date.today() - timedelta(days=21)).isoformat()
 run("3/3 outcomes (realized round trips)",
     ["-m", "tools.compute_outcomes", "--since", since])
 
-print("\nDAILY UPLOAD COMPLETE — book, trades, and outcomes are current.")
+# fill-level lot ledger (9/20): rebuild + context backfill on every
+# ingest so the clock/shelf/current-book always run on today's fills
+print("\n=== 4/4 lot ledger rebuild ===")
+import db_pg  # noqa: E402
+db_pg._load_dotenv_fallback()
+from tools.lot_ledger import integrity_check, rebuild  # noqa: E402
+n = rebuild()
+mism = integrity_check()
+print(f"ledger: {n} fills · integrity {'clean' if not mism else f'{len(mism)} MISMATCH(ES)'}")
+for m in mism[:5]:
+    print("  ⚠", m)
+
+print("\nDAILY UPLOAD COMPLETE — book, trades, outcomes and lot ledger are current.")
