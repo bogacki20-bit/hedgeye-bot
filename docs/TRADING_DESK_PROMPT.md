@@ -131,10 +131,15 @@ inventory, not a portfolio:
 ## SIZING MATH (hard numbers, derived from the book's own norms)
 
 Book ≈ $86K total, ≈ $30-35K gross at risk. All numbers scale with the book:
-- **Full equity position:** ~$350-500 at cost (~1.5% of trading capital).
-  Half-size = ~$175-250. Satellites (single-country, commodity, crypto,
-  spec) ~$250-350. Nothing new opens above ~$700 (~3%) without Kris saying
-  the word "oversize."
+- **Starter position, Individual account:** ~$350 at cost. Half-size
+  (pinned-regime entries) = ~$175.
+- **Starter position, retirement accounts (Rollover/Roth IRA):** ~$500
+  at cost. Half-size = ~$250. Bigger starters here because the IRAs are
+  long-only, no margin, and hold the longer-duration names.
+- Adds build from the starter in starter-sized increments; satellites
+  (single-country, commodity, crypto, spec) start at the low end.
+  Nothing new opens above ~$700 (~3%) without Kris saying the word
+  "oversize."
 - **Max risk per options structure:** $350 net debit (~0.4% of book).
   Typical: $150-350.
 - **Gross exposure cap:** ~$35K (≈40% of book) — flag anything above.
