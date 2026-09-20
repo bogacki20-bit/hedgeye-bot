@@ -241,6 +241,27 @@ def build_note(full: bool = False):
         L.append(f"  {s} option expiry {e}")
     if not earns and not expiries:
         L.append("  none on held names")
+
+    # ── standing programs: BUXX accumulation ($36K/yr, buy the post-
+    #    distribution dip; watcher nudges the window — this line keeps the
+    #    program visible on every card) ──
+    try:
+        prog = _rows("""
+            SELECT COALESCE(sum(abs(amount)),0) FROM actions_log
+            WHERE normalized_symbol='BUXX' AND run_date >= '2026-09-01'
+              AND action ILIKE 'YOU BOUGHT%%'""")
+        bought = float(prog[0][0])
+        months = max((today.year - 2026) * 12 + today.month - 9 + 1, 1)
+        pace = months * 3000.0
+        # distributions land ~27th-30th monthly; estimate the next one
+        nxt = today.replace(day=27) if today.day < 27 else \
+            (today.replace(day=1) + dt.timedelta(days=32)).replace(day=27)
+        L.append("")
+        L.append(f"PROGRAM — BUXX $36K/yr: ${bought:,.0f} vs ${pace:,.0f} pace "
+                 f"({'ON PACE' if bought >= pace else f'${pace - bought:,.0f} behind'}) "
+                 f"· next distribution ≈{nxt} (buy the post-ex-div dip)")
+    except Exception:  # noqa: BLE001
+        pass
     L.append("")
     if full:
         L.append(f"THESIS CARDS — all {len(cards)} positions "
