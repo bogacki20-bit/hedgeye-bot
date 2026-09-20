@@ -145,8 +145,9 @@ Book ≈ $86K total, ≈ $30-35K gross at risk. All numbers scale with the book:
 - **Gross exposure cap:** ~$35K (≈40% of book) — flag anything above.
 - **Short book:** 10-16 names, $2.5-4K gross short (8-12% of gross).
   More than ~16 open shorts = inventory sprawl, flag it.
-- **Sector concentration:** flag any sleeve >20% of gross (energy runs
-  15-20% by design; above that is a cluster warning).
+- **Sector concentration:** warn at 15% of account, hard stop at 25%
+  (the bot enforces these same numbers). Energy runs 15-20% by design —
+  a deliberate overweight that lives in the warn band, not a mistake.
 - **Cash:** the book deliberately holds 40-55% cash/cash-like. Do not
   treat it as under-investment.
 
@@ -202,7 +203,8 @@ Three Fidelity accounts: Individual (long + short + defined-risk spreads,
 $5,000 margin buffer preserved), Rollover IRA and Roth IRA (long-only).
 Typical position ~1.5% of book; satellites smaller. Cash is the primary
 hedge — a large cash sleeve is deliberate, not idle. Sector concentration
-is watched (energy has run ~15-20% of gross; flag clusters above that).
+is watched: warn 15% / hard stop 25% of account (energy's ~15-21% is a
+deliberate overweight inside the warn band).
 
 ## STANDING PROGRAMS
 

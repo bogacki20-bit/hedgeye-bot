@@ -1,4 +1,4 @@
-"""Sector concentration cap — 8% warn / 12% hard reject, EQUITY only.
+"""Sector concentration cap — 15% warn / 25% hard reject, EQUITY only.
 
 WHY IT EXISTS. A book can pass every per-position check and still be one bet:
 USO, UGA, XOP, OIH and HAL are five names, each inside a 6% position cap, and
@@ -8,8 +8,10 @@ keyed on asset class.
 
 WHAT IT DOES
   * EQUITY positions are grouped by PM sector (ticker_tags.hedgeye_group, via
-    tools.asset_classifier) and capped at 8% warn / 12% hard reject of ACCOUNT
-    value.
+    tools.asset_classifier) and capped at 15% warn / 25% hard reject of ACCOUNT
+    value (operator, 9/20 — aligned with the desk framework's cluster rule;
+    the energy sleeve at ~21% is a deliberate overweight and lives in the
+    warn band, not blocked).
   * NON-EQUITY routes to the doctrine asset-class ceiling (6% equity / 12%
     currency / 10% fixed income / 4% commodity), applied on the SAME
     denominator so two caps can never disagree about the size of the account.
@@ -39,8 +41,8 @@ import logging
 
 log = logging.getLogger(__name__)
 
-WARN_PCT = 8.0
-REJECT_PCT = 12.0
+WARN_PCT = 15.0     # operator 9/20 (was 8): framework cluster-warn band
+REJECT_PCT = 25.0   # operator 9/20 (was 12): hard stop; energy ~21% passes as WARN
 
 # "account" (default) or "book". One line to flip enforcement scope; the other
 # scope is still computed and shown either way.

@@ -699,8 +699,10 @@ def _sector_cap_lines() -> list:
                           + format_verdict(v).split("  book-wide")[0]))
         order = {"reject": 0, "warn": 1}
         lines.sort(key=lambda x: (order.get(x[0], 2), x[1]))
-        return ["SECTOR CAP (per-account lens, Individual — unchanged "
-                "thresholds 8% warn / 12% reject):"] + [l for _, l in lines]
+        from tools.sector_cap import REJECT_PCT, WARN_PCT
+        return [f"SECTOR CAP (per-account lens, Individual — thresholds "
+                f"{WARN_PCT:.0f}% warn / {REJECT_PCT:.0f}% reject):"] \
+            + [l for _, l in lines]
     except Exception as e:
         log.warning("sector cap block failed: %s", e)
         return [f"SECTOR CAP: unavailable ({e})"]
