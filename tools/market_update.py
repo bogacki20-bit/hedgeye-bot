@@ -314,6 +314,15 @@ def build_market_update(full: bool = False) -> str:
                         f"size between, let the walls decide")
             lines.append("  → zone entries " + hint)
 
+    # energy complex — diesel/CL1/cracks (operator 9/20: the refiner
+    # sleeve's driver belongs on every market snapshot)
+    try:
+        from tools.energy_complex import build_block
+        lines.append("")
+        lines.extend(build_block())
+    except Exception as e:
+        lines.append(f"⛽ ENERGY COMPLEX unavailable: {e}")
+
     lines.append("")
     lines.append("INDEXES")
     for t in INDEXES:
