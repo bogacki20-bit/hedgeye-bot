@@ -84,11 +84,38 @@ def build_block() -> list[str]:
     stale = (dt.date.today() - d0).days
     tag = f" ⚠{stale}d old" if stale > 1 else ""
 
+    # ranges on the fronts (operator 9/21): Hedgeye WTIC risk range for
+    # CL1 (senior source, daily email), MFR HO_F band for diesel
+    def _rp(px, lo, hi):
+        return max(0.0, min(1.0, (px - lo) / (hi - lo))) if hi > lo else None
+
+    rr = {}
+    try:
+        r = _rows("SELECT buy_trade, sell_trade, trend FROM hedgeye_risk_ranges "
+                  "WHERE ticker='WTIC' AND signal_date >= CURRENT_DATE - 7 "
+                  "ORDER BY signal_date DESC LIMIT 1")
+        if r and v["cl1"] is not None:
+            lo, hi, tr = float(r[0][0]), float(r[0][1]), r[0][2]
+            rp = _rp(float(v["cl1"]), lo, hi)
+            rr["cl1"] = f"  {tr or ''} rp={rp:.2f} [{lo:g}-{hi:g}] hdg"
+        r = _rows("SELECT range_low, range_high, trend_signal FROM mfr_snapshots "
+                  "WHERE ticker='HO_F' AND snapshot_date >= CURRENT_DATE - 5 "
+                  "AND range_low IS NOT NULL ORDER BY snapshot_date DESC LIMIT 1")
+        if r and v["ho1"] is not None:
+            lo, hi, tr = float(r[0][0]), float(r[0][1]), (r[0][2] or "")
+            rp = _rp(float(v["ho1"]), lo, hi)
+            tr = {"trendBullish": "BULLISH", "trendBearish": "BEARISH",
+                  "trendNeutral": "NEUT"}.get(tr, tr)
+            rr["ho1"] = f"  {tr} rp={rp:.2f} [{lo:g}-{hi:g}] mfr"
+    except Exception as e:  # noqa: BLE001
+        log.warning("energy range lookup failed: %s", e)
+
     def line(label, key, unit, prec):
         s = f"  {label:<15}{float(v[key]):.{prec}f} {unit}"
         d1 = _delta(v[key], hist, key, 1)
         d5 = _delta(v[key], hist, key, 5)
-        return s + (f" Δ1d{d1}" if d1 else "") + (f" Δ5d{d5}" if d5 else "")
+        return (s + (f" Δ1d{d1}" if d1 else "") + (f" Δ5d{d5}" if d5 else "")
+                + rr.get(key, ""))
 
     return [f"⛽ ENERGY COMPLEX ({d0}{tag}) — the refiner sleeve's driver "
             f"(VLO/MPC/PSX/CVI/CRAK):",
