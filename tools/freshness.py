@@ -37,8 +37,8 @@ CONTRACTS = [
     ("portsol", "Portfolio Solutions re-rank",
      "SELECT max(snapshot_date) FROM hedgeye_portfolio_solutions", 4, True,
      "ps ranks on shelf rows go stale"),
-    ("ideas", "Investing Ideas roster",
-     "SELECT max(snapshot_date) FROM hedgeye_investing_ideas", 14, False,
+    ("ideas", "Investing Ideas newsletter (weekly, Sunday)",
+     "SELECT max(signal_date) FROM hedgeye_ii_newsletter", 9, False,
      "SCREEN ideas lens serves an old roster as current"),
     ("btcq", "Crypto Quant sentiment (any non-null)",
      "SELECT max(signal_date) FROM hedgeye_crypto_quant "

@@ -44,8 +44,12 @@ def _portsol() -> set:
                     "WHERE snapshot_date = (SELECT max(snapshot_date) FROM hedgeye_portfolio_solutions)")
 
 def _ideas() -> set:
-    return _members("SELECT DISTINCT ticker FROM hedgeye_investing_ideas "
-                    "WHERE snapshot_date = (SELECT max(snapshot_date) FROM hedgeye_investing_ideas)")
+    """Investing Ideas roster. The ranked 'Top 21' email died ~8/7 (its
+    table froze — the 45-day-stale find, 9/21); the LIVE product is the
+    Sunday newsletter (hedgeye_ii_newsletter, sided + ranged, current).
+    Read the newsletter's latest issue; the ranked table stays as history."""
+    return _members("SELECT DISTINCT ticker FROM hedgeye_ii_newsletter "
+                    "WHERE signal_date = (SELECT max(signal_date) FROM hedgeye_ii_newsletter)")
 
 def _keiths() -> set:
     return _members("SELECT DISTINCT ticker FROM hedgeye_keiths_signals "
