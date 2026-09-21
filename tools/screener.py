@@ -730,8 +730,15 @@ def _btcquant_trends() -> dict:
     out = {}
     try:
         with db_pg.get_conn() as c, c.cursor() as cur:
+            # STALENESS GATE (9/21, the ETHA lesson — same class as XLI):
+            # a BTC Quant call older than 7 days is NOT the trend authority.
+            # ETHA carried an 8/14 'bearish' for 38 days over fresh MFR
+            # BULLISH; BTC's was from May. Stale -> no override, the name
+            # falls back to the gated Hedgeye/MFR stack like everything else.
             cur.execute("SELECT DISTINCT ON (asset) asset, sentiment FROM hedgeye_crypto_quant "
-                        "WHERE sentiment IS NOT NULL ORDER BY asset, signal_date DESC")
+                        "WHERE sentiment IS NOT NULL "
+                        "  AND signal_date >= CURRENT_DATE - 7 "
+                        "ORDER BY asset, signal_date DESC")
             for a, sd in cur.fetchall():
                 if a and sd and sd.strip().lower() in m:
                     out[BTCQ_NORM.get(a.strip().upper(), a.strip().upper())] = m[sd.strip().lower()]
