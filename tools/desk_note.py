@@ -278,6 +278,18 @@ def build_note(full: bool = False):
     except Exception:  # noqa: BLE001
         pass
 
+    # ── cash flows: the spending line (9/22 — the account doubles as
+    #    checking; $4K/wk of spending read as 'missing money' until it
+    #    was printed where the eye lands every morning) ──
+    try:
+        from tools.cash_flows import week_summary
+        fl = week_summary()
+        if fl:
+            L.append("")
+            L.append("💳 " + fl)
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── standing programs: BUXX accumulation ($36K/yr, buy the post-
     #    distribution dip; watcher nudges the window — this line keeps the
     #    program visible on every card) ──
