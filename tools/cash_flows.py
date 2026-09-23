@@ -56,28 +56,42 @@ def ingest(path: str | pathlib.Path) -> dict:
     # account number from the filename (History_for_Account_X96383748...)
     import re
     m = re.search(r"Account_([A-Z0-9]+)", path.name)
-    acct = m.group(1) if m else "unknown"
+    file_acct = m.group(1) if m else None
+    # Two Fidelity shapes (9/23 fix — Accounts_History parsed 0 rows):
+    #   History_for_Account: Action@1, Amount@14, CashBalance@15
+    #   Accounts_History:    Account#@2, Action@3, Amount@16, Settle@17
     rows, skipped = [], 0
     with open(path, encoding="utf-8-sig") as f:
+        header_amt, act_col, acct_col = 14, 1, None
         for r in csv.reader(f):
-            if len(r) < 16 or not r[0].strip() or "/" not in r[0]:
+            if r and r[0].strip() == "Run Date":
+                cols = [c.strip() for c in r]
+                header_amt = cols.index("Amount")
+                act_col = cols.index("Action")
+                acct_col = cols.index("Account Number") \
+                    if "Account Number" in cols else None
+                continue
+            if len(r) <= header_amt or not r[0].strip() or "/" not in r[0]:
                 continue
             try:
                 d = dt.datetime.strptime(r[0].strip(), "%m/%d/%Y").date()
             except ValueError:
                 continue
-            action = r[1]
+            action = r[act_col]
             kind = _kind(action)
             if kind is None:
                 skipped += 1
                 continue
             try:
-                amt = float(r[14].replace(",", ""))
+                amt = float(r[header_amt].replace(",", ""))
             except ValueError:
                 continue
             if kind == "other" and abs(amt) < 0.5:
                 continue
-            pending = (r[15] or "").strip().lower() == "processing"
+            nxt = r[header_amt + 1] if len(r) > header_amt + 1 else ""
+            pending = (nxt or "").strip().lower() == "processing" or not nxt
+            acct = (r[acct_col].strip() if acct_col is not None and
+                    r[acct_col].strip() else file_acct) or "unknown"
             h = hashlib.sha1(f"{acct}|{d}|{action}|{amt}".encode()).hexdigest()
             rows.append((acct, d, kind, amt, action[:180], pending, h))
     written = 0
