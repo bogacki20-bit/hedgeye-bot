@@ -78,6 +78,14 @@ print("\n=== 4/4 lot ledger rebuild ===")
 import db_pg  # noqa: E402
 db_pg._load_dotenv_fallback()
 from tools.lot_ledger import integrity_check, rebuild  # noqa: E402
+# purge FILL bridge rows the fresh snapshot supersedes (9/22: texted
+# intraday fills are a bridge, not a record — the CSV is authoritative)
+with db_pg.get_conn() as _c, _c.cursor() as _cur:
+    _cur.execute("DELETE FROM book_activity WHERE action_raw LIKE 'TELEGRAM FILL%%' "
+                 "AND run_date < (SELECT max(snapshot_date) FROM book_positions)")
+    if _cur.rowcount:
+        print(f"purged {_cur.rowcount} superseded FILL bridge row(s)")
+    _c.commit()
 n = rebuild()
 mism = integrity_check()
 print(f"ledger: {n} fills · integrity {'clean' if not mism else f'{len(mism)} MISMATCH(ES)'}")

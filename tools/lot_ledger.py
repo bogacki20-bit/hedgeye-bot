@@ -75,6 +75,7 @@ def rebuild() -> int:
         FROM book_activity
         WHERE action_type IN ('buy', 'sell') AND NOT is_option
           AND quantity IS NOT NULL AND quantity <> 0
+          AND action_raw NOT LIKE 'TELEGRAM FILL%%'  -- bridge rows, not record
         ORDER BY underlying, account_number, run_date, id""")
     acts = list(acts) + [
         r for r in extra

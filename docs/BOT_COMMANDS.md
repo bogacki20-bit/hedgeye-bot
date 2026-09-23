@@ -60,6 +60,18 @@ evening total packet 6:45 PM · Saturday walls scorecard 10:00.
 After a screen replies, short follow-ups refine it: `near the low`,
 `show gated`, `held only`. Unknown words are named, never ignored.
 
+## FILLS — keep the book live intraday (9/22: sheets were a day stale)
+
+| say | effect |
+|---|---|
+| `FILL SOLD COP 3.7 @128.26` | book updates in seconds — BOOK RP / REPORT / screens / shelf all see it |
+| `FILL BOUGHT BNO 8.5 @58.61` · `FILL SHORTED WSM 1` · `FILL COVERED ACI 10` | same, all verbs |
+| add `RIRA` or `ROTH` | non-Individual account (IRAs reject shorts) |
+| `FILL LIST` / `FILL UNDO` | today's texted fills / delete the last one |
+
+A texted fill is a BRIDGE, not a record — tomorrow's CSV upload
+supersedes it automatically. Price optional.
+
 ## LOGGING TRADES (so the clock and attribution stay true)
 
 Plain verb lines — the bot logs them against alerts/positions:
