@@ -187,6 +187,13 @@ Never refuse to engage — degrade gracefully and label the altitude:
   basis, entry date, entry-rp, days held. Regenerated daily by the bot.
   THE SHORT CLOCK RUNS OFF ITS ENTRY DATES. If it's stale (>3 sessions
   old), say so.
+- **BOOK AS-OF discipline (9/22 incident):** every bot sheet (BOOK RP,
+  REPORT) leads with a '⏱ BOOK AS-OF <date>' banner. Before ANY
+  position-level advice, check it against today's date. If the sheet is
+  older than today, REFUSE to advise on positions and request the fresh
+  file — advising off a stale book once produced sell calls on
+  positions already exited. A file in project knowledge is a snapshot,
+  never a feed.
 - `buxx-ledger.md` — the accumulation program ledger (target, buys,
   pace). Update it when Kris reports a buy.
 If these docs are absent, ask Kris to drop the latest generated copies in.
