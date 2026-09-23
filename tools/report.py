@@ -790,9 +790,31 @@ def build_book_rp() -> str:
     corr_line = (f"correlations: {covered}/{len(held)} positions have a 90d "
                  f"coefficient; {len(held) - covered} do not (n/a, never "
                  f"0.00)")
-    return format_book_rp(rows, clusters=cl, corr_by_ticker=tc,
-                          sector_cap_lines=_sector_cap_lines(),
-                          total_book=total_book, corr_coverage=corr_line)
+    return book_asof_line() + "\n" + format_book_rp(
+        rows, clusters=cl, corr_by_ticker=tc,
+        sector_cap_lines=_sector_cap_lines(),
+        total_book=total_book, corr_coverage=corr_line)
+
+
+def book_asof_line() -> str:
+    """AS-OF banner (9/22: the desk LLM advised off a weekend file — every
+    sheet announces its own age so a stale copy can't pose as live)."""
+    import db_pg
+    try:
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT max(snapshot_date), max(snapshot_downloaded_at) "
+                        "FROM book_positions WHERE snapshot_date = "
+                        "(SELECT max(snapshot_date) FROM book_positions)")
+            sd, dl = cur.fetchone()
+            cur.execute("SELECT count(*) FROM book_activity WHERE action_raw "
+                        "LIKE 'TELEGRAM FILL%%' AND run_date >= %s", (sd,))
+            nf = cur.fetchone()[0]
+    except Exception as e:  # noqa: BLE001
+        return f"⏱ BOOK AS-OF unknown ({e})"
+    return (f"⏱ BOOK AS-OF {sd} (export {str(dl)[:16]})"
+            + (f" + {nf} texted fill(s) overlaid" if nf else "")
+            + " — trades after this are NOT here. If today's date is later "
+              "than this, DEMAND a fresh file before advising.")
 
 
 def build_rp_single(t: str) -> str:
@@ -880,6 +902,7 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
         lines.append(f"REPORT {VERSION} {today} [{kind}] · rp=range pos 0-1 · "
                      f"⚠=trend-against 📉=dip/rip · fill=% of target "
                      f"(<40 STARTER · <80 BUILDING · ≤110 FULL · >110 OVER)")
+        lines.append(book_asof_line())
         # BOOK AGE, stated ALWAYS. Everything below that touches positions,
         # weights, fills or CONC is computed from this snapshot — see
         # tools/book_freshness for why this is never silent.
