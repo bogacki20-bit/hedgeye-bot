@@ -564,6 +564,38 @@ def _fetch_bars(symbols, lookback_days=LOOKBACK_DAYS):
 
 # ── deterministic bar store ────────────────────────────────────────────────
 
+def _repair_final_bar(bars: dict, as_of) -> int:
+    """Append the as_of session's close from the QUOTE endpoint's
+    previous-close where the daily file's row was empty (9/23: Yahoo's
+    close file lagged the morning after 9/22; the quote system already
+    served the official close). Only fills symbols whose last bar is
+    EXACTLY one session behind — never fabricates history. Returns count."""
+    from concurrent.futures import ThreadPoolExecutor
+    lagging = [s for s, b in bars.items()
+               if b.get("dates") and b["dates"][-1] < as_of]
+    if not lagging:
+        return 0
+
+    def one(s):
+        try:
+            import yfinance as yf
+            pc = yf.Ticker(s).fast_info.previous_close
+            return s, (float(pc) if pc else None)
+        except Exception:
+            return s, None
+
+    fixed = 0
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for s, pc in ex.map(one, lagging):
+            if pc:
+                bars[s]["dates"].append(as_of)
+                bars[s]["closes"].append(pc)
+                fixed += 1
+    log.info("final-bar repair: %d/%d symbols filled from quote prev-close",
+             fixed, len(lagging))
+    return fixed
+
+
 def _bars_from_store(as_of, symbols) -> dict:
     """Bars previously banked for `as_of`, or {} if none/partial.
 
@@ -1292,9 +1324,18 @@ def build_eod_pack(persist: bool = True) -> str:
                     _c.commit()
             except Exception as _e:  # noqa: BLE001
                 log.warning("stale store purge failed: %s", _e)
+    repaired_n = 0
     if not bars:
         bars = _fetch_bars(sorted(need))
         _lb, _ = resolve_session_date(bars)
+        if _lb != _asof:
+            # FINAL-BAR REPAIR (9/23): the daily close file lags some
+            # mornings — the row arrives with empty closes — but the QUOTE
+            # endpoint serves the same session's official close as
+            # 'previous close'. Same provider, same number, different
+            # door. Repaired closes are counted and stamped below.
+            repaired_n = _repair_final_bar(bars, _asof)
+            _lb, _ = resolve_session_date(bars)
         if _lb == _asof:
             _bank_bars(_asof, bars)      # only a complete frame gets banked
         else:
@@ -1493,7 +1534,9 @@ def build_eod_pack(persist: bool = True) -> str:
     # own size, and the delivery layer splits at a block boundary above
     # SPLIT_AT rather than ever letting a cap truncate it.
     body += (f"\npack provenance: {len(need)} symbols requested · body "
-             f"{len(body):,} chars (excl. this line)")
+             f"{len(body):,} chars (excl. this line)"
+             + (f" · {repaired_n} final-bar close(s) repaired from the "
+                f"quote endpoint (daily file lagged)" if repaired_n else ""))
     # §1.1b ARTIFACT RETENTION. Every pack persists with its build time, the
     # RESOLVED bar date, the validation result and the DEPLOYED COMMIT SHA.
     # The 2026-08-16 Sunday-bar bug was unfalsifiable purely because no such
