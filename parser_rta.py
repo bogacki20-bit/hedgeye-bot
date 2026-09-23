@@ -44,7 +44,7 @@ NOTE_TAIL_RE = re.compile(
 # Signal-type keyword anywhere near the end of <head>; tolerate a trailing
 # garbled "Signal"-ish / "Side" / "Signals" token after it.
 SIGTYPE_RE = re.compile(
-    r"\b(?P<sig>(?:Buy|Sell|Cover|Add|Trim|Short)(?:[- ]?SOME|[- ]?MORE)?)\b"
+    r"\b(?P<sig>(?:Buy|Sell|Cover|Add|Trim|Short|Book)(?:[- ]?SOME|[- ]?MORE)?)\b"
     r"(?:\s+(?:S\w*l|S\w*g\w*|Side|Signals?))?\s*$",
     re.I,
 )
