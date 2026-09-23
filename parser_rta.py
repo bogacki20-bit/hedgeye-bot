@@ -95,7 +95,7 @@ def _strip_html(html: str) -> str:
 def _norm_sigtype(raw: str) -> str:
     s = re.sub(r"\s+", "", (raw or "")).lower()  # "Sell-SOME" -> "sell-some"
     # canonicalize "sellsome"/"sell some" -> "sell-some" (etc.)
-    return re.sub(r"^(buy|sell|cover|add|trim|short)-?(some|more)$",
+    return re.sub(r"^(buy|sell|cover|add|trim|short|book)-?(some|more)$",
                   r"\1-\2", s)
 
 
@@ -103,6 +103,8 @@ def _side_for(signal_type: str, is_cover_short: bool) -> Optional[str]:
     st = signal_type or ""
     if is_cover_short or st.startswith("cover"):
         return "short"          # covering reduces a short position
+    if st.startswith("book"):
+        return "long"          # booking gains on a long (Book-SOME)
     if st.startswith("buy") or st.startswith("add"):
         return "long"
     if st.startswith("sell") or st.startswith("trim") or st.startswith("short"):
