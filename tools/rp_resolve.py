@@ -46,7 +46,7 @@ ZONE_BREAKDOWN = "BREAKDOWN"
 
 # short display tags — every surface that prints an rp prints one of these
 SRC_TAG = {"mfr-published": "mfr", "derived-mfr": "drv", "derived-hdg": "hdg",
-           "shadow": "shd", "wrapper": "wrap"}
+           "derived-iin": "iin", "shadow": "shd", "wrapper": "wrap"}
 
 
 # ─────────────────────────── pure logic ───────────────────────────
@@ -65,6 +65,10 @@ def resolve_rp(published=None, derived=None, derived_src=None,
     where the 9/18 Hedgeye band 163-173 says 0.60/hdg)."""
     if derived is not None and derived_src == "derived-hdg":
         return float(derived), "derived-hdg"
+    # Investing Ideas TREND range (desk 9/22 #10): the Hedgeye layer
+    # BETWEEN the risk range and MFR — iin-derived outranks MFR-published
+    if derived is not None and derived_src == "derived-iin":
+        return float(derived), "derived-iin"
     if published is not None:
         return float(published), "mfr-published"
     if derived is not None:
@@ -120,7 +124,13 @@ def verdict(z, side) -> str | None:
             return "add"
         return None
     if side == "short":
-        if z in (ZONE_BREAKOUT, ZONE_NEAR_TOP):
+        # Desk fix 9/22 #5: BREAKOUT (closed ABOVE the range top) is the
+        # ladder's exit trigger, not an add — ONON at rp 2.45 was printing
+        # 'add'. NEAR_TOP (0.80-1.00, still inside the range) remains the
+        # short-entry/add zone per the rp>=0.65 doctrine. Kris may re-rule.
+        if z == ZONE_BREAKOUT:
+            return "EXIT (ran over range top)"
+        if z == ZONE_NEAR_TOP:
             return "add"
         if z in (ZONE_NEAR_BOTTOM, ZONE_BREAKDOWN):
             return "cover"
@@ -198,8 +208,8 @@ def apply_rp_resolution(rows, record=True) -> list:
         else:
             shadow_rp = None
             derived_now = derived
-            derived_src = ("derived-hdg" if r.get("band_source") == "hdg"
-                           else "derived-mfr")
+            derived_src = {"hdg": "derived-hdg", "iin": "derived-iin"}.get(
+                r.get("band_source"), "derived-mfr")
         live_derived = (derived_now is not None
                         and r.get("_rp_stale") is False)
         rp, src = resolve_rp(published=None if live_derived else ps,

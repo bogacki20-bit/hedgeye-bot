@@ -45,6 +45,30 @@ the session transcript; this file tracks what shipped and what's open.
   price 3+ sessions (FXH 129.36, CACC 582.31) = dead feed; also absurd
   wall jumps (WEAT pw 1→37).
 
+## Desk 9/22 fix list — status
+
+Shipped 9/22 evening: #1 TZ=America/New_York on Railway (all stamps ET
+after deploy) · #2 RTA is_close() — direction from bucket+qualifier, not
+verb; CHH/AEO restored to universe · #3 tilt provisional marker
+(intraday capture vs final; fetched_at) · #4 ·snap quote-provenance
+marker on every MARKET line · #5 run-over shorts → EXIT bucket (BREAKOUT
+never 'add'; NEAR_TOP stays add — Kris may re-rule) · #6 BOOK RP lot
+columns (in·legs·sessions·last-fill·⏱scaling) · #10 iin band tier
+(hdg > iin 7d > mfr; migration 111; CRWD/DT/KMX/MICC live) · #14
+VREOF/HGER/BNO classified (cap engine accepts).
+
+KRIS TO RULE: #5 confirm EXIT-on-breakout split · #7 ladder X/Y (cover-
+some on X% drop from last fill; re-short on Y% bounce w/ rp≥0.65 —
+last-fill data now on BOOK RP to set them) · #9 bucket order
+active-vs-top_idea (retirement gate keys on it).
+
+Open: #3b all-six-index tilt (SPY/NDX/RUT tabs in indices_capture) ·
+#7 implement ladder once X/Y ruled · #8 weekly short-book turnover on
+Friday note · #11 SS diff from roster image OCR · #12 within-layer
+timestamp ranking (SS beats newsletter) · #13 HGER→MFR (Kris pastes) ·
+#16 stat-pack close-vs-intraday labels · #17 Tier1Alpha vol-control/CTA
+capture.
+
 ## Open — P2
 
 - **#13 Link harvest** — built 9/20 (hedgeye_links.py, Cloudflare-polite).
@@ -69,6 +93,26 @@ the session transcript; this file tracks what shipped and what's open.
 - **#22 Re-grade regime cells with MIXED excluded** — highest-value
   scorecard check; 3 of 5 sessions last week were inside the band.
 - **#23 Discretionary-call grading** (the 9/14 financials exit).
+
+## Known NOT-bugs (do not file)
+
+- **Bot `rng` vs TradingView MFR indicator Range High/Low never tie on
+  the same bar** — one-session offset by design: the bot carries the
+  range published FOR the next session; TV's last bar carries the range
+  that applied DURING it. Gap closes walking toward the last bar. The
+  bot is the fresher one (desk decode 9/20).
+- **JPM Range High/Low null on recent daily bars in the TV export** —
+  indicator gap on TradingView's side.
+
+## Corridor levels (desk decode 9/20) — data dependency
+
+trend = daily close vs the TV indicator's Bullish/Bearish Trend lines;
+mom = same on 60m bars (1 unexplained miss: V — mom_log.csv accumulates
+the dataset to settle it). The MFR API ships LABELS ONLY; corridor
+levels exist solely in TradingView exports (tv_mfr_history: 21 tickers,
+last bar 2026-09-04). Screens print "(breaks X)" when a bar ≤10d exists
+— **refresh the TV export weekly or the levels stay hidden**. No hourly
+feed exists anywhere yet; mom_log.csv's h_* columns wait for one.
 
 ## Data gaps
 

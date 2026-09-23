@@ -25,6 +25,41 @@ log = logging.getLogger("rta_cross_signal")
 # Full closes only — the -SOME gradations are trims, not closes.
 CLOSE_TYPES = {"sell", "cover"}
 
+
+def is_close(rec: dict) -> bool:
+    """Direction from CONTEXT, not the verb (desk fix 9/22: Keith's
+    'Sell Signal ... CHH' was tagged close and dropped from the alert
+    universe — but a SELL on a name Hedgeye isn't long is an OPEN SHORT).
+
+      cover           -> closes a short (suppress)                = True
+      sell + SHORTING qualifier in the body                       = False
+      sell on a name in a Hedgeye SHORT bucket                    = False
+      sell on a name in a Hedgeye LONG bucket (take-profit close) = True
+      sell on an unbucketed name -> treat as OPEN (never suppress
+      what we can't prove was held)                               = False
+    """
+    sig = (rec.get("signal_type") or "").lower()
+    if sig not in CLOSE_TYPES:
+        return False
+    if sig == "cover":
+        return True
+    if rec.get("is_cover_short"):
+        return True
+    # 'sell': consult the monitor bucket for the name
+    try:
+        import db_pg
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("SELECT hedgeye_bucket_0629 FROM ticker_tags "
+                        "WHERE ticker = %s", ((rec.get("ticker") or "").upper(),))
+            r = cur.fetchone()
+        bucket = (r[0] or "") if r else ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("is_close bucket lookup failed: %s", e)
+        return False        # can't prove long -> don't suppress
+    if "short" in bucket:
+        return False        # selling a short-roster name = opening/pressing
+    return "long" in bucket  # long-roster name = take-profit close
+
 # Buy-flavored actions frame matches as scale-in checks; sell-flavored as
 # take-profit checks. (BUY covers count as bullish tells; trims as bearish.)
 _BULLISH = {"buy", "cover", "cover-some", "add"}
@@ -215,7 +250,7 @@ def handle_rta(rec: dict, signal_date: date, message_id: str | None) -> dict:
             return out
 
         sig = (rec.get("signal_type") or "").lower()
-        closed = sig in CLOSE_TYPES
+        closed = is_close(rec)
         if closed:
             out["closed"] = record_close(t, signal_date, sig, message_id)
 

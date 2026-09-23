@@ -45,6 +45,9 @@ def test_resolution_order_never_silently_falls_through():
         (1.29, "derived-hdg"), "fresh hedgeye band outranks published"
     assert resolve_rp(0.89, 1.29, "derived-mfr", 0.5, 0.4) == \
         (0.89, "mfr-published"), "published beats mfr-derived"
+    # 9/22 #10: Investing Ideas TREND range sits BETWEEN hdg and mfr
+    assert resolve_rp(0.89, 1.29, "derived-iin", 0.5, 0.4) == \
+        (1.29, "derived-iin"), "iin band outranks mfr-published"
     assert resolve_rp(None, 1.29, "derived-hdg", 0.5, 0.4) == \
         (1.29, "derived-hdg")
     assert resolve_rp(None, 0.72, None, 0.5, 0.4) == (0.72, "derived-mfr")
@@ -127,7 +130,9 @@ def test_verdicts_for_longs_and_shorts_invert():
     assert verdict("BREAKDOWN", "long") == "add"
     # shorts invert: top = add-to-short, bottom = cover. SUJA at 1.02 short
     # appeared nowhere under the old longs-only lines.
-    assert verdict("BREAKOUT", "short") == "add"
+    # 9/22 desk fix: BREAKOUT (above the range top) is the ladder's exit
+    # trigger, never an add — ONON at rp 2.45 printed 'add'.
+    assert verdict("BREAKOUT", "short") == "EXIT (ran over range top)"
     assert verdict("NEAR TOP", "short") == "add"
     assert verdict("MID", "short") is None
     assert verdict("NEAR BOTTOM", "short") == "cover"
@@ -145,9 +150,11 @@ def test_zone_lists_route_both_sides_and_respect_filters():
             _row("DK", None, dark=True)]
     z = rp_zone_lists(rows)
     assert z["trim"] == ["TRIML"]
-    # the ADD list carries BOTH a long at the bottom of its range and a
-    # run-over short at the top of its — one list, two routes into it
-    assert z["add"] == ["ADDL", "SHADD"], z["add"]
+    # 9/22 desk fix #5: a RUN-OVER short (above the range top) routes to
+    # EXIT, never to add — adds are longs at the bottom or shorts still
+    # INSIDE the range near its top
+    assert z["add"] == ["ADDL"], z["add"]
+    assert z["exit"] == ["SHADD"], z["exit"]
     assert z["cover"] == ["SHCOV"]
     assert z["low_signal"] == ["LOWSIG"], "low-signal excluded from verdicts"
     assert "CASHEQ" not in z["trim"], "cash-equivalent never a candidate"

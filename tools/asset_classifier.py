@@ -66,6 +66,12 @@ OPERATOR_OVERRIDES: dict = {
     # energy equities. This is OPERATOR KNOWLEDGE, not derivation — without it
     # an energy-concentrated book would be refused as "unclassified" rather
     # than caught by the ENERGY sector cap, which is a false-confidence pass.
+    # Cannabis single names (desk 9/22 #14: sector cap refused VREOF as
+    # unknown — cannabis equities, CANNABIS sector so the cap can see the
+    # cluster; HGER is a commodity basket, added same pass).
+    "VREOF": {"asset_class": EQUITY, "sector": "CANNABIS"},   # Vireo Growth
+    "HGER": {"asset_class": COMMODITY},   # Harbor Commodity All-Weather ETF
+    "BNO":  {"asset_class": COMMODITY},   # US Brent Oil Fund
     "HAL": {"asset_class": EQUITY, "sector": "ENERGY"},   # Halliburton
     "SLB": {"asset_class": EQUITY, "sector": "ENERGY"},   # SLB (Schlumberger)
     "BKR": {"asset_class": EQUITY, "sector": "ENERGY"},   # Baker Hughes

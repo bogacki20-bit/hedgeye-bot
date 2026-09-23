@@ -453,7 +453,7 @@ def rp_zone_lists(table_rows) -> dict:
     candidate list but never from the table."""
     from tools.mfr_coverage import is_dark_row
     from tools.rp_resolve import verdict as rp_verdict, zone as rp_zone
-    out = {"trim": set(), "add": set(), "cover": set(),
+    out = {"trim": set(), "add": set(), "cover": set(), "exit": set(),
            "low_signal": set(), "dark": set()}
     for r in table_rows:
         if is_dark_row(r):
@@ -466,7 +466,9 @@ def rp_zone_lists(table_rows) -> dict:
             continue
         v = rp_verdict(rp_zone(r.get("rp_now")), r.get("side"))
         if v:
-            out[v].add(r["ticker"])
+            # 9/22 desk fix #5: run-over shorts route to their own EXIT
+            # bucket instead of masquerading as adds
+            out["exit" if v.startswith("EXIT") else v].add(r["ticker"])
     return {k: sorted(v) for k, v in out.items()}
 
 
@@ -596,8 +598,10 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
     out += [
         "TRIM candidates (longs at/above 0.80 or breakout): "
         + (" ".join(z["trim"]) or "none"),
-        "ADD candidates (longs at/below 0.20; shorts at/above 0.80 — a "
-        "run-over short is an add): " + (" ".join(z["add"]) or "none"),
+        "ADD candidates (longs at/below 0.20; shorts 0.80-1.00 inside the "
+        "range): " + (" ".join(z["add"]) or "none"),
+        "EXIT — shorts RUN OVER the range top (ladder trigger, 9/22): "
+        + (" ".join(z.get("exit", [])) or "none"),
         "COVER candidates (shorts at/below 0.20 or breakdown): "
         + (" ".join(z["cover"]) or "none"),
         "LOW-SIGNAL (band under 2% of price — rp printed, verdicts "
@@ -607,7 +611,8 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
         "",
         f"{'tkr':<8}{'acct':<9}{'side':<6}{'$val':>9}{'%book':>7}"
         f"{'rpST':>7}{'rpLT':>6}  {'5d lo-hi':<11}{'trend':<9}"
-        f"{'PM bucket':<15}{'src':<6}{'top-corr'}"]
+        f"{'PM bucket':<15}{'src':<6}{'lots (in·legs·sess·last-fill)':<34}"
+        f"{'top-corr'}"]
 
     def _f(v, fmt):
         return f"{v:{fmt}}" if v is not None else "n/a"
@@ -635,7 +640,8 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
             f"{_f(r.get('rp_now'), '.2f'):>7}"
             f"{_f(r.get('rp_lt'), '.2f'):>6}  {band:<11}"
             f"{(r.get('trend') or 'n/a'):<9}"
-            f"{(r.get('bucket') or '-'):<15}{src:<6}{tc_s}"
+            f"{(r.get('bucket') or '-'):<15}{src:<6}"
+            f"{(r.get('lot') or '-'):<34}{tc_s}"
             + (("   " + " ".join(tags)) if tags else ""))
 
     if corr_coverage:
@@ -757,6 +763,34 @@ def build_book_rp() -> str:
         log.warning("cash-equivalents unavailable: %s", e)
         cash_eq = set()
 
+    # lot-ledger columns (desk 9/22 #6): entry date, leg count, sessions
+    # since entry, last-fill price — the clock's raw material on the sheet
+    try:
+        from tools.lot_ledger import lots_all
+        _lots = lots_all()
+    except Exception as e:  # noqa: BLE001
+        log.warning("lots_all unavailable for BOOK RP: %s", e)
+        _lots = {}
+    import datetime as _dt
+    _today = _dt.date.today()
+
+    def _lot_str(t):
+        L = _lots.get(t)
+        if not L or not L.get("open"):
+            return None
+        oo = L["oldest_open"]
+        legs = len(L["open"])
+        sess = (_today - oo).days
+        last_px = next((px for d, q, px, _rp in reversed(L["open"])
+                        if px is not None), None)
+        s = f"in {oo:%m/%d}·{legs}leg·{sess}s"
+        if last_px is not None:
+            s += f"·lf {last_px:g}"
+        la = L.get("last_add")
+        if la and (_today - la).days <= 5:
+            s += "·⏱scaling"
+        return s
+
     dollars = {}
     rows = []
     for t, acct, mv in pos:
@@ -779,6 +813,7 @@ def build_book_rp() -> str:
                                                  rp.get("range_high"),
                                                  rp.get("price")),
                      "cash_eq": t in cash_eq,
+                     "lot": _lot_str(t),
                      "dark": rp.get("dark", False)})
 
     # exclude cash-equivalents from cluster dollars the way BOOK FULL parks

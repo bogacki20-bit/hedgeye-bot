@@ -180,12 +180,17 @@ def _tilt_lines() -> list[str]:
     tilt > 1 = dealers long gamma -> pinning, fade the range edges;
     tilt < 1 = short gamma -> moves amplify, follow."""
     rows = _rows(
-        "SELECT DISTINCT ON (sym) sym, trade_date, gamma_tilt FROM sg_tilt "
-        "ORDER BY sym, trade_date DESC")
+        "SELECT DISTINCT ON (sym) sym, trade_date, gamma_tilt, fetched_at "
+        "FROM sg_tilt ORDER BY sym, trade_date DESC")
     if not rows:
         return []
     parts = []
-    for sym, d, gt in sorted(rows):
+    prov = ""
+    for sym, d, gt, fa in sorted(rows):
+        # a same-session print is PROVISIONAL — the 9/21 lesson: the 9:35
+        # capture stored 1.05 intraday, the final close print was 1.56
+        if d == dt.date.today() and fa is not None:
+            prov = f" ⚠ intraday capture @{fa.astimezone().strftime('%H:%M')} — final prints tomorrow 9:35"
         gt = float(gt)
         # three-state rule (9/20): the week of 9/14 printed 1.04->0.97->
         # 0.90->0.83->1.04 — a hard 1.00 split flips regime four times on
@@ -193,7 +198,7 @@ def _tilt_lines() -> list[str]:
         tag = ("PINNED/FADE" if gt > 1.10
                else "FOLLOW" if gt < 0.90 else "MIXED")
         parts.append(f"{sym} {gt:.2f} {tag}")
-    return [f"⚖ GAMMA REGIME ({rows[0][1]}): " + " · ".join(parts),
+    return [f"⚖ GAMMA REGIME ({rows[0][1]}{prov}): " + " · ".join(parts),
             "  >1.10 pinned/fade · <0.90 follow · 0.90-1.10 MIXED "
             "(unresolved — size between)"]
 
@@ -246,8 +251,12 @@ def _line(t: str, d: dict) -> str:
         rng = f"  {_px(px)} [{_px(band[0])}-{_px(band[1])}]"
     elif px is not None:
         rng = f"  {_px(px)}"
+    # quote provenance (desk fix 9/22 #4: names printed identical marks
+    # 10:39->15:35 with nothing saying so) — ·snap = last daily-sync price,
+    # no live quote landed inside the fetch budget
+    snap = "" if d.get("live") else " ·snap"
     return (f"{_ARROW.get(tr, '·')} {t:<8}{rp_s:<6}{tr[:4]}"
-            f"{rng}{_sg_suffix(d)}{_vol_tag(d.get('iv'), d.get('rv'))}")
+            f"{rng}{snap}{_sg_suffix(d)}{_vol_tag(d.get('iv'), d.get('rv'))}")
 
 
 def _pm_name_rows(names: list[str]) -> dict:
