@@ -1270,13 +1270,36 @@ def build_eod_pack(persist: bool = True) -> str:
     # rebuild is byte-identical. yfinance is NOT reproducible -- three identical
     # ranged calls returned 617/617/614 rows for CPER -- so the only way a
     # second build can match the first is to reuse the first build's input.
-    from tools.trading_calendar import last_completed_session
+    from tools.trading_calendar import (last_completed_session,
+                                        resolve_session_date)
     _asof = last_completed_session()
     bars = _bars_from_store(_asof, sorted(need))
     replayed = bool(bars)
+    # 9/23 fix: a store banked BEFORE the session's bars posted (Tue-evening
+    # EOD ran ahead of yfinance) replayed its stale frame forever. A store
+    # whose last bar lags its own as_of is poisoned — discard and refetch.
+    if bars:
+        _lb, _ = resolve_session_date(bars)
+        if _lb != _asof:
+            log.warning("bar store for %s is stale (last bar %s) — "
+                        "discarding and refetching", _asof, _lb)
+            bars, replayed = {}, False
+            try:
+                import db_pg as _dbp
+                with _dbp.get_conn() as _c, _c.cursor() as _cur:
+                    _cur.execute("DELETE FROM eod_bar_store WHERE as_of=%s",
+                                 (_asof,))
+                    _c.commit()
+            except Exception as _e:  # noqa: BLE001
+                log.warning("stale store purge failed: %s", _e)
     if not bars:
         bars = _fetch_bars(sorted(need))
-        _bank_bars(_asof, bars)
+        _lb, _ = resolve_session_date(bars)
+        if _lb == _asof:
+            _bank_bars(_asof, bars)      # only a complete frame gets banked
+        else:
+            log.warning("fetched frame ends %s < as_of %s — NOT banked "
+                        "(session bars not posted yet)", _lb, _asof)
     got = sum(1 for s in need if bars.get(s, {}).get("closes"))
     # H2: as-of stamp. The LAST BAR DATE, not the clock — a pack built at 09:00
     # Monday off Friday's closes is not stale by the clock and is stale by three
@@ -1314,6 +1337,12 @@ def build_eod_pack(persist: bool = True) -> str:
             "   table that looks right is worse than no table.",
             "   duplicate-bar check: %s" % dup_detail,
             "   symbols with data: %d/%d" % (got, len(need)),
+            "",
+            "   LIKELY CAUSE (9/23): the price provider has not posted the",
+            "   last session's official closes yet (the row arrives with",
+            "   empty closes and is dropped). Nothing is broken — retry in",
+            "   an hour or two; a stale frame is never banked or served.",
+            "   (Not the FRED/rates feed — that is a separate section.)",
         ])
         # Archive the FAILURE too -- a blocked run is exactly the one a future
         # investigation needs to see. (2026-08-24: these two lines sat AFTER a
