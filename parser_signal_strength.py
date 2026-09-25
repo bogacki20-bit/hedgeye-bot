@@ -1,13 +1,16 @@
 """Signal Strength parser — Hedgeye's curated ~90-stock watchlist.
 
 Emails look like:
-  Subject: "Signal Strength Stocks: 90 Stocks (2 Added, 3 Removed)"
-  Body:    "Added: WRBY, AS / Removed: CVX, BROS, JBHT"
-           (Full list is image-only in the email; deltas are text.)
+  Subject: "Signal Strength Stocks: 59 Stocks (8 added, 1 removed)"
+  Body:    "ADDING: AKAM, GLBE ... / REMOVING: U" then the FULL list as an
+           HTML table (dashboard layout, 2026-09-25+).
+  Before 9/25: "Added: WRBY, AS / Removed: CVX, BROS" with the full list
+           image-only (PNG).
 
 This parser captures the adds/removes as deltas in hedgeye_signal_strength
-with is_added_today / is_removed_today flags. The full list is reconstructable
-by carrying forward prior membership and applying daily deltas.
+with is_added_today / is_removed_today flags. When the full table is present
+it also anchors ss_roster_history to it (tools.ss_roster.anchor_from_email),
+which replaces the manual Friday "SS:" paste.
 
 CLI:
   py parser_signal_strength.py --message-id <id>
@@ -75,14 +78,20 @@ def _strip_html(html: str) -> str:
 # The stop set includes [a-z]: the list ENDS at the first lowercase letter. That
 # is what bounds it to the ticker list without discarding it — dropping the real
 # adds along with the prose would trade a loud bug for a silent one.
+#
+# 2026-09-25 — dashboard layout. Labels became "ADDING:" / "REMOVING:" (the old
+# "(?i:added)" stop never matched "REMOVING", so the ADDING capture ran into the
+# colon and the whole match failed — both 9/25 emails parsed empty). The list is
+# now followed directly by the roster table, whose first header cell is "Ticker":
+# without the Ticker\b stop the [a-z] stop would leave a stray "T" (AT&T) behind.
 ADDED_RE   = re.compile(
-    r"\b(?i:added)\s*:\s*([A-Z0-9.,\-\s]+?)"
-    r"(?=(?i:removed)|(?i:rank)|(?i:please)|[a-z\(\[\*]|\Z)",
+    r"\b(?i:add(?:ed|ing))\s*:\s*([A-Z0-9.,\-\s]+?)"
+    r"(?=(?i:remov(?:ed|ing))|(?i:rank)|(?i:please)|Ticker\b|[a-z\(\[\*]|\Z)",
     re.S,
 )
 REMOVED_RE = re.compile(
-    r"\b(?i:removed)\s*:\s*([A-Z0-9.,\-\s]+?)"
-    r"(?=(?i:added)|(?i:rank)|(?i:please)|[a-z\(\[\*]|\Z)",
+    r"\b(?i:remov(?:ed|ing))\s*:\s*([A-Z0-9.,\-\s]+?)"
+    r"(?=(?i:add(?:ed|ing))|(?i:rank)|(?i:please)|Ticker\b|[a-z\(\[\*]|\Z)",
     re.S,
 )
 # Suffix-aware: a bare \b[A-Z]{1,5}\b split RPI.L into RPI + L (the '.' is a
@@ -94,12 +103,43 @@ TICKER_RE  = re.compile(r"\b([A-Z0-9]{1,7}(?:[.\-][A-Z0-9]{1,4}){0,2})\b")
 # Deliberately contains no real ticker: HAS, JUST, CAN, ALL, ONE, NEW are all
 # listed securities. Never add a word here without checking it doesn't trade.
 STOPWORDS = {"RANK", "PLEASE", "AND", "THE", "ADDED", "REMOVED", "SIGNAL",
-             "STRENGTH", "STOCKS", "TOTAL", "NAME", "NAMES", "LONG", "SHORT"}
+             "STRENGTH", "STOCKS", "TOTAL", "NAME", "NAMES", "LONG", "SHORT",
+             "ADDING", "REMOVING"}
+
+# Dashboard-era emails (2026-09-25+) carry the FULL list as an HTML table —
+# the PNG is gone. One <tr> per name, cells in this order.
+ROSTER_COLS = ("ticker", "name", "sector", "analyst", "entry_date",
+               "entry_price", "recent_price", "total_return",
+               "best_idea_rank", "holding_period")
+_ROSTER_TICKER_RE = re.compile(r"[A-Z0-9]{1,7}(?:[.\-][A-Z0-9]{1,4}){0,2}")
+
+
+def parse_roster_table(html_body: str) -> list[dict]:
+    """Full-roster rows from the dashboard email table. [] for old-layout
+    emails (no table) — callers treat that as 'no anchor available'."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        log.warning("bs4 unavailable — SS roster table not parsed")
+        return []
+    soup = BeautifulSoup(html_body or "", "html.parser")
+    rows, seen = [], set()
+    for tr in soup.find_all("tr"):
+        cells = [td.get_text(" ", strip=True)
+                 for td in tr.find_all(["td", "th"], recursive=False)]
+        if len(cells) != len(ROSTER_COLS) or cells[0] == "Ticker":
+            continue
+        tk = cells[0].strip().upper()
+        if not _ROSTER_TICKER_RE.fullmatch(tk) or tk in seen:
+            continue
+        seen.add(tk)
+        rows.append(dict(zip(ROSTER_COLS, [tk] + cells[1:])))
+    return rows
 
 
 def parse_body(html_body: str) -> dict:
     text = _strip_html(html_body)
-    out = {"added": [], "removed": []}
+    out = {"added": [], "removed": [], "roster": parse_roster_table(html_body)}
 
     am = ADDED_RE.search(text)
     if am:
@@ -223,27 +263,39 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
     parsed = parse_body(html_body)
     snapshot_date = received_at.date() if received_at else date.today()
 
+    roster_tickers = [r["ticker"] for r in parsed["roster"]]
     summary = {
         "message_id":    message_id, "subject": subject,
         "snapshot_date": str(snapshot_date),
         "added":         parsed["added"],
         "removed":       parsed["removed"],
+        "roster_rows":   len(roster_tickers),
         "dry_run":       dry_run,
     }
     if dry_run:
+        summary["roster_tickers"] = roster_tickers
         return summary
 
     summary["upsert"] = upsert_deltas(parsed, snapshot_date, message_id)
 
     # Self-updating roster (step 3): apply deltas to ss_roster_history + count tripwire.
     # Defensive — a roster-applier failure must NOT break email parsing.
+    # When the email carries the full table, the anchor below reconciles and
+    # reports any drift, so the delta-only count squawk is skipped.
     try:
         from tools.ss_roster import apply_deltas, parse_header_count
+        header_count = parse_header_count(subject)
         summary["roster"] = apply_deltas(
             parsed["added"], parsed["removed"], snapshot_date,
-            source_email_id=message_id, header_count=parse_header_count(subject))
+            source_email_id=message_id,
+            header_count=None if roster_tickers else header_count)
+        if roster_tickers:
+            from tools.ss_roster import anchor_from_email
+            summary["anchor"] = anchor_from_email(
+                roster_tickers, snapshot_date, source_email_id=message_id,
+                header_count=header_count)
     except Exception as e:
-        log.warning("ss_roster apply_deltas failed (email still parsed): %s", e)
+        log.warning("ss_roster apply/anchor failed (email still parsed): %s", e)
 
     all_tickers = sorted(set(parsed["added"]) | set(parsed["removed"]))
     summary["noted_in_inventory"] = note_in_inventory(all_tickers, message_id)

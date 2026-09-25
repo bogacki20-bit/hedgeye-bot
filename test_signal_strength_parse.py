@@ -90,6 +90,69 @@ def test_no_ticker_survives_from_a_pure_prose_body():
     assert out["added"] == [] and out["removed"] == [], out
 
 
+# ── 2026-09-25 dashboard layout: ADDING/REMOVING labels + full-roster table ──
+
+_HDR = ["Ticker", "Name", "Sector", "Analyst", "Entry Date", "Entry Price",
+        "Recent Price", "Total Return", "Best Idea Rank", "Holding Period"]
+
+
+def _dash(adding, removing, rows):
+    def tr(cells):
+        return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+    parts = ["<p>Signal Strength Stocks: 3 Stocks</p>",
+             "<p>How to Use Signal Strength Stocks</p>"]
+    if adding is not None:
+        parts.append(f"<p><span>ADDING: </span><span>{adding}</span></p>")
+    if removing is not None:
+        parts.append(f"<p><span>REMOVING: </span><span>{removing}</span></p>")
+    parts.append("<table>" + tr(_HDR) + "".join(tr(r) for r in rows) + "</table>")
+    return "".join(parts)
+
+
+_ROWS = [
+    ["TXG", "10x Genomics Inc.", "Healthcare", "Tom Tobin", "05/19/26",
+     "$21.70", "$82.59", "+277.47%", "3/6", "129 days"],
+    ["MSFT", "Microsoft Corporation", "KM Signal", "KM Signal", "08/12/26",
+     "$493.20", "$515.37", "+4.47%", "KM Signal", "44 days"],
+    ["RPBPF", "Raspberry Pi Holdings Plc", "KM Signal", "KM Signal", "09/25/26",
+     "$9.85", "$9.85", "-7.11%", "KM Signal", "0 days"],
+]
+
+
+def test_dashboard_adding_and_removing_labels():
+    """The 9/25 email that parsed empty: '(8 added, 1 removed)'."""
+    out = parse_body(_dash("AKAM, GLBE, GTBIF, LLY, MARA, MRVL, RBRK, RPBPF",
+                           "U", _ROWS))
+    assert out["added"][:2] == ["AKAM", "GLBE"], out["added"]
+    assert "U" in out["removed"], out["removed"]
+
+
+def test_dashboard_table_header_does_not_leak_a_T():
+    """'Ticker' follows the REMOVING list directly; its capital T must not be
+    harvested as AT&T."""
+    raw = parse_body.__globals__["_strip_html"](_dash(None, "VREOF", _ROWS))
+    m = REMOVED_RE.search(raw)
+    assert m and m.group(1).split() == ["VREOF"], (m and m.group(1))
+
+
+def test_dashboard_remove_only_email():
+    out = _p("REMOVING: VREOF Ticker Name Sector")
+    assert out["removed"] == ["VREOF"] and out["added"] == [], out
+
+
+def test_roster_table_parses_every_row_and_skips_header():
+    from parser_signal_strength import parse_roster_table
+    rows = parse_roster_table(_dash("RPBPF", "U", _ROWS))
+    assert [r["ticker"] for r in rows] == ["TXG", "MSFT", "RPBPF"], rows
+    assert rows[1]["best_idea_rank"] == "KM Signal"
+    assert rows[0]["entry_price"] == "$21.70"
+
+
+def test_old_layout_has_no_roster():
+    from parser_signal_strength import parse_roster_table
+    assert parse_roster_table("<p>Added: WRBY Removed: CVX</p>") == []
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0

@@ -242,34 +242,90 @@ def _stage_upload(body: str) -> str:
     return "\n".join(out)
 
 
-def _commit_anchor(pending: dict) -> str:
+def _write_anchor(upload: set, anchor_date, note: str, max_remove_pct=None):
+    """Declarative reconcile of ss_roster_history to `upload`. Returns
+    (current, add, rem, anchor_id); anchor_id is None if max_remove_pct refused it."""
     import db_pg
     from psycopg2.extras import Json
-    upload = set(pending["tickers"])
-    today = _utc_date()
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT ticker FROM ss_roster_history WHERE removed_on IS NULL")
             current = {r[0] for r in cur.fetchall()}
             add, rem = sorted(upload - current), sorted(current - upload)
+            if (max_remove_pct is not None and current
+                    and len(rem) / len(current) * 100 > max_remove_pct):
+                return current, add, rem, None
             cur.execute(
                 "INSERT INTO ss_roster_anchor "
                 "(anchor_date, ticker_count, tickers, roster_before, diff_added, diff_removed, note) "
-                "VALUES (%s,%s,%s,%s,%s,%s,'telegram_upload') RETURNING id",
-                (today, len(upload), Json(sorted(upload)), len(current), Json(add), Json(rem)))
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (anchor_date, len(upload), Json(sorted(upload)), len(current),
+                 Json(add), Json(rem), note))
             anchor_id = cur.fetchone()[0]
             for t in add:
                 cur.execute("INSERT INTO ss_roster_history (ticker, added_on, add_source, anchor_id) "
-                            "VALUES (%s, %s, 'anchor', %s)", (t, today, anchor_id))
+                            "VALUES (%s, %s, 'anchor', %s)", (t, anchor_date, anchor_id))
             for t in rem:
                 cur.execute("UPDATE ss_roster_history SET removed_on=%s, remove_source='anchor', "
                             "anchor_id=%s, updated_at=now() WHERE ticker=%s AND removed_on IS NULL",
-                            (today, anchor_id, t))
+                            (anchor_date, anchor_id, t))
         conn.commit()
+    return current, add, rem, anchor_id
+
+
+def _commit_anchor(pending: dict) -> str:
+    upload = set(pending["tickers"])
+    today = _utc_date()
+    current, add, rem, _ = _write_anchor(upload, today, "telegram_upload")
     _clear_pending()
     _set_bot_state("ss_last_anchor_date", today.isoformat())
     return (f"✅ SS anchor set: {len(upload)} names. Delta roster was {len(current)}; "
             f"corrected +{add or 'none'} −{rem or 'none'}.")
+
+
+def anchor_from_email(tickers, snapshot_date, source_email_id=None,
+                      header_count=None) -> dict:
+    """Anchor to the full roster table in a dashboard-layout SS email (9/25+).
+
+    Self-validating instead of human-confirmed: writes only if the table's row
+    count equals the subject's "N Stocks" header, and refuses (with a squawk)
+    anything that would drop > REPLACE_GUARD_PCT of the roster — the same
+    guard a Telegram paste needs CONFIRM REPLACE to pass. A clean anchor sets
+    ss_last_anchor_date, which retires the Friday paste prompt."""
+    upload = _norm(tickers)
+    if header_count is None or len(upload) != header_count:
+        log.warning("ss email anchor skipped: %d table rows vs header %s",
+                    len(upload), header_count)
+        return {"anchored": False, "reason": "count-mismatch",
+                "rows": len(upload), "header_count": header_count}
+
+    current, add, rem, anchor_id = _write_anchor(
+        set(upload), snapshot_date, f"email_table:{source_email_id}",
+        max_remove_pct=REPLACE_GUARD_PCT)
+    if anchor_id is None:
+        try:
+            from notifier import send_telegram
+            send_telegram("SS Roster",
+                          f"🛑 SS email table would remove {len(rem)}/{len(current)} names "
+                          f"({snapshot_date}) — NOT applied. Check the email; paste "
+                          f"SS: ... + CONFIRM REPLACE if it's real.", priority=2)
+        except Exception as e:
+            log.warning("ss email anchor refusal squawk failed: %s", e)
+        return {"anchored": False, "reason": "replace-guard",
+                "would_add": add, "would_remove": rem}
+
+    _set_bot_state("ss_last_anchor_date", snapshot_date.isoformat())
+    if add or rem:
+        try:
+            from tools.ss_flow import stamp_unstamped
+            log.info("ss_flow stamp (email anchor): %s", stamp_unstamped())
+        except Exception as e:
+            log.warning("ss_flow stamping failed: %s", e)
+    log.info("ss email anchor %s: %d names, corrected +%s -%s",
+             anchor_id, len(upload), add, rem)
+    return {"anchored": True, "anchor_id": anchor_id, "count": len(upload),
+            "roster_before": len(current), "corrected_add": add,
+            "corrected_remove": rem}
 
 
 # ─────────────────────────── Friday anchor prompt + re-ping (step 5) ───────────────────────────
