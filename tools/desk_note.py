@@ -232,6 +232,13 @@ def build_note(full: bool = False):
          + (f" (tilt {spx_tilt:.2f})" if spx_tilt else ""),
          "",
          "EXPOSURE by sleeve (gross):"]
+    # T1A vs SG flip lines (desk 9/26) — right under STANCE, where the regime
+    # call lives. Guarded: missing data prints its own "no data" line.
+    try:
+        from tools.t1a_vs_sg import build_block
+        L[3:3] = build_block().split("\n") + [""]
+    except Exception as e:  # noqa: BLE001
+        L[3:3] = [f"🧭 T1A vs SG unavailable: {e}", ""]
     for k, v in sorted(sleeves.items(), key=lambda kv: -kv[1])[:8]:
         L.append(f"  {k or 'untagged':<24}{_money(v):>10}  {v / gross * 100:.0f}%")
     L.append("")
