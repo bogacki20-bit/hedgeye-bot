@@ -27,6 +27,12 @@ datacenter IPs like Railway's. Railway only reads the stored numbers.
    flat-market projection of the next cross.
 5. `py parser_t1a.py --json <that json> --date <date>`: the validator blocks
    misreads (levels >8% from spot, inverted PV band, unknown status words).
+5b. `py parser_t1a.py --send --date <date>` → the full T1A card to Telegram
+   (~7:00, 2 messages): flip-line block + `tools.t1a_vs_sg.full_detail`
+   (NDX/RUT, strikes, VC flow ±5%, term structure, every event, sector PV
+   bands, rVol drop-off, breadth, impact leaders). The 9:40 desk note keeps
+   the compact block only (it is capped at 4,000 chars); NOTE FULL carries
+   the full detail too.
 6. `py parser_t1a.py --show --date <date>` → report the block.
 
 Do NOT: sign in (if Hedgeye shows a login page, stop and tell Kris), grant

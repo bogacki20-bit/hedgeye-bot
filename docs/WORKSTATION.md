@@ -79,6 +79,50 @@ RP/CAP/MOVES/TARGET/WRAP/QUAD/SS.
 - VSCO→VSXY (symbol_guard SYMBOL_ALIASES). ~5:30 AM console-kill costs
   one canary cycle, self-heals. The cat opens Calculator.
 
+## Tier1 Alpha + SG levels (built 9/26, `5658b19`)
+- `t1a_snapshots` (T1A MSR: GEX flip, PV bands, throttle, systematic z,
+  vol-control flow) + `sg_index_levels` (SG vol trigger/zero gamma/walls/tilt
+  per index, written by founders_note.py). 🧭 T1A-vs-SG block sits under
+  STANCE in the desk note; `py parser_t1a.py --show`.
+- Whole report stored (migration 114): short-dated IV term structure + event
+  calendar, systematic/VC/CTA, rVol drop-off, sector PV bands, breadth.
+  `spx_realized_vol` (tools/rv_cross.py) = our exact SPX 1m/3m with crosses
+  (±0.25 band) + flat-market projection; last cross down 8/17.
+- Capture = scheduled Claude task `t1a-daily-capture` (weekdays 06:50) driving
+  Kris's signed-in Chrome, on his home IP. Runbook: docs/T1A_CAPTURE.md.
+- Delivery: the FULL T1A card on Telegram ~7:00 (`parser_t1a.py --send`, every
+  table), the compact block in the 9:40 desk note (capped at 4,000 chars), and
+  the full detail in NOTE FULL.
+- Bot Chrome :9222 was DOWN 9/26 and has no Hedgeye login; Kris to run
+  `start_hedgeye_chrome.bat` and sign in.
+
+## Macro Show deck (built 9/26)
+- `tms_decks` (migration 115): the whole daily slide pack. Top 3 text, Our
+  Process (live GIP quad model: GDP/CPI table + quad path), Macro Grind
+  (sectors, factors, $USD corr, CFTC, yield curve), Volatility (IVol vs RVol,
+  VIX/MOVE/HY/FX/BBB), and every Chart Callout. `py parser_tms_deck.py --show`.
+- Quad model estimates → `hedgeye_quad_stated` (product 'Macro Show Deck').
+  Never writes the confirmed quad; `--show` flags a deck-vs-QUAD: mismatch.
+- Capture = scheduled Claude task `tms-deck-capture` (weekdays 09:45, after
+  the show) through the same Chrome + S3 path. Runbook: docs/TMS_DECK_CAPTURE.md.
+- Delivery: its own Telegram card ~9:50 (after the 9:40 desk note, quad
+  alert first) + a MACRO SHOW DECK block in the EOD stat pack.
+  Stored so far: 9/25. The 9/24 PDF is saved but not yet read.
+
+## Open items (as of 9/25 close)
+- **SS dashboard layout (9/25)**: parser fixed (`a07c63d`, ADDING/REMOVING +
+  full-roster table → auto-anchor; Friday `SS:` paste now redundant) —
+  **needs `railway up`** (Kris to OK; working tree also has an uncommitted
+  `_mfr_gap_report.py` edit).
+- **MARKET frozen single-name px** (ticket 9/25): Step 1 diagnosed — single
+  names read `mfr_snapshots.price` (daily sync ~9:35 + incidental scanner
+  refetches, 974× MFR 429s/day); only ETFs get a live quote (never persisted);
+  header clock is UTC labeled ET. Step 2/3 fix (quote_snapshots table, batched
+  quotes, px @ET per line, ⚠stale-px, NY clock) **awaiting Kris go**;
+  acceptance #1 needs two live runs in market hours.
+- **Book value excludes Fidelity "Pending activity"** (IND ~$2.7K) — Kris
+  asked; offer to include it pending an answer.
+
 ## Open items (as of 9/24 AM)
 - **Kris rulings**: #5 EXIT-on-breakout split (live, confirm) · #7
   ladder X/Y (cover-some X% below last fill; re-short Y% bounce) — last-

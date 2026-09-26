@@ -250,6 +250,14 @@ def _msr_email(day: dt.date):
         return cur.fetchone()
 
 
+def _t1a_row_date(day: dt.date) -> dt.date | None:
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT report_date FROM t1a_snapshots WHERE report_date=%s", (day,))
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
 def _email_id_for(report_date: str | None) -> str | None:
     if not report_date:
         return None
@@ -289,6 +297,8 @@ def _cli() -> int:
     g.add_argument("--render", metavar="PDF", help="write pages 1/4/5 as PNGs next to the PDF")
     g.add_argument("--link", action="store_true")
     g.add_argument("--show", action="store_true")
+    g.add_argument("--send", action="store_true",
+                   help="send the full T1A card (block + every table) to Telegram")
     ap.add_argument("--date", help="report date YYYY-MM-DD (default: today ET)")
     ap.add_argument("--dry-run", action="store_true", help="extract + validate, no write")
     args = ap.parse_args()
@@ -307,6 +317,22 @@ def _cli() -> int:
         from tools.t1a_vs_sg import build_block
         print(build_block(day))
         return 0
+    if args.send:
+        # The trading-day card (desk 9/26: "the full tier one for trading that
+        # day"). The 9:40 desk note is capped at 4,000 chars, so the full
+        # report goes out as its own message; notifier chunks it at 4,096.
+        from tools.t1a_vs_sg import build_block, full_detail
+        if _t1a_row_date(day) != day:
+            print(f"NOT sent: no T1A report stored for {day}")
+            return 1
+        block = build_block(day).split("\n")
+        body = "\n".join(block[1:] + [""] + full_detail(day))
+        from parser_tms_deck import load_telegram_env
+        load_telegram_env()
+        from notifier import send_telegram
+        ok = send_telegram(block[0], body)
+        print("sent" if ok else "NOT sent (Telegram error, see log)")
+        return 0 if ok else 1
 
     if args.render:
         import pathlib

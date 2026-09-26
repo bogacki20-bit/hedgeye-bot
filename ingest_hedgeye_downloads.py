@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 DOWNLOADS = Path(r"C:\Users\bogac\Downloads")
-REPO = Path(r"C:\Projects\hedgeye-bot")
+REPO = Path(__file__).resolve().parent     # whichever checkout runs it
 CORPUS = REPO / "data" / "snapshots" / "hedgeye"
 
 # Filename patterns: each entry is (regex, sub_folder_under_date)

@@ -322,6 +322,12 @@ def build_note(full: bool = False):
         pass
     L.append("")
     if full:
+        # the whole Tier1 MSR (desk 9/26) — only the uncapped document has room
+        try:
+            from tools.t1a_vs_sg import full_detail
+            L.extend(full_detail() + [""])
+        except Exception as e:  # noqa: BLE001
+            L.extend([f"📑 T1A detail unavailable: {e}", ""])
         L.append(f"THESIS CARDS — all {len(cards)} positions "
                  f"(in: = first entry ≤120d; 🚩 = needs eyes):")
         L.extend("  " + c for c in cards)

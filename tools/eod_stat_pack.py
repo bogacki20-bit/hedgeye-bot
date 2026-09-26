@@ -1526,6 +1526,14 @@ def build_eod_pack(persist: bool = True) -> str:
         parts.extend(build_block())
     except Exception as _e:  # noqa: BLE001
         parts.append(f"ENERGY COMPLEX: unavailable ({_e})")
+    # Macro Show deck (operator 9/26): quad model, vol/IVol, CFTC, callouts.
+    # Its tables are the session BEFORE the show; the block says which.
+    try:
+        from parser_tms_deck import eod_block
+        parts.append("")
+        parts.extend(eod_block(last_bar))
+    except Exception as _e:  # noqa: BLE001
+        parts.append(f"MACRO SHOW DECK: unavailable ({_e})")
     parts.append("VOL COMPLEX (VIX/VXN/RVX/VVIX/MOVE/GVZ/OVX) + IVOL: Phase 2")
     parts.append("CFTC positioning + FX realized-vol proxy: Phase 3")
     body = "\n".join(parts)
