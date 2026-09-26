@@ -114,12 +114,20 @@ RP/CAP/MOVES/TARGET/WRAP/QUAD/SS.
   full-roster table → auto-anchor; Friday `SS:` paste now redundant) —
   **needs `railway up`** (Kris to OK; working tree also has an uncommitted
   `_mfr_gap_report.py` edit).
-- **MARKET frozen single-name px** (ticket 9/25): Step 1 diagnosed — single
-  names read `mfr_snapshots.price` (daily sync ~9:35 + incidental scanner
-  refetches, 974× MFR 429s/day); only ETFs get a live quote (never persisted);
-  header clock is UTC labeled ET. Step 2/3 fix (quote_snapshots table, batched
-  quotes, px @ET per line, ⚠stale-px, NY clock) **awaiting Kris go**;
-  acceptance #1 needs two live runs in market hours.
+- **MARKET frozen single-name px** (ticket 9/25): BUILT 9/26 (`0357f85`) with
+  the TRADE/TREND levels. Yahoo `live_quotes` (5-min loop in main.py), v_screener
+  price = newer of Yahoo vs MFR, MARKET corpus-first + @HH:MM ET + ⚠stale-px +
+  NY clock. Acceptance #2–#5 pass; **#1 (two live runs ≥15 min apart) Monday
+  in market hours.** Takes effect on Telegram only after **`railway up`**.
+
+## TradingView TRADE / TREND (built 9/26, `0357f85`)
+- Kris's rule: TREND = MFR Trend daily band, TRADE = Vola2vola daily line
+  (tested on Keith's Alpha Codes; bearish = unvalidated mirror, shown ·mir / *).
+- `tv_levels` ← scheduled task `tv-levels-overnight` (Tue–Sat 00:05) driving
+  Kris's TradingView tab (adds Vola2vola unsaved if missing). Runbook
+  docs/TV_LEVELS.md. First run 9/26: 735 tickers, all 68 held names.
+- Everywhere via v_screener.tv_trade / tv_trend: MARKET lines, SCREEN, BOOK RP
+  columns, RP <tkr>, desk-note cards. Laptop must be awake at midnight.
 - **Book value excludes Fidelity "Pending activity"** (IND ~$2.7K) — Kris
   asked; offer to include it pending an answer.
 
