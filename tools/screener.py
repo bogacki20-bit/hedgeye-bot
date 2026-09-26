@@ -831,11 +831,29 @@ def _is_mfr_only_topidea(r) -> bool:
             and r.get("trend_source") == "mfr")
 
 
+def _attach_tt(rows) -> None:
+    """Fill tv_trade / tv_trend / tv_basis on rows that lack them (one query)."""
+    need = [r["ticker"] for r in rows if "tv_trade" not in r]
+    if not need:
+        return
+    from tools.tt_levels import tt_map
+    tt = tt_map(need)
+    for r in rows:
+        if "tv_trade" not in r:
+            r["tv_trade"], r["tv_trend"], r["tv_basis"] = tt.get(r["ticker"], (None, None, None))
+
+
+def _tt_str(r) -> str:
+    from tools.tt_levels import tt_tag
+    return tt_tag(r.get("tv_trade"), r.get("tv_trend"), r.get("tv_basis"))
+
+
 def _fmt_gated(r) -> str:
     src = {"hedgeye": "hdg", "mfr": "mfr", "btcq": "btcq", "undr": "undr"}.get(r.get("trend_source"), "")
     td = (r["trend_dir"] or "none") + (f"·{src}" if src else "")
     rp = _rp_str(r)
-    return f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} trend={td:<12} rp={rp} px={_px_str(r)} rng={_rng_str(r)}"
+    return (f"  {_tier(r['hedgeye_bucket_0629']):<2} {r['ticker']:<9} {(r['subsector'] or ''):<18} "
+            f"trend={td:<12} rp={rp} px={_px_str(r)} rng={_rng_str(r)}{_tt_str(r)}")
 
 
 def _num(v, sign=False, nd=2) -> str:
@@ -1245,6 +1263,9 @@ def run_screen_q(q: dict) -> str:
     # Cloud position (price vs the MFR trend range) — annotate every slice row, then
     # optionally filter on above/in/below.
     _attach_cloud(slice_)
+    # TradingView TRADE/TREND on every row, whatever query built it (source=
+    # slices don't read v_screener) — matches, gated and DARK all share these dicts.
+    _attach_tt(slice_)
 
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
@@ -1370,7 +1391,8 @@ def run_screen_q(q: dict) -> str:
             lines.append("")
     if result:
         lines.append(f"{len(result)} match(es)   tier: ●●active ●top-idea ·bench")
-        lines.append("[tier·ticker·subsector·trend·rp·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]")
+        lines.append("[tier·ticker·subsector·trend·rp·px·rng·TRD/TND·mom·hurst·iv·rv·ivpd·cSPY·cUUP·vol]  "
+                     "TRD=TRADE (Vola2vola) TND=TREND (MFR Trend), daily · ·mir = bearish mirror")
         sg = _sg_for([r["ticker"] for r in result])
         cor = _corridor_for([r["ticker"] for r in result])
         lines += [_fmt_row(r, corr, vol, ivpct, sg, cor) for r in result]
@@ -1476,6 +1498,7 @@ def run_screen_q(q: dict) -> str:
         lines.append(f"🌑 DARK — {dark_hdr} ({len(dark)}):")
         lines += [f"  {_tier(r['hedgeye_bucket_0629'])} {r['ticker']:<9} "
                   f"{(r['subsector'] or '—')} [{r['hedgeye_bucket_0629'] or tag_fallback}]"
+                  f"{_tt_str(r)}"
                   for r in dark]
     else:
         base = src_noun or ("held" if q["held"] else "tag-matched")
