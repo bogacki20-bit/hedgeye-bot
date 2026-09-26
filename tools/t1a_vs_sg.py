@@ -60,4 +60,34 @@ def build_block(day: dt.date | None = None) -> str:
     if s:
         lines.append(f"  SG: tilt {_f(s['gamma_tilt'], 2)} · notional ${_f(s['gamma_notional_mm'])}M"
                      f" · CW {_f(s['call_wall'])} · PW {_f(s['put_wall'])} · absγ {_f(s['abs_gamma_strike'])}")
+    if t:
+        lines.extend(_t1a_extras(t))
+    try:                                   # our exact 1m/3m cross (tools.rv_cross)
+        from tools.rv_cross import status_lines
+        lines.extend(status_lines())
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"📉 rVol cross unavailable: {e}")
     return "\n".join(lines)
+
+
+def _t1a_extras(t: dict) -> list[str]:
+    """Systematic/vol-control, short-dated vol and breadth from the full MSR."""
+    out = []
+    if t.get("vc_notional_bn") is not None or t.get("cta_position") is not None:
+        out.append(f"  systematic: VC notional ~${_f(t.get('vc_notional_bn'))}bn · CTA ~{_f(t.get('cta_position'))}"
+                   f" · T1A rVol 1m/3m ~{_f(t.get('rv_1m_t1a'), 1)}/{_f(t.get('rv_3m_t1a'), 1)} (chart reads)")
+    ts = t.get("term_structure") or []
+    if len(ts) >= 2:
+        front, back = ts[0], ts[-1]
+        peak = max(ts, key=lambda r: r["iv"])
+        out.append(f"  short-dated IV {front['iv']:.2f} ({front['expiry'][5:]}) → {back['iv']:.2f} "
+                   f"({back['expiry'][5:]}) · peak {peak['iv']:.2f} on {peak['expiry'][5:]}")
+    hi = [e for e in (t.get("event_calendar") or []) if e.get("impact") == "high"]
+    if hi:
+        nxt = hi[:3]
+        out.append("  next high-impact: " + " · ".join(
+            f"{e['date'][5:]} {e['event']} ±{_f(e.get('expected_move_pct'), 2)}%" for e in nxt))
+    if t.get("stocks_up") is not None:
+        out.append(f"  breadth: {t['stocks_up']} up / {t['stocks_down']} down · above 20/50/200d "
+                   f"~{_f(t.get('breadth_20d_pct'))}/{_f(t.get('breadth_50d_pct'))}/{_f(t.get('breadth_200d_pct'))}%")
+    return out

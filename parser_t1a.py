@@ -35,7 +35,9 @@ import sys
 log = logging.getLogger(__name__)
 
 T1A_MODEL = os.getenv("T1A_MODEL", "claude-sonnet-5")
-PAGES = (1, 4, 5)            # key levels · systematic positioning · index PV bands
+# 1 key levels · 2 short-dated vol + event calendar · 3 dealer gamma · 4 systematic
+# positioning · 5 index PV bands · 6 sector PV bands · 7 breadth (8-9 = glossary)
+PAGES = (1, 2, 3, 4, 5, 6, 7)
 RENDER_ZOOM = 2.0
 
 STATUS_SETS = {
@@ -70,9 +72,31 @@ Read the values EXACTLY as printed. Return ONLY one JSON object, no prose:
                                        // "Est. Chg $bn" row above the Vol Control
                                        // Implied Rebalancing Flow chart
  "ndx_zero_gamma": number, "ndx_upper_pv": number, "ndx_lower_pv": number,
- "rut_zero_gamma": number, "rut_upper_pv": number, "rut_lower_pv": number
+ "rut_zero_gamma": number, "rut_upper_pv": number, "rut_lower_pv": number,
                                        // legends of the NDX / Russell 2000
-                                       // Probable Volatility charts
+                                       // Probable Volatility charts (p5)
+ "strikes_in_play": {"SPX": [n...], "NDX": [n...], "RUT": [n...]},   // p5 boxes
+ "term_structure": [{"expiry": "YYYY-MM-DD", "iv": n}],   // p2 chart: every labeled point
+ "event_calendar": [{"date": "YYYY-MM-DD", "event": s, "estimate": n|null,
+                     "previous": n|null, "impact": "low|medium|high", "call_iv": n,
+                     "put_iv": n, "spx_iv": n, "expected_move_pct": n,
+                     "pc_vol": n, "pc_oi": n}],            // p2 table, every row
+ "gex_per_1pct_bn": number,            // p3 legend "GEX Per 1%/Move: $5B" -> 5
+ "rv_10d": number,                     // p3 throttle box "10-Day rVol"
+ "rv_1m_t1a": number, "rv_3m_t1a": number,   // p4 1m/3m realized lines, right end (approx)
+ "vc_notional_bn": number,             // p4 Vol Control implied notional, right end (approx, $bn)
+ "cta_position": number,               // p4 CTA positioning blue line, right end (approx)
+ "rv_dropoff": [{"t": 1, "d1m": "YYYY-MM-DD", "drop1m": n, "d3m": "YYYY-MM-DD", "drop3m": n}],
+                                       // p4 "SPX Realized Vol Data In Sample" table T+1..T+10
+ "sector_bands": [{"asset": s, "last": n, "lower": n, "upper": n, "upside_pct": n,
+                   "downside_pct": n, "spread_pct": n, "rvol_1m": n, "beta_2y": n}],  // p6 table
+ "stocks_up": int, "stocks_down": int, "spx_daily_pct": n, "avg_return_pct": n,
+ "avg_gain_pct": n, "avg_decline_pct": n,                // p7 MBAD box + legend
+ "breadth_20d_pct": n, "breadth_50d_pct": n, "breadth_200d_pct": n,
+                                       // p7 blue breadth lines, right end, RIGHT axis 0-100 (approx)
+ "impact_leaders": [{"side": "pos|neg", "ticker": s, "ret_pct": n, "impact_pct": n, "weight_pct": n}],
+                                       // p7 relative-impact table, all 20 rows
+ "approx_fields": ["sys_positioning_z", ...]   // every field read off a chart line
 }
 Percent fields are plain numbers (1.49 means 1.49%). Use null for anything
 not visible in these images — never guess a number."""
@@ -137,6 +161,20 @@ def validate(d: dict) -> tuple[list[str], list[str]]:
     vc = d.get("vc_flow_by_move") or {}
     if vc and set(vc) != {str(i) for i in range(-5, 6)}:
         warn.append(f"vc_flow_by_move keys {sorted(vc)} incomplete")
+    for k, lo_, hi_ in (("rv_10d", 2, 150), ("rv_1m_t1a", 2, 150), ("rv_3m_t1a", 2, 150),
+                        ("breadth_20d_pct", 0, 100), ("breadth_50d_pct", 0, 100),
+                        ("breadth_200d_pct", 0, 100)):
+        v = d.get(k)
+        if v is not None and not lo_ <= v <= hi_:
+            warn.append(f"{k}={v} outside {lo_}-{hi_} — dropped")
+            d[k] = None
+    up, dn = d.get("stocks_up"), d.get("stocks_down")
+    if up is not None and dn is not None and not 480 <= up + dn <= 505:
+        warn.append(f"stocks up+down={up + dn}, expected ~500")
+    for row in d.get("term_structure") or []:
+        if not 3 <= (row.get("iv") or 0) <= 150:
+            hard.append(f"term_structure iv {row} implausible")
+            break
     for k in ("report_date", "data_date"):
         try:
             if d.get(k):
@@ -153,14 +191,22 @@ COLS = ("data_date", "gamma_exposure", "systematic_flow_risk", "pv_band_rr",
         "upside_risk_pct", "downside_risk_pct", "gex_throttle", "gex_flip",
         "implied_move_pct", "resistance_strike", "focal_strike", "support_strike",
         "sys_positioning_z", "vc_flow_by_move", "ndx_zero_gamma", "ndx_upper_pv",
-        "ndx_lower_pv", "rut_zero_gamma", "rut_upper_pv", "rut_lower_pv")
+        "ndx_lower_pv", "rut_zero_gamma", "rut_upper_pv", "rut_lower_pv",
+        # migration 114 — the rest of the report
+        "term_structure", "event_calendar", "gex_per_1pct_bn", "rv_10d",
+        "rv_1m_t1a", "rv_3m_t1a", "vc_notional_bn", "cta_position", "rv_dropoff",
+        "strikes_in_play", "sector_bands", "stocks_up", "stocks_down",
+        "spx_daily_pct", "avg_return_pct", "avg_gain_pct", "avg_decline_pct",
+        "breadth_20d_pct", "breadth_50d_pct", "breadth_200d_pct", "impact_leaders")
+JSON_COLS = {"vc_flow_by_move", "term_structure", "event_calendar", "rv_dropoff",
+             "strikes_in_play", "sector_bands", "impact_leaders"}
 
 
 def upsert(d: dict, report_date: str, capture_path: str,
            source_email_id: str | None) -> None:
     import db_pg
     from psycopg2.extras import Json
-    vals = [Json(d[c]) if c == "vc_flow_by_move" and d.get(c) is not None
+    vals = [Json(d[c]) if c in JSON_COLS and d.get(c) is not None
             else d.get(c) for c in COLS]
     sets = ", ".join(f"{c}=EXCLUDED.{c}" for c in COLS)
     with db_pg.get_conn() as conn, conn.cursor() as cur:

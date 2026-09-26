@@ -16,9 +16,15 @@ datacenter IPs like Railway's. Railway only reads the stored numbers.
 3. Straight away: `curl -s -o data/snapshots/hedgeye/<date>/t1a_msr.pdf '<s3 url>'`
    (same laptop, same home IP). Check the first bytes are `%PDF`.
 4. `py parser_t1a.py --render data/snapshots/hedgeye/<date>/t1a_msr.pdf`
-   → `_p1/_p4/_p5.png`. Read the three images and write
-   `data/snapshots/hedgeye/<date>/t1a_msr.json` in the `EXTRACT_PROMPT` schema
-   (parser_t1a.py). Read what's printed; null anything you can't see.
+   → `_p1` … `_p7.png`. Read all seven and write
+   `data/snapshots/hedgeye/<date>/t1a_msr.json` in the full `EXTRACT_PROMPT`
+   schema (parser_t1a.py): key levels, short-dated vol term structure + event
+   calendar, dealer gamma, systematic/vol-control/CTA + realized-vol drop-off,
+   index + sector PV bands, breadth + impact table. Chart-line reads go in
+   `approx_fields`; null anything you can't see.
+4b. `py -m tools.rv_cross`: our own exact SPX 1m/3m realized vol →
+   `spx_realized_vol`, crosses flagged with a ±0.25 hysteresis band, plus a
+   flat-market projection of the next cross.
 5. `py parser_t1a.py --json <that json> --date <date>`: the validator blocks
    misreads (levels >8% from spot, inverted PV band, unknown status words).
 6. `py parser_t1a.py --show --date <date>` → report the block.

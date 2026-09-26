@@ -140,6 +140,41 @@ def test_sg_notional_units_and_sign():
     assert r["SPX"]["risk_pivot"] == 7690
 
 
+def _closes(rets):
+    import datetime as dt
+    c, out, d = 100.0, [], dt.date(2026, 1, 1)
+    out.append((d, c))
+    for i, r in enumerate(rets, 1):
+        c *= (1 + r)
+        out.append((d + dt.timedelta(days=i), c))
+    return out
+
+
+def test_rv_cross_fires_once_on_a_real_vol_expansion():
+    from tools.rv_cross import compute
+    calm = [0.002 * (-1) ** i for i in range(70)]            # ~3 vol
+    storm = [0.02 * (-1) ** i for i in range(15)]            # ~32 vol
+    rows = compute(_closes(calm + storm))
+    ups = [r for r in rows if r["crossed"] == "up"]
+    assert len(ups) == 1, [r["trade_date"] for r in ups]
+
+
+def test_rv_cross_ignores_hairline_flips():
+    """Aug 2026: six flips on gaps of a few hundredths. Inside the ±0.25
+    band nothing should fire."""
+    from tools.rv_cross import compute
+    flat = [0.006 * (-1) ** i for i in range(120)]            # constant vol: 1m≈3m
+    rows = compute(_closes(flat))
+    assert not [r for r in rows if r["crossed"]], "hairline cross fired"
+
+
+def test_rv_projection_rolls_off_big_days():
+    from tools.rv_cross import project_flat
+    rets = [0.0] * 60 + [0.03, -0.03] + [0.0] * 5
+    p = project_flat(_closes(rets), days=25)
+    assert p[-1]["rv_1m"] < p[0]["rv_1m"], "1m rv should fall as the shock rolls off"
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0
