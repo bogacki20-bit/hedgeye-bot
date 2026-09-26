@@ -30,3 +30,6 @@ ts_export/
 
 # Hedgeye mail archive (subscriber content, personal use only - roadmap section 2)
 data/hedgeye_mail/
+
+# TradingView overnight level reads (daily data, lives in Postgres tv_levels)
+data/tv_levels/

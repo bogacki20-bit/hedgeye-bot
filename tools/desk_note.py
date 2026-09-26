@@ -160,8 +160,10 @@ def build_note(full: bool = False):
 
     # ── thesis cards ──
     scr = {r[0]: r for r in _rows(
-        "SELECT ticker, range_pos, trend_dir, price, range_low, range_high "
+        "SELECT ticker, range_pos, trend_dir, price, range_low, range_high, "
+        "       tv_trade, tv_trend, tv_basis "
         "FROM v_screener WHERE ticker = ANY(%s)", (held,))}
+    from tools.tt_levels import tt_tag
     sg = {r[0]: r for r in _rows(
         "SELECT DISTINCT ON (ticker) ticker, call_wall, put_wall FROM "
         "spotgamma_snapshots WHERE ticker = ANY(%s) AND snapshot_date >= "
@@ -209,6 +211,7 @@ def build_note(full: bool = False):
         card = (f"{s:<7}{side:<6}{_money(float(mv)):>9}  {tr[:4]}·rp{rp}{wall}  "
                 f"gl={float(gl):+.1f}%" if gl is not None else
                 f"{s:<7}{side:<6}{_money(float(mv)):>9}  {tr[:4]}·rp{rp}{wall}")
+        card += tt_tag(v[6], v[7], v[8]) if v else ""     # TRADE/TREND (TradingView)
         card += f"  in:{ent}" if ent else ""
         # the stale-short clock, run right (9/20): oldest OPEN lot, and
         # suppressed while the position is being scaled into

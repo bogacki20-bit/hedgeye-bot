@@ -484,7 +484,7 @@ def _ivpd_pct_for(tickers, window=60) -> dict:
 _SLICE_COLS = ("SELECT ticker, subsector, hedgeye_bucket_0629, hedgeye_group, "
                "range_pos, momentum_ok, "
                "momentum_dir, divergence, hurst, iv, rv, ivpd, trend_dir, trend_source, "
-               "held, has_range FROM v_screener")
+               "held, has_range, tv_trade, tv_trend, tv_basis FROM v_screener")
 
 
 def _rows(sql, args):
@@ -958,8 +958,11 @@ def _fmt_row(r, corr, vol=None, ivpct=None, sg=None, cor=None) -> str:
         volmark = " vol=↑"
     else:
         volmark = ""
+    from tools.tt_levels import tt_tag
+    tt = tt_tag(r.get("tv_trade"), r.get("tv_trend"), r.get("tv_basis")).strip()
     return (f"  {tier:<2} {r['ticker']:<9} {(r['subsector'] or '—'):<18} {trend:<11} "
-            f"rp={rp:<8} px={_px_str(r):<7} rng={_rng_str(r):<17} mom={md:<4} h={_num(r.get('hurst')):<5} "
+            f"rp={rp:<8} px={_px_str(r):<7} rng={_rng_str(r):<17} "
+            f"{(tt + ' ') if tt else ''}mom={md:<4} h={_num(r.get('hurst')):<5} "
             f"iv={_num(r.get('iv'))} rv={_num(r.get('rv'))} ivpd={_num(r.get('ivpd'), sign=True)}{_ivpd_tag(r, ivpct)} "
             f"cSPY={_num(cs, sign=True)} cUUP={_num(cu, sign=True)}"
             f"{(sg or {}).get(r['ticker'], '')}{div}{book}{cloud}{side}{wrap}{th}{warn}{volmark}")

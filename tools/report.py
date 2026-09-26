@@ -611,8 +611,15 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
         "",
         f"{'tkr':<8}{'acct':<9}{'side':<6}{'$val':>9}{'%book':>7}"
         f"{'rpST':>7}{'rpLT':>6}  {'5d lo-hi':<11}{'trend':<9}"
+        f"{'px':>9}{'TRADE':>9}{'TREND':>9}  "
         f"{'PM bucket':<15}{'src':<6}{'lots (in·legs·sess·last-fill)':<34}"
         f"{'top-corr'}"]
+
+    def _lv(v):
+        if v is None:
+            return "—"
+        v = float(v)
+        return f"{v:,.0f}" if abs(v) >= 1000 else f"{v:.2f}"
 
     def _f(v, fmt):
         return f"{v:{fmt}}" if v is not None else "n/a"
@@ -640,6 +647,10 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
             f"{_f(r.get('rp_now'), '.2f'):>7}"
             f"{_f(r.get('rp_lt'), '.2f'):>6}  {band:<11}"
             f"{(r.get('trend') or 'n/a'):<9}"
+            f"{_lv(r.get('px')):>9}"
+            f"{_lv((r.get('tt') or (None, None, None))[0]):>9}"
+            f"{_lv((r.get('tt') or (None, None, None))[1]):>9}"
+            f"{'*' if (r.get('tt') or (None, None, None))[2] == 'bear-mirror' else ' '} "
             f"{(r.get('bucket') or '-'):<15}{src:<6}"
             f"{(r.get('lot') or '-'):<34}{tc_s}"
             + (("   " + " ".join(tags)) if tags else ""))
@@ -791,6 +802,8 @@ def build_book_rp() -> str:
             s += "·⏱scaling"
         return s
 
+    from tools.tt_levels import tt_map
+    tt_by = tt_map([t for t, _, _ in pos])     # TradingView TRADE/TREND (Kris 9/26)
     dollars = {}
     rows = []
     for t, acct, mv in pos:
@@ -814,6 +827,8 @@ def build_book_rp() -> str:
                                                  rp.get("price")),
                      "cash_eq": t in cash_eq,
                      "lot": _lot_str(t),
+                     "px": rp.get("price"),
+                     "tt": tt_by.get(t),
                      "dark": rp.get("dark", False)})
 
     # exclude cash-equivalents from cluster dollars the way BOOK FULL parks
@@ -911,6 +926,12 @@ def build_rp_single(t: str) -> str:
              f"5d rp band {_n(lo)}-{_n(hi)}  "
              f"trend {r.get('trend_dir') or 'n/a'}",
              f"PM bucket: {(brow[0] if brow and brow[0] else '-')}"]
+    from tools.tt_levels import tt_map
+    tt = tt_map([t]).get(t)
+    if tt and (tt[0] is not None or tt[1] is not None):
+        lines.insert(3, f"TRADE {_n(tt[0])}  TREND {_n(tt[1])}"
+                        f"  (TradingView: Vola2vola / MFR Trend daily"
+                        f"{', bearish mirror — unvalidated' if tt[2] == 'bear-mirror' else ''})")
     if held:
         lines.append("held: " + "  ".join(
             f"{_acct_label(a)} {float(q):g}sh ${float(mv or 0):,.0f}"

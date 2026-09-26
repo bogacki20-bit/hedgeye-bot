@@ -446,6 +446,37 @@ if __name__ == "__main__":
     else:
         log.info("Wrapper flip-watch disabled (WRAPPER_FLIP_ENABLED=false).")
 
+    # Live Yahoo quotes for the whole screener universe (Kris 9/26 + MARKET ticket
+    # 9/25): every 5 min in US market hours, plus one post-close pass, so
+    # v_screener.price and range_pos never sit on MFR's 9:35 snapshot all day.
+    # One batched yf.download per ~150 names (~60s for the full universe).
+    if os.getenv("LIVE_QUOTES_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _live_quotes_loop():
+            import time
+            from zoneinfo import ZoneInfo
+            from datetime import datetime as _dt
+            last_close_pass = None
+            while True:
+                try:
+                    now_et = _dt.now(ZoneInfo("America/New_York"))
+                    hm = now_et.hour * 60 + now_et.minute
+                    weekday = now_et.weekday() < 5
+                    in_session = weekday and 9 * 60 + 25 <= hm <= 16 * 60 + 5
+                    close_pass = weekday and hm >= 16 * 60 + 15 and last_close_pass != now_et.date()
+                    if in_session or close_pass:
+                        from tools.quotes import refresh
+                        r = refresh()
+                        log.info("live_quotes: %d priced (%s)", len(r["quotes"]), r["run_id"])
+                        if close_pass:
+                            last_close_pass = now_et.date()
+                except Exception as e:
+                    log.error("live_quotes loop error: %s", e)
+                time.sleep(300)
+        threading.Thread(target=_live_quotes_loop, daemon=True, name="live-quotes").start()
+        log.info("Live-quotes thread started.")
+    else:
+        log.info("Live quotes disabled (LIVE_QUOTES_ENABLED=false).")
+
     # HTTP API â€” serves /api/scrape_ingest (+ /api/tape_report compat alias) so
     # scheduled scrape SKILLs (running in a sandbox with no DB access) can route
     # captures into Postgres over HTTP. Same daemon pattern. Toggle via

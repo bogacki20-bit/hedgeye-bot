@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from zoneinfo import ZoneInfo
 
 SENTINELS = ("MARKET", "MARKET UPDATE", "MKT")
 
@@ -58,57 +59,100 @@ def _rows(sql, args=None):
         return cur.fetchall()
 
 
-def _live_prices(tickers: list[str], budget_s: float = 20.0) -> dict:
-    """{ticker: live_price} via the bot's price-feed dispatcher, fetched in
-    parallel under a hard time budget. Anything slow/failed is simply absent —
-    the caller keeps the last-sync price. Never raises."""
-    out: dict = {}
-    try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+ET = ZoneInfo("America/New_York")
 
-        import yfinance_client
 
-        def one(t):
-            try:
-                d = yfinance_client.fetch_raw(t)
-                return t, (d or {}).get("price")
-            except Exception:
-                return t, None
+def _now_et() -> dt.datetime:
+    """Wall clock in ET, DST-aware. Railway runs in UTC — the 9/25 header
+    printed '06:02 PM ET' for a 2:02 PM ET run."""
+    return dt.datetime.now(ET)
 
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            futs = [ex.submit(one, t) for t in tickers]
-            for f in as_completed(futs, timeout=budget_s):
-                t, px = f.result()
-                if px:
-                    out[t] = px
-    except Exception:
-        pass  # budget exhausted or feed down — snapshot prices still stand
+
+def _run_id() -> str:
+    return f"mkt-{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%S%f}"
+
+
+# MARKET ticket 9/25: an unchanged-to-the-cent price vs the previous MARKET run
+# while the name's sector ETF moved >= this = the quote didn't really refresh.
+STALE_ETF_MOVE = 0.0010
+DEAD_SESSIONS = 3          # identical close over this many sessions = dead feed
+_SECTOR_OF = {name: etf for etf, name in SECTOR_ETF}
+
+
+def _prev_run_prices(tickers: list[str], run_id: str) -> dict:
+    """{ticker: price} from the most recent EARLIER MARKET run."""
+    return {t: float(p) for t, p in _rows(
+        "SELECT DISTINCT ON (ticker) ticker, price FROM quote_snapshots "
+        "WHERE ticker = ANY(%s) AND run_id LIKE 'mkt-%%' AND run_id < %s "
+        "  AND price IS NOT NULL ORDER BY ticker, run_id DESC", (tickers, run_id))}
+
+
+def _dead_feeds(tickers: list[str]) -> set:
+    """Names whose MFR close hasn't changed across DEAD_SESSIONS snapshots."""
+    return {t for (t,) in _rows(
+        "SELECT ticker FROM (SELECT ticker, price, row_number() OVER "
+        "  (PARTITION BY ticker ORDER BY snapshot_date DESC) rn FROM mfr_snapshots "
+        "  WHERE ticker = ANY(%s) AND snapshot_date >= CURRENT_DATE - 10) s "
+        "WHERE rn <= %s GROUP BY ticker "
+        "HAVING count(*) >= %s AND count(DISTINCT round(price, 2)) = 1",
+        (tickers, DEAD_SESSIONS, DEAD_SESSIONS))}
+
+
+def _screen_rows(tickers: list[str], live: bool = True, run_id: str | None = None) -> dict:
+    """{ticker: row} for any names MARKET prints.
+
+    Corpus-first: when live, a batched Yahoo refresh for exactly these names
+    lands in live_quotes / quote_snapshots BEFORE anything renders; the row is
+    then read back from v_screener (price = newer of Yahoo vs MFR) and rp is
+    recomputed here in Python from that price against the stored band.
+    A failed quote keeps the old price but is marked ⚠stale-px."""
+    tickers = sorted({t for t in tickers if t})
+    if not tickers:
+        return {}
+    run_id = run_id or _run_id()
+    priced: set = set()
+    if live:
+        try:
+            from tools.quotes import refresh
+            priced = set(refresh(tickers, run_id=run_id)["quotes"])
+        except Exception:
+            priced = set()
+    out = {}
+    for (t, lo, hi, trend, iv, rv, px, at, src, trd, tnd, basis, sector) in _rows(
+            "SELECT ticker, range_low, range_high, trend_dir, iv, rv, price, price_at, "
+            "       price_source, tv_trade, tv_trend, tv_basis, gics_sector "
+            "FROM v_screener WHERE ticker = ANY(%s)", (tickers,)):
+        band = (lo, hi) if lo is not None and hi is not None else None
+        rp = None
+        if px is not None and band and float(hi) > float(lo):
+            rp = (float(px) - float(lo)) / (float(hi) - float(lo))
+        out[t] = {"rp": rp, "trend": trend, "iv": iv, "rv": rv, "px": px, "band": band,
+                  "at": at, "src": src, "live": t in priced, "sector": sector,
+                  "tt": (trd, tnd, basis), "stale": None}
+        if live and t not in priced and px is not None:
+            out[t]["stale"] = "quote failed"
+    if live and out:
+        prev = _prev_run_prices(list(out), run_id)
+        for t, d in out.items():
+            etf = _SECTOR_OF.get(d["sector"])
+            e, p = out.get(etf), prev.get(etf)
+            if (d["stale"] or d["px"] is None or t not in prev or etf in (None, t)
+                    or not e or e["px"] is None or not p):
+                continue
+            etf_move = abs(float(e["px"]) / p - 1)
+            if round(float(d["px"]), 2) == round(prev[t], 2) and etf_move >= STALE_ETF_MOVE:
+                d["stale"] = f"unchanged vs last run, {etf} {etf_move * 100:+.2f}%"
+        for t in _dead_feeds(list(out)):
+            if t not in priced:
+                out[t]["stale"] = f"dead feed ({DEAD_SESSIONS}+ sessions unchanged)"
     return out
 
 
-def _fetch(live: bool = True) -> dict:
-    """{ticker: {rp, trend, iv, rv, px, band, live}} for the universe,
-    v_screener first, Hedgeye RR fallback for the composites. MFR prices are
-    from the DAILY sync — a 4pm MARKET was showing 10am prices (9/12), so
-    px is refreshed from the live feed and rp recomputed against the band."""
+def _fetch(live: bool = True, run_id: str | None = None) -> dict:
+    """{ticker: row} for the ETF/macro universe (see _screen_rows), plus the
+    Hedgeye Risk Range composites (VIX, UST10Y) that have no screener row."""
     univ = INDEXES + SECTORS + THEMES + COMMODITIES + MACRO
-    out = {}
-    for t, rp, trend, iv, rv, px, lo, hi in _rows(
-            "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
-            "       range_low, range_high FROM v_screener "
-            "WHERE ticker = ANY(%s)", (univ,)):
-        out[t] = {"rp": float(rp) if rp is not None else None,
-                  "trend": trend, "iv": iv, "rv": rv, "px": px,
-                  "band": (lo, hi) if lo is not None and hi is not None else None}
-    if live:
-        fresh = _live_prices([t for t in out])
-        for t, px in fresh.items():
-            d = out[t]
-            d["px"], d["live"] = px, True
-            if d["band"]:
-                lo, hi = float(d["band"][0]), float(d["band"][1])
-                if hi > lo:
-                    d["rp"] = (float(px) - lo) / (hi - lo)
+    out = _screen_rows(univ, live=live, run_id=run_id)
     for t, sg in _sg_snaps(list(out)).items():
         out[t]["sg"] = sg
     for t, trend, lo, hi, px, sd in _rows(
@@ -190,7 +234,7 @@ def _tilt_lines() -> list[str]:
         # a same-session print is PROVISIONAL — the 9/21 lesson: the 9:35
         # capture stored 1.05 intraday, the final close print was 1.56
         if d == dt.date.today() and fa is not None:
-            prov = f" ⚠ intraday capture @{fa.astimezone().strftime('%H:%M')} — final prints tomorrow 9:35"
+            prov = f" ⚠ intraday capture @{fa.astimezone(ET).strftime('%H:%M')} ET — final prints tomorrow 9:35"
         gt = float(gt)
         # three-state rule (9/20): the week of 9/14 printed 1.04->0.97->
         # 0.90->0.83->1.04 — a hard 1.00 split flips regime four times on
@@ -251,39 +295,43 @@ def _line(t: str, d: dict) -> str:
         rng = f"  {_px(px)} [{_px(band[0])}-{_px(band[1])}]"
     elif px is not None:
         rng = f"  {_px(px)}"
-    # quote provenance (desk fix 9/22 #4: names printed identical marks
-    # 10:39->15:35 with nothing saying so) — ·snap = last daily-sync price,
-    # no live quote landed inside the fetch budget
-    snap = "" if d.get("live") else " ·snap"
+    # quote provenance (MARKET ticket 9/25): every line carries the price's
+    # own time in ET; ⚠stale-px when the quote failed / didn't really move.
+    at = d.get("at")
+    when = f" @{at.astimezone(ET):%H:%M}" if at is not None else ""
+    if at is not None and at.astimezone(ET).date() != _now_et().date():
+        when = f" @{at.astimezone(ET):%m/%d %H:%M}"
+    stale = " ⚠stale-px" if d.get("stale") else ""
+    from tools.tt_levels import tt_tag
+    tt = tt_tag(*d["tt"]) if d.get("tt") else ""
     return (f"{_ARROW.get(tr, '·')} {t:<8}{rp_s:<6}{tr[:4]}"
-            f"{rng}{snap}{_sg_suffix(d)}{_vol_tag(d.get('iv'), d.get('rv'))}")
+            f"{rng}{when}{stale}{tt}{_sg_suffix(d)}{_vol_tag(d.get('iv'), d.get('rv'))}")
 
 
-def _pm_name_rows(names: list[str]) -> dict:
-    """v_screener rows + SG walls for PM names (MARKET FULL / drill-down)."""
-    out = {}
+def _pm_name_rows(names: list[str], live: bool = True, run_id: str | None = None) -> dict:
+    """Fresh-priced rows + SG walls for PM names (MARKET FULL / drill-down).
+    The sector ETFs ride along in the same quote run so the stale-px check can
+    compare each name against its own sector's move."""
     if not names:
-        return out
-    for t, rp, trend, iv, rv, px, lo, hi in _rows(
-            "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
-            "       range_low, range_high FROM v_screener "
-            "WHERE ticker = ANY(%s)", (names,)):
-        out[t] = {"rp": float(rp) if rp is not None else None,
-                  "trend": trend, "iv": iv, "rv": rv, "px": px,
-                  "band": (lo, hi) if lo is not None and hi is not None else None}
+        return {}
+    out = _screen_rows(list(names) + SECTORS, live=live, run_id=run_id)
+    out = {t: d for t, d in out.items() if t in set(names)}
     for t, sg in _sg_snaps(list(out)).items():
         out[t]["sg"] = sg
     return out
 
 
 def build_market_update(full: bool = False) -> str:
-    data = _fetch()
-    now = dt.datetime.now().strftime("%m/%d %I:%M %p")
+    run_id = _run_id()
+    data = _fetch(run_id=run_id)
+    now = _now_et().strftime("%m/%d %I:%M %p")
 
     add_long, add_short, stretched = [], [], []
     for t in INDEXES + SECTORS + THEMES + COMMODITIES + MACRO:
         d = data.get(t)
         if not d or d.get("rp") is None or not d.get("trend"):
+            continue
+        if d.get("stale"):          # ticket 9/25: a stale price never makes ZONES
             continue
         rp, tr = d["rp"], d["trend"]
         if tr == "BULLISH" and rp <= ADD_LONG_RP:
@@ -347,7 +395,7 @@ def build_market_update(full: bool = False) -> str:
         all_names = [t.lstrip("●") for b in buckets.values()
                      for t in b["long"] + b["short"]
                      + b.get("long_bench", []) + b.get("short_bench", [])]
-        name_rows = _pm_name_rows(all_names)
+        name_rows = _pm_name_rows(all_names, run_id=run_id)
     lines.append("")
     lines.append("SECTORS — Hedgeye PM (● top idea)")
     for etf, sector in SECTOR_ETF:
@@ -414,16 +462,9 @@ def build_sector_detail(etf: str) -> str:
     b = _pm_buckets().get(sector, {"long": [], "short": []})
     names = [t.lstrip("●") for t in b["long"] + b["short"]]
     tops = {t.lstrip("●") for t in b["long"] + b["short"] if t.startswith("●")}
-    data = {}
-    if names:
-        for t, rp, trend, iv, rv, px, lo, hi in _rows(
-                "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
-                "       range_low, range_high FROM v_screener "
-                "WHERE ticker = ANY(%s)", (names,)):
-            data[t] = {"rp": float(rp) if rp is not None else None,
-                       "trend": trend, "iv": iv, "rv": rv, "px": px,
-                       "band": (lo, hi) if lo is not None and hi is not None else None}
-    etf_data = _fetch().get(etf)
+    run_id = _run_id()
+    data = _screen_rows(names + [etf], run_id=run_id) if names else {}
+    etf_data = data.get(etf) or _screen_rows([etf], run_id=run_id).get(etf)
     lines = [f"📸 {etf} — {sector} (Hedgeye PM, ● top idea)"]
     if etf_data:
         lines.append(_line(etf, etf_data))
@@ -459,15 +500,7 @@ def build_sector_detail(etf: str) -> str:
             if extra:
                 lines.append("")
                 lines.append(f"SECTOR PRO — {label} (beyond the monitor)")
-                xdata = {}
-                for t, rp, trend, iv, rv, px, lo, hi in _rows(
-                        "SELECT ticker, range_pos, trend_dir, iv, rv, price, "
-                        "range_low, range_high FROM v_screener "
-                        "WHERE ticker = ANY(%s)", ([t for t, _ in extra],)):
-                    xdata[t] = {"rp": float(rp) if rp is not None else None,
-                                "trend": trend, "iv": iv, "rv": rv, "px": px,
-                                "band": (lo, hi) if lo is not None and
-                                        hi is not None else None}
+                xdata = _screen_rows([t for t, _ in extra] + [etf], run_id=run_id)
                 for t, side in extra:
                     d = xdata.get(t)
                     tag = "S" if side == "short" else "L"
