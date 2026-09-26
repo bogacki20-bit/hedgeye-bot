@@ -559,6 +559,85 @@ def build_block(day: dt.date, full: bool = False) -> str:
     return "\n".join(out)
 
 
+_ID_COLS = ("ticker", "sector", "name", "factor", "metric", "index", "series", "label",
+            "group", "section")
+
+
+def _cell(v) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+    return f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def _table(rows: list[dict]) -> list[str]:
+    """Every row, every column — identifiers first, then the deck's own order."""
+    if not rows:
+        return ["  (none)"]
+    cols = []
+    for r in rows:
+        cols.extend(k for k in r if k not in cols)
+    cols = [c for c in _ID_COLS if c in cols] + [c for c in cols if c not in _ID_COLS]
+    grid = [cols] + [[_cell(r.get(c)) for c in cols] for r in rows]
+    w = [min(max(len(g[i]) for g in grid), 40) for i in range(len(cols))]
+    return ["  " + "  ".join(g[i][:40].ljust(w[i]) for i in range(len(cols))).rstrip()
+            for g in grid]
+
+
+def full_text(day: dt.date) -> str | None:
+    """The WHOLE stored deck as plain text — every section, every row, the
+    Top 3 and process pages verbatim, every callout with its levels. This is
+    what goes to Telegram as one .txt file (REPORT UPLOAD pattern) so the
+    desk LLM gets the full deck, not the summary card."""
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT row_to_json(t) FROM tms_decks t WHERE show_date=%s", (day,))
+        row = cur.fetchone()
+    if not row:
+        return None
+    r = row[0]
+    out = [f"HEDGEYE MACRO SHOW DECK — show {r['show_date']} · tables = {r['data_date']} close · "
+           f"{r['page_count']} pages", "", "SUMMARY", build_block(day, full=True), ""]
+    out.append("=== TOP 3 (verbatim) ===")
+    for t in r.get("top3") or []:
+        out += [f"[p{t.get('page')}] {t.get('topic') or ''}".rstrip(), t.get("text") or "", ""]
+    qm = r.get("quad_model") or {}
+    if qm:
+        out.append(f"=== GIP QUAD MODEL (updated {qm.get('updated')}) ===")
+        out.append("  path: " + " → ".join(
+            f"{p['q']} Q{p['quad']}{'s' if p.get('shallow') else ''}{' (est)' if p.get('estimate') else ''}"
+            for p in qm.get("path") or []))
+        q = qm.get("quarters")
+        out += (_table(q) if isinstance(q, list) else [f"  {_cell(q)}"]) + [""]
+    for p, v in sorted((r.get("process_text") or {}).items(), key=lambda kv: int(kv[0])):
+        out += [f"=== OUR PROCESS p{p} ===", (v or {}).get("text", ""), ""]
+    for key, title in (("sector_perf", "SECTOR PERFORMANCE"), ("sector_rel", "SECTOR RELATIVE TO SPX"),
+                       ("volume", "VOLUME"), ("style_factors", "STYLE FACTORS"),
+                       ("usd_corr", "$USD CORRELATIONS"), ("cftc", "CFTC POSITIONING"),
+                       ("series", "SERIES (yields, spreads, …)"), ("macro_vol", "MACRO VOL"),
+                       ("ivol", "IMPLIED vs REALIZED VOL")):
+        out += [f"=== {title} ==="] + _table(r.get(key) or []) + [""]
+    out.append("=== CHART CALLOUTS ===")
+    for c in r.get("callouts") or []:
+        out.append(f"[p{c.get('page')}] {c.get('title') or '?'}"
+                   + (f"  (source: {c['source']})" if c.get("source") else ""))
+        if c.get("summary"):
+            out.append(f"  {c['summary']}")
+        lv = c.get("levels") or {}
+        rows = lv.get("rows") if isinstance(lv, dict) else lv
+        if rows:
+            out += _table(rows)
+        rest = {k: v for k, v in c.items() if k not in ("page", "title", "source", "summary", "levels")}
+        if rest:
+            out.append("  " + _cell(rest))
+        out.append("")
+    if r.get("extra_pages"):
+        out += ["=== OTHER PAGES ===", _cell(r["extra_pages"]), ""]
+    out.append("Sections: " + ", ".join(f"{k} p{v[0]}-{v[-1]}" for k, v in (r.get("sections") or {}).items() if v))
+    return "\n".join(out)
+
+
 def eod_block(day: dt.date) -> list[str]:
     """MACRO SHOW DECK block for the EOD stat pack: the latest deck on or
     before `day`, labeled with the close its tables use (always the session
@@ -601,17 +680,18 @@ def load_telegram_env() -> None:
 
 
 def send_card(day: dt.date) -> bool:
-    """The morning card: the deck summary as its own Telegram message, quad
-    line first when the model is new or disagrees with the confirmed quad."""
-    block = build_block(day)
-    if block.endswith("not stored"):
+    """The morning card: the WHOLE deck as one .txt attachment (Kris 9/26: the
+    summary message was far too small; send it like REPORT UPLOAD). Caption =
+    quad alert first when the model is new or disagrees with the confirmed quad."""
+    text = full_text(day)
+    if not text:
         return False
-    lines = block.split("\n")
+    lines = build_block(day).split("\n")
     alert = [l for l in lines if "NEW" in l or "≠" in l]
-    body = "\n".join((["⚠️ " + a.strip() for a in alert] + [""] if alert else []) + lines[1:])
+    caption = "\n".join(["⚠️ " + a.strip() for a in alert] + [lines[0]] + lines[1:2])
     load_telegram_env()
-    from notifier import send_telegram
-    return send_telegram(lines[0], body)
+    from notifier import send_telegram_document
+    return send_telegram_document(f"macro_show_deck_{day}.txt", text, caption)
 
 
 def _cli() -> int:
@@ -622,7 +702,8 @@ def _cli() -> int:
     g.add_argument("--zoom", nargs=2, metavar=("PDF", "PAGE"))
     g.add_argument("--json", metavar="FILE")
     g.add_argument("--show", action="store_true")
-    g.add_argument("--send", action="store_true", help="send the deck summary to Telegram")
+    g.add_argument("--send", action="store_true", help="send the whole deck to Telegram as one .txt")
+    g.add_argument("--full", action="store_true", help="print the whole-deck text that --send ships")
     g.add_argument("--eod", action="store_true", help="print the EOD-pack block")
     ap.add_argument("--date", help="show date YYYY-MM-DD (default: today ET)")
     ap.add_argument("--dry-run", action="store_true", help="validate only, no write")
@@ -644,6 +725,10 @@ def _cli() -> int:
     if args.eod:
         print("\n".join(eod_block(day)))
         return 0
+    if args.full:
+        text = full_text(day)
+        print(text or f"no deck stored for {day}")
+        return 0 if text else 1
     if args.send:
         ok = send_card(day)
         print("sent" if ok else f"NOT sent (deck for {day} stored? Telegram reachable?)")

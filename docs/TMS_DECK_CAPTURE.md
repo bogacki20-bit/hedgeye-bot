@@ -36,8 +36,8 @@ Tables are images: the Macro Grind and Volatility pages show the **prior close**
    The validator recomputes each quad from the GIP table (sign of the change
    in GDP YoY and CPI YoY) and blocks a path that disagrees. It also checks
    sector tickers and row counts, CFTC z-scores, and VIX range.
-7. `py parser_tms_deck.py --send --date <D>` → the morning Telegram card
-   (~9:50, own message, lands after the 9:40 desk note). The laptop .env has
+7. `py parser_tms_deck.py --send --date <D>` → the WHOLE deck as ONE .txt file on Telegram
+   (~9:50, every section and row, quad alert in the caption; `--full` prints it). The laptop .env has
    no Telegram token; `--send` loads it in-process from `railway variables`.
 8. `py parser_tms_deck.py --show --date <D>` → report the block.
 

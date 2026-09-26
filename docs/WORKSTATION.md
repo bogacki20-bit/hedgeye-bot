@@ -90,7 +90,7 @@ RP/CAP/MOVES/TARGET/WRAP/QUAD/SS.
   (±0.25 band) + flat-market projection; last cross down 8/17.
 - Capture = scheduled Claude task `t1a-daily-capture` (weekdays 06:50) driving
   Kris's signed-in Chrome, on his home IP. Runbook: docs/T1A_CAPTURE.md.
-- Delivery: the FULL T1A card on Telegram ~7:00 (`parser_t1a.py --send`, every
+- Delivery: the FULL T1A card as ONE .txt file on Telegram ~7:00 (`parser_t1a.py --send`, every
   table), the compact block in the 9:40 desk note (capped at 4,000 chars), and
   the full detail in NOTE FULL.
 - Bot Chrome :9222 was DOWN 9/26 and has no Hedgeye login; Kris to run
@@ -105,7 +105,7 @@ RP/CAP/MOVES/TARGET/WRAP/QUAD/SS.
   Never writes the confirmed quad; `--show` flags a deck-vs-QUAD: mismatch.
 - Capture = scheduled Claude task `tms-deck-capture` (weekdays 09:45, after
   the show) through the same Chrome + S3 path. Runbook: docs/TMS_DECK_CAPTURE.md.
-- Delivery: its own Telegram card ~9:50 (after the 9:40 desk note, quad
+- Delivery: the WHOLE deck as ONE .txt file on Telegram ~9:50 (`--send`; quad
   alert first) + a MACRO SHOW DECK block in the EOD stat pack.
   Stored so far: 9/25. The 9/24 PDF is saved but not yet read.
 

@@ -319,18 +319,18 @@ def _cli() -> int:
         return 0
     if args.send:
         # The trading-day card (desk 9/26: "the full tier one for trading that
-        # day"). The 9:40 desk note is capped at 4,000 chars, so the full
-        # report goes out as its own message; notifier chunks it at 4,096.
+        # day"), as ONE .txt attachment — Kris 9/26: not spread over several
+        # messages, easy to hand to the desk LLM (REPORT UPLOAD pattern).
         from tools.t1a_vs_sg import build_block, full_detail
         if _t1a_row_date(day) != day:
             print(f"NOT sent: no T1A report stored for {day}")
             return 1
         block = build_block(day).split("\n")
-        body = "\n".join(block[1:] + [""] + full_detail(day))
+        text = "\n".join(block + [""] + full_detail(day))
         from parser_tms_deck import load_telegram_env
         load_telegram_env()
-        from notifier import send_telegram
-        ok = send_telegram(block[0], body)
+        from notifier import send_telegram_document
+        ok = send_telegram_document(f"tier1alpha_{day}.txt", text, "\n".join(block[:3]))
         print("sent" if ok else "NOT sent (Telegram error, see log)")
         return 0 if ok else 1
 

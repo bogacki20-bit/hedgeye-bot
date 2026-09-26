@@ -28,7 +28,7 @@ datacenter IPs like Railway's. Railway only reads the stored numbers.
 5. `py parser_t1a.py --json <that json> --date <date>`: the validator blocks
    misreads (levels >8% from spot, inverted PV band, unknown status words).
 5b. `py parser_t1a.py --send --date <date>` → the full T1A card to Telegram
-   (~7:00, 2 messages): flip-line block + `tools.t1a_vs_sg.full_detail`
+   (~7:00, ONE .txt attachment for the desk LLM): flip-line block + `tools.t1a_vs_sg.full_detail`
    (NDX/RUT, strikes, VC flow ±5%, term structure, every event, sector PV
    bands, rVol drop-off, breadth, impact leaders). The 9:40 desk note keeps
    the compact block only (it is capped at 4,000 chars); NOTE FULL carries

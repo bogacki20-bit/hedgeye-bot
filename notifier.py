@@ -125,4 +125,39 @@ def send_telegram(title, message, priority=1):
     return ok
 
 
+def send_telegram_document(filename, text, caption=""):
+    """Send `text` as ONE .txt attachment (the REPORT UPLOAD pattern) so a long
+    card lands as a single file to hand to the desk LLM instead of a run of
+    4,096-char chunks. Caption is plain text, capped at Telegram's 1,024.
+    Returns True only if Telegram accepted the file."""
+    token   = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        log.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; cannot send.")
+        return False
+    if not text:
+        log.warning("Telegram document skipped: empty text (%s)", filename)
+        return False
+    try:
+        response = requests.post(
+            TELEGRAM_API.format(token=token).replace("/sendMessage", "/sendDocument"),
+            data={"chat_id": chat_id, "caption": (caption or "")[:1024]},
+            files={"document": (filename, text.encode("utf-8"))},
+            timeout=30,
+        )
+    except Exception as e:
+        log.error("Telegram document %s failed (transport): %s", filename, _redact(e))
+        return False
+    if response.ok:
+        log.info("Telegram document sent: %s (%d chars)", filename, len(text))
+        return True
+    try:
+        desc = (response.json() or {}).get("description") or ""
+    except Exception:
+        desc = (response.text or "")[:200]
+    log.error("Telegram document %s failed: http %s — %s",
+              filename, response.status_code, _redact(desc))
+    return False
+
+
 send_pushover = send_telegram
