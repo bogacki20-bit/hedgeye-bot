@@ -39,9 +39,11 @@ def compute(closes: list[tuple]) -> list[dict]:
         spread = (r1 - r3) if r1 is not None and r3 is not None else None
         crossed = None
         if spread is not None:
+            if state is None:              # seed the side from the first gap's sign,
+                state = "above" if spread > 0 else "below"   # without firing
             new = ("above" if spread > CROSS_BAND else
                    "below" if spread < -CROSS_BAND else state)
-            if state and new != state:
+            if new != state:
                 crossed = "up" if new == "above" else "down"
             state = new
         rows.append({"trade_date": d, "spx_close": c, "rv_10d": _rv(rets, W10),

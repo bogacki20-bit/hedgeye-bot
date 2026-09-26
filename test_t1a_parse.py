@@ -152,9 +152,10 @@ def _closes(rets):
 
 def test_rv_cross_fires_once_on_a_real_vol_expansion():
     from tools.rv_cross import compute
-    calm = [0.002 * (-1) ** i for i in range(70)]            # ~3 vol
+    busy = [0.008 * (-1) ** i for i in range(45)]            # ~13 vol
+    calm = [0.002 * (-1) ** i for i in range(30)]            # ~3 vol: 1m well below 3m
     storm = [0.02 * (-1) ** i for i in range(15)]            # ~32 vol
-    rows = compute(_closes(calm + storm))
+    rows = compute(_closes(busy + calm + storm))
     ups = [r for r in rows if r["crossed"] == "up"]
     assert len(ups) == 1, [r["trade_date"] for r in ups]
 
