@@ -1,5 +1,5 @@
 # WORKSTATION — the whole system on one page
-*Handoff doc, updated 2026-09-24. Start any new chat by pointing at this
+*Handoff doc, updated 2026-09-29. Start any new chat by pointing at this
 file. Deep detail: [BOT_COMMANDS.md](BOT_COMMANDS.md) (how to talk to the
 bot), [TRADING_DESK_PROMPT.md](TRADING_DESK_PROMPT.md) (the desk-LLM
 system prompt), [BUILD_LIST_2026-09-20.md](BUILD_LIST_2026-09-20.md)
@@ -109,16 +109,30 @@ RP/CAP/MOVES/TARGET/WRAP/QUAD/SS.
   alert first) + a MACRO SHOW DECK block in the EOD stat pack.
   Stored so far: 9/25. The 9/24 PDF is saved but not yet read.
 
-## Open items (as of 9/25 close)
-- **SS dashboard layout (9/25)**: parser fixed (`a07c63d`, ADDING/REMOVING +
-  full-roster table → auto-anchor; Friday `SS:` paste now redundant) —
-  **needs `railway up`** (Kris to OK; working tree also has an uncommitted
-  `_mfr_gap_report.py` edit).
-- **MARKET frozen single-name px** (ticket 9/25): BUILT 9/26 (`0357f85`) with
-  the TRADE/TREND levels. Yahoo `live_quotes` (5-min loop in main.py), v_screener
-  price = newer of Yahoo vs MFR, MARKET corpus-first + @HH:MM ET + ⚠stale-px +
-  NY clock. Acceptance #2–#5 pass; **#1 (two live runs ≥15 min apart) Monday
-  in market hours.** Takes effect on Telegram only after **`railway up`**.
+## Built 9/29 (all deployed)
+- **Position Monitor PDF, new two-column layout**: the importer rebuilds the one-column
+  text (`tools/pm_parse.relinearize_two_column`, pypdf only — works on Railway).
+  +2 sectors COMMODITIES and HOUSING. 9/28 PM loaded: 442 names (was 430).
+- **Signal Strength is sided** (migration 119): 53 longs + 96 shorts from the
+  dashboard CSV (`python -m tools.ss_roster --csv <file>` or drop it in Telegram).
+  The email only carries the longs. `SCREEN signal strength shorts` = dashboard
+  shorts + Keith's shorts; SHELF reads side='short'.
+- **TradingView ranges** (MFR Range indicator → tv_levels.range_*): last-resort range
+  tier in v_screener, SCREEN (`·tv`) and BOOK RP — nothing held is dark anymore.
+  The midnight job now reads MFR Range too (~2 h for ~750 names).
+- **SCREEN**: per-line `@HH:MM` price time, ⚠stale-px in market hours.
+- **BOOK RP**: DONE block = the last trade date's covers (all/some), shorts,
+  buys, sells (some/all) with $; candidate lists carry "(done: …)".
+- **MARKET frozen-price ticket: CLOSED** — acceptance #1 passed 9/29
+  (406/413 names re-priced between 9:52 and 10:07; the 7 are thin names).
+
+## Open items (as of 9/29)
+- **Scheduled tasks hang on their first unattended step** (t1a-daily-capture,
+  tms-deck-capture, tv-levels-overnight — 9/28 and 9/29). Kris: Run now once each
+  with "always allow", or OK an allowed-command list. Until then the watch
+  session runs T1A / the deck manually (9/29: both done by hand).
+- Claude-in-Chrome dropped all day 9/28 (Kris's main Chrome closed/restarted).
+- Book value excludes Fidelity "Pending activity" — offer to include, unanswered.
 
 ## TradingView TRADE / TREND (built 9/26, `0357f85`)
 - Kris's rule: TREND = MFR Trend daily band, TRADE = Vola2vola daily line
