@@ -584,26 +584,35 @@ def format_rp_clusters(cl, warn_pct=8.0, reject_pct=12.0) -> list:
 
 def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
                    sector_cap_lines=None, total_book=None,
-                   corr_coverage=None) -> str:
+                   corr_coverage=None, done_lines=None, done_notes=None) -> str:
     """Pure. Zone verdict lines, the full two-range table (rp desc, dark
     last), risk clusters, then the sector-cap verdict — two lenses side by
     side so neither reads as an all-clear on its own."""
     from tools.mfr_coverage import is_dark_row
     from tools.rp_resolve import SRC_TAG
     z = rp_zone_lists(table_rows)
+    notes = done_notes or {}
+
+    def _ann(names):
+        # a name already acted on in the DONE window says so (Kris 9/29)
+        return " ".join(t + (f" (done: {notes[t]})" if t in notes else "")
+                        for t in names) or "none"
+
     out = ["BOOK RP — both ranges, provenance on every rp"]
     if total_book:
         out.append(f"total book (cash included): ${total_book:,.2f} — "
                    f"%book is against this, per the 2026-08-25 cap policy")
+    if done_lines:
+        out += done_lines + [""]
     out += [
         "TRIM candidates (longs at/above 0.80 or breakout): "
-        + (" ".join(z["trim"]) or "none"),
+        + _ann(z["trim"]),
         "ADD candidates (longs at/below 0.20; shorts 0.80-1.00 inside the "
-        "range): " + (" ".join(z["add"]) or "none"),
+        "range): " + _ann(z["add"]),
         "EXIT — shorts RUN OVER the range top (ladder trigger, 9/22): "
-        + (" ".join(z.get("exit", [])) or "none"),
+        + _ann(z.get("exit", [])),
         "COVER candidates (shorts at/below 0.20 or breakdown): "
-        + (" ".join(z["cover"]) or "none"),
+        + _ann(z["cover"]),
         "LOW-SIGNAL (band under 2% of price — rp printed, verdicts "
         "suppressed): " + (" ".join(z["low_signal"]) or "none"),
         "HELD AND DARK (no rp from any tier — the enrollment to-do): "
@@ -725,6 +734,120 @@ def _sector_cap_lines() -> list:
         return [f"SECTOR CAP: unavailable ({e})"]
 
 
+DONE_SESSIONS = 3      # how many trade dates the DONE block looks back
+
+_DONE_ORDER = (("cover_all", "COVERED ALL"), ("cover_some", "COVERED SOME"),
+               ("short", "SHORTED (new/add)"), ("buy", "BOUGHT"),
+               ("sell_some", "SOLD SOME"), ("sell_all", "SOLD ALL"))
+
+
+def classify_done(trades, held_now) -> dict:
+    """Pure. trades: [(run_date, acct, ticker, action_raw, amount)];
+    held_now: {(ticker, acct): signed market value} from the latest positions.
+    -> {kind: {ticker: {"usd": abs $ summed, "last": latest date}}}
+    A cover/sell is ALL when that account no longer holds that side, SOME
+    when it still does (Kris 9/29: BOOK RP kept telling him to cover names he
+    had already covered)."""
+    out = {k: {} for k, _ in _DONE_ORDER}
+    for d, acct, t, raw, amt in trades:
+        raw_u = (raw or "").upper()
+        now = held_now.get((t, acct), 0.0)
+        if "SHORT COVER" in raw_u:
+            kind = "cover_some" if now < 0 else "cover_all"
+        elif "SHORT SALE" in raw_u:
+            kind = "short"
+        elif "BOUGHT" in raw_u or raw_u.startswith("TELEGRAM FILL BOUGHT"):
+            kind = "buy"
+        elif "SOLD" in raw_u:
+            kind = "sell_some" if now > 0 else "sell_all"
+        else:
+            continue
+        e = out[kind].setdefault(t, {"usd": 0.0, "last": d})
+        e["usd"] += abs(float(amt or 0))
+        e["last"] = max(e["last"], d)
+    return out
+
+
+def format_done(done, dates) -> list:
+    """Pure. The DONE block + a {ticker: 'covered some $208 9/28'} note map."""
+    notes = {}
+    span = (f"{min(dates):%m/%d}–{max(dates):%m/%d}" if len(dates) > 1
+            else (f"{dates[0]:%m/%d}" if dates else "none"))
+    lines = [f"DONE — what you already traded ({span}, from the uploaded activity):"]
+    for kind, label in _DONE_ORDER:
+        names = done.get(kind) or {}
+        if not names:
+            continue
+        items = sorted(names.items(), key=lambda kv: -kv[1]["usd"])
+        lines.append(f"  {label:<18} " + " · ".join(
+            f"{t} ${v['usd']:,.0f}" for t, v in items)
+            + f"   (${sum(v['usd'] for _, v in items):,.0f})")
+        for t, v in items:
+            notes.setdefault(t, []).append(
+                f"{label.split(' (')[0].lower()} ${v['usd']:,.0f} {v['last']:%m/%d}")
+    if len(lines) == 1:
+        lines.append("  no trades in the window")
+    return lines, {t: "; ".join(n) for t, n in notes.items()}
+
+
+def _done_block(cur) -> tuple:
+    """IO: last DONE_SESSIONS trade dates from book_activity (Fidelity rows +
+    texted TELEGRAM FILLs) classified against the latest positions."""
+    cur.execute("SELECT DISTINCT run_date FROM book_activity "
+                "WHERE action_type IN ('buy','sell') AND COALESCE(symbol,'') <> '' "
+                "AND run_date <= CURRENT_DATE ORDER BY run_date DESC LIMIT %s",
+                (DONE_SESSIONS,))
+    dates = sorted(r[0] for r in cur.fetchall())
+    if not dates:
+        return ["DONE — no trades on file"], {}
+    cur.execute("SELECT run_date, account_number, upper(COALESCE(underlying, symbol)), "
+                "action_raw, amount FROM book_activity "
+                "WHERE action_type IN ('buy','sell') AND COALESCE(symbol,'') <> '' "
+                "AND COALESCE(is_option, false) = false AND run_date >= %s",
+                (dates[0],))
+    trades = cur.fetchall()
+    cur.execute("SELECT upper(underlying), account_number, sum(market_value) "
+                "FROM book_positions WHERE snapshot_date = "
+                "(SELECT max(snapshot_date) FROM book_positions) "
+                "AND asset_class <> 'cash' GROUP BY 1, 2")
+    held_now = {(t, a): float(v or 0) for t, a, v in cur.fetchall()}
+    return format_done(classify_done(trades, held_now), dates)
+
+
+def _tv_fill_dark(rows) -> None:
+    """Held names the rp tiers leave dark get the TradingView "MFR Range"
+    read (tv_levels, 9/29) priced off the freshest Yahoo quote (else the TV
+    close): rp_now / rp_lt, source 'tv'. In place; failures leave rows dark."""
+    need = sorted({r["ticker"] for r in rows if r.get("rp_now") is None})
+    if not need:
+        return
+    try:
+        import db_pg
+        from tools.rp_resolve import is_low_signal
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT ON (l.ticker) l.ticker, l.range_low::float, "
+                "l.range_high::float, l.lt_range_low::float, l.lt_range_high::float, "
+                "COALESCE(q.price, l.bar_close)::float "
+                "FROM tv_levels l LEFT JOIN live_quotes q ON q.ticker = l.ticker "
+                "WHERE l.ticker = ANY(%s) AND l.range_high > l.range_low "
+                "AND l.bar_date >= CURRENT_DATE - 10 "
+                "ORDER BY l.ticker, l.bar_date DESC", (need,))
+            tv = {r[0]: r[1:] for r in cur.fetchall()}
+    except Exception as e:  # noqa: BLE001
+        log.warning("BOOK RP TradingView fallback failed: %s", e)
+        return
+    for r in rows:
+        v = tv.get(r["ticker"]) if r.get("rp_now") is None else None
+        if not v or v[4] is None:
+            continue
+        lo, hi, llo, lhi, px = v
+        r["rp_now"] = (px - lo) / (hi - lo)
+        r["rp_lt"] = (px - llo) / (lhi - llo) if llo is not None and lhi and lhi > llo else None
+        r["rp_source"], r["px"], r["dark"] = "tv", px, False
+        r["low_signal"] = is_low_signal(lo, hi, px)
+
+
 def build_book_rp() -> str:
     """IO assembly for BOOK RP v2: positions per (underlying, account) joined
     to _book_rows(include_dark=True) — which now resolves rp through
@@ -765,6 +888,11 @@ def build_book_rp() -> str:
                     (held, held))
         pairs = [{"a": a, "b": b, "corr": float(c)}
                  for a, b, c, _ in cur.fetchall() if c is not None]
+        try:
+            done_lines, done_notes = _done_block(cur)
+        except Exception as e:  # noqa: BLE001
+            log.warning("BOOK RP DONE block failed: %s", e)
+            done_lines, done_notes = [f"DONE: unavailable ({e})"], {}
     # E4: ONE cash-equivalent source — the same get_cash_equivalents BOOK
     # FULL's compute_fills uses, so the two commands cannot disagree on BUXX.
     try:
@@ -831,6 +959,8 @@ def build_book_rp() -> str:
                      "tt": tt_by.get(t),
                      "dark": rp.get("dark", False)})
 
+    _tv_fill_dark(rows)       # TradingView range where every other tier is dark (9/29)
+
     # exclude cash-equivalents from cluster dollars the way BOOK FULL parks
     # them; they still print in the table tagged CASH-EQ
     cl = build_rp_clusters(pairs, {t: v for t, v in dollars.items()
@@ -843,7 +973,8 @@ def build_book_rp() -> str:
     return book_asof_line() + "\n" + format_book_rp(
         rows, clusters=cl, corr_by_ticker=tc,
         sector_cap_lines=_sector_cap_lines(),
-        total_book=total_book, corr_coverage=corr_line)
+        total_book=total_book, corr_coverage=corr_line,
+        done_lines=done_lines, done_notes=done_notes)
 
 
 def book_asof_line() -> str:
