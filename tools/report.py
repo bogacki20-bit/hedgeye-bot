@@ -734,7 +734,7 @@ def _sector_cap_lines() -> list:
         return [f"SECTOR CAP: unavailable ({e})"]
 
 
-DONE_SESSIONS = 3      # how many trade dates the DONE block looks back
+DONE_SESSIONS = 1      # the DONE block = the last trade date only (Kris 9/29: "what I did yesterday")
 
 _DONE_ORDER = (("cover_all", "COVERED ALL"), ("cover_some", "COVERED SOME"),
                ("short", "SHORTED (new/add)"), ("buy", "BOUGHT"),
