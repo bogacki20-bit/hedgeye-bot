@@ -74,6 +74,9 @@ _SECTORS = [
     (r"software",                                     "SOFTWARE"),
     # likewise "communication services" is GICS's spelling of COMMUNICATIONS.
     (r"communications?(?:\s+services)?",              "COMMUNICATIONS"),
+    # added with the two-column PM PDF (9/28/26)
+    (r"commodit(?:y|ies)",                            "COMMODITIES"),
+    (r"housing|homebuild(?:ers?|ing)",                "HOUSING"),
 ]
 _SECTOR_NAMES = [canon for _, canon in _SECTORS]
 

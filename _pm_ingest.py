@@ -24,10 +24,13 @@ if not os.path.exists(path):
 from pypdf import PdfReader
 
 text = "\n".join((pg.extract_text() or "") for pg in PdfReader(path).pages)
-print(f"extracted {len(text)} chars from {os.path.basename(path)}")
 
 from tools.pm_parse import (REMOVAL_GUARD_FRACTION, diff_summary,
-                            parse_position_monitor)
+                            parse_position_monitor, pm_text_for_pdf)
+
+with open(path, "rb") as fh:
+    text = pm_text_for_pdf(fh.read(), text)     # two-column PM (9/28/26+)
+print(f"extracted {len(text)} chars from {os.path.basename(path)}")
 
 p = parse_position_monitor(text)
 print(f"parsed: date {p['report_date'] or 'UNDATED ⚠'} · "

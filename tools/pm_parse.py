@@ -61,7 +61,96 @@ PM_SECTORS = frozenset({
     "RESTAURANTS", "CONSUMER STAPLES", "CANNABIS", "GLL", "RETAIL",
     "HEALTHCARE", "FINANCIALS", "DIGITAL ASSETS", "SMALL CAPS", "INDUSTRIALS",
     "MATERIALS", "ENERGY", "SOFTWARE", "COMMUNICATIONS", "GLOBAL TECH",
+    # added 2026-09-28: Hedgeye's two-column PM PDF carries these two as well
+    # (Kris confirmed the 9/28 PDF; GLD/USO/CORN… and OPEN/ZG/RKT… live here).
+    "COMMODITIES", "HOUSING",
 })
+
+# Two-column PM PDF (9/28/26+) spells two sectors out in full.
+_SECTOR_ALIASES = {"GAMING LODGING & LEISURE": "GLL", "GLOBAL TECHNOLOGY": "GLOBAL TECH"}
+_PAIRED_HDRS = {"ACTIVE LONGS": "ACTIVE", "TOP IDEA LONGS": "TOP IDEA", "LONG BENCH": "BENCH"}
+
+
+def pm_text_for_pdf(data: bytes, text: str) -> str:
+    """pypdf `text` of a PDF, swapped for the one-column rebuild when it is a
+    two-column Position Monitor (both side headers on one line). Anything
+    else — other documents, the older one-column PM — passes through."""
+    if _MASTHEAD_RE.search(text or "") and re.search(r"ACTIVE LONGS\s+ACTIVE SHORTS", text or ""):
+        rebuilt = relinearize_two_column(data)
+        if rebuilt:
+            return rebuilt
+    return text
+
+
+def relinearize_two_column(data: bytes) -> str | None:
+    """The 9/28/26 PM PDF prints each sector as three bucket rows with the
+    LONGS in the left column and the SHORTS in the right one ('ACTIVE LONGS'
+    and 'ACTIVE SHORTS' share a line), so pypdf's plain text interleaves the
+    two sides and parse_position_monitor finds nothing. This rebuilds the
+    one-column text that parser already reads — masthead, SECTOR, bucket
+    header, ticker, name — from pypdf's positioned text: tickers are the bold
+    10.7pt tokens (x left of centre = long), sector titles are the 14.6pt
+    lines, and name lines follow their ticker in stream order.
+    Returns None when the PDF isn't this layout."""
+    import io
+    from pypdf import PdfReader
+    try:
+        reader = PdfReader(io.BytesIO(data))
+    except Exception:
+        return None
+    masthead, sectors = None, []            # [(name, {bucket: {"L": [...], "S": [...]}})]
+    bucket, last = None, None
+    for page in reader.pages:
+        width = float(page.mediabox.width)
+        items = []
+
+        def visit(text, cm, tm, font, size, _items=items):
+            t = (text or "").strip()
+            if t:
+                # A token that shares its row with an earlier one (the SHORT
+                # when both columns are filled) arrives with an identity text
+                # matrix — pypdf loses its position. Only the right column can
+                # be second on a row, so it is placed right of centre.
+                x = (tm[4] * cm[0] + cm[4]) if tm[4] or tm[5] else float("inf")
+                eff = (size or 0) * abs(tm[0] or 1) * abs(cm[0] or 1)
+                bold = "bold" in str((font or {}).get("/BaseFont", "")).lower()
+                _items.append((t, x, eff, bold))
+        page.extract_text(visitor_text=visit)
+        for t, x, size, bold in items:
+            u = t.upper()
+            if _MASTHEAD_RE.search(t):
+                masthead = t
+                continue
+            if size > 13:                                   # sector title
+                sectors.append((_SECTOR_ALIASES.get(u, u), {}))
+                bucket, last = None, None
+                continue
+            if u in _PAIRED_HDRS:
+                bucket, last = _PAIRED_HDRS[u], None
+                continue
+            if u in ("ACTIVE SHORTS", "TOP IDEA SHORTS", "SHORT BENCH"):
+                continue
+            if bold and bucket and sectors and _TICKER_RE.match(t) and x > 0:
+                side = "L" if x < width / 2 else "S"
+                last = [t, []]
+                sectors[-1][1].setdefault(bucket, {"L": [], "S": []})[side].append(last)
+                continue
+            if last is not None and not bold:
+                last[1].append(t)                           # company name (+ wraps)
+    if not masthead or not sectors:
+        return None
+    out = [masthead]
+    for name, buckets in sectors:
+        out.append(name)
+        for b in ("ACTIVE", "TOP IDEA", "BENCH"):
+            cols = buckets.get(b, {"L": [], "S": []})
+            for side, hdr in (("L", "LONGS" if b != "BENCH" else "LONG BENCH"),
+                              ("S", "SHORTS" if b != "BENCH" else "SHORT BENCH")):
+                out.append(hdr if b == "BENCH" else f"{b} {hdr}")
+                for tk, nm in cols[side]:
+                    out += [tk, " ".join(nm) or tk]
+    text = "\n".join(out)
+    return text if sum(len(c) for _, bk in sectors for v in bk.values() for c in v.values()) else None
 
 
 def pm_sector_key(sector) -> str | None:

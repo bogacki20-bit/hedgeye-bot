@@ -35,12 +35,12 @@ def check(label, got, want):
 PM15 = ["RESTAURANTS", "CONSUMER STAPLES", "CANNABIS", "GLL", "RETAIL",
         "HEALTHCARE", "FINANCIALS", "DIGITAL ASSETS", "SMALL CAPS",
         "INDUSTRIALS", "MATERIALS", "ENERGY", "SOFTWARE", "COMMUNICATIONS",
-        "GLOBAL TECH"]
+        "GLOBAL TECH", "COMMODITIES", "HOUSING"]   # +2 with the 9/28/26 two-column PDF
 
 # ── 1. every PM sector name parses to exactly itself ────────────────────────
 print("1. all 15 PM sector names parse to themselves:")
-check("PM_SECTORS has 15", len(PM_SECTORS), 15)
-check("_SECTOR_NAMES == the 15", sorted(_SECTOR_NAMES), sorted(PM15))
+check("PM_SECTORS has 17", len(PM_SECTORS), 17)
+check("_SECTOR_NAMES == the 17", sorted(_SECTOR_NAMES), sorted(PM15))
 for name in PM15:
     q = parse_query(name.lower() + " longs")
     check(f"'{name.lower()} longs' -> {name}", q["sector"], name)

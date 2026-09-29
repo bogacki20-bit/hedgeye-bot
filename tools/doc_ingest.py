@@ -148,7 +148,8 @@ def extract_text(file_name: str | None, data: bytes) -> tuple:
             from pypdf import PdfReader
             reader = PdfReader(io.BytesIO(data))
             text = "\n".join((p.extract_text() or "") for p in reader.pages)
-            return text.strip(), None
+            from tools.pm_parse import pm_text_for_pdf   # two-column PM (9/28/26+)
+            return pm_text_for_pdf(data, text).strip(), None
         except Exception as e:
             log.warning("pdf extraction failed for %s: %s", file_name, e)
             return "", f"pdf extraction failed: {e}"
