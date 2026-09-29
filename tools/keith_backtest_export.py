@@ -506,7 +506,7 @@ def export(to_store: bool = False) -> None:
         roster = defaultdict(list)
         try:
             cur.execute("SELECT ticker, added_on, removed_on "
-                        "FROM ss_roster_history")
+                        "FROM ss_roster_history WHERE side = 'long'")
             for t, a, r_ in cur.fetchall():
                 roster[t].append((a, r_))
         except Exception as e:

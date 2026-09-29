@@ -97,6 +97,20 @@ def _sigstr() -> set:
     side. Only the SHORTS direction routes to Keith's — see sigstr_side and the
     routing table in screener.run_screen_q.
     """
+    # LONG side only (migration 119 made the roster sided): the broad longs
+    # screen keeps its TREND gate; the dashboard SHORTS route via ss_side().
+    return _members("SELECT ticker FROM ss_roster_current WHERE side = 'long'")
+
+
+def ss_side(direction: str | None = None) -> set:
+    """Signal Strength DASHBOARD roster by side (9/29: the new layout's CSV
+    export carries 53 longs + 96 shorts; the email only the longs).
+    direction: 'short(s)' / 'long(s)' / None -> both."""
+    d = (direction or "").lower()
+    if d.startswith("short"):
+        return _members("SELECT ticker FROM ss_roster_current WHERE side = 'short'")
+    if d.startswith("long"):
+        return _members("SELECT ticker FROM ss_roster_current WHERE side = 'long'")
     return _members("SELECT ticker FROM ss_roster_current")
 
 

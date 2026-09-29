@@ -33,12 +33,18 @@
 
   async function readOne(ticker, sym) {
     await Promise.race([new Promise(r => CH.setSymbol(sym, r)), sleep(12000)]);
-    for (let k = 0; k < 30; k++) {
+    // MFR Range (st/lt ranges, 9/29) computes slowly — up to ~25 s on a symbol
+    // TradingView hasn't loaded before — so it gets a longer wait, but never
+    // blocks the TRADE/TREND read: past the wait the row ships without ranges.
+    for (let k = 0; k < 80; k++) {
       const bars = rows(inner().mainSeries());
       const m = rows(src('Myfractalrange Trend'));
       const v = rows(src('Vola2vola volatility Trade & Trend'));
+      const R = src('MFR Range'), rg = rows(R);
       const lastT = bars.length ? bars[bars.length - 1][0] : null;
-      if (bars.length > 30 && m.length > 30 && v.length > 30 &&
+      const rangeReady = !R || (rg.length > 30 && rg[rg.length - 1][0] === lastT) ||
+                         k >= 60 || (R.status && R.status().type === 2 && rg.length === 0 && k >= 10);
+      if (bars.length > 30 && m.length > 30 && v.length > 30 && rangeReady &&
           m[m.length - 1][0] === lastT && v[v.length - 1][0] === lastT) {
         const type = (CH.symbolExt && CH.symbolExt().type) || '';
         const now = Date.now() / 1000;
@@ -47,9 +53,11 @@
         if (roundTheClock && bars[i][0] > now - 20 * 3600) i -= 1;   // session still forming
         const b = bars[i];
         const mm = m.find(x => x[0] === b[0]), vv = v.find(x => x[0] === b[0]);
+        const rr = rg.find(x => x[0] === b[0]) || [];
         if (!mm || !vv) return {t: ticker, s: sym, miss: 'indicator bar missing'};
         return {t: ticker, s: CH.symbol(), type, bar: sessionDate(b[0]), close: r6(b[4]),
-                mu: r6(mm[1]), ml: r6(mm[2]), va: r6(vv[1]), vb: r6(vv[3])};
+                mu: r6(mm[1]), ml: r6(mm[2]), va: r6(vv[1]), vb: r6(vv[3]),
+                rh: r6(rr[1]), rl: r6(rr[2]), lh: r6(rr[3]), ll: r6(rr[4])};
       }
       await sleep(400);
     }

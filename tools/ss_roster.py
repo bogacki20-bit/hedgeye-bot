@@ -43,7 +43,10 @@ def apply_deltas(added, removed, snapshot_date, source_email_id=None,
     applied_add, applied_remove, skipped = [], [], []
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT ticker FROM ss_roster_history WHERE removed_on IS NULL")
+            # The "Signal Strength Stocks" email only carries the LONG table
+            # (the dashboard's shorts arrive via the CSV export — anchor_from_csv).
+            cur.execute("SELECT ticker FROM ss_roster_history "
+                        "WHERE removed_on IS NULL AND side = 'long'")
             current = {r[0] for r in cur.fetchall()}
 
             for t in added:                       # ADD: open a row only if not already open
@@ -62,12 +65,13 @@ def apply_deltas(added, removed, snapshot_date, source_email_id=None,
                     continue
                 cur.execute(
                     "UPDATE ss_roster_history SET removed_on=%s, remove_source='delta', "
-                    "updated_at=now() WHERE ticker=%s AND removed_on IS NULL",
+                    "updated_at=now() WHERE ticker=%s AND removed_on IS NULL AND side='long'",
                     (snapshot_date, t))
                 current.discard(t)
                 applied_remove.append(t)
 
-            cur.execute("SELECT count(*) FROM ss_roster_history WHERE removed_on IS NULL")
+            cur.execute("SELECT count(*) FROM ss_roster_history "
+                        "WHERE removed_on IS NULL AND side = 'long'")
             roster_count = cur.fetchone()[0]
         conn.commit()
 
@@ -176,11 +180,14 @@ def _parse_paste(body: str):
     return tickers, ignored
 
 
-def _current_roster_set() -> set:
+def _current_roster_set(side: str = "long") -> set:
+    """Open roster for one side. The SS: paste and the email table are the
+    LONG list, so that is the default."""
     import db_pg
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT ticker FROM ss_roster_history WHERE removed_on IS NULL")
+            cur.execute("SELECT ticker FROM ss_roster_history "
+                        "WHERE removed_on IS NULL AND side = %s", (side,))
             return {r[0] for r in cur.fetchall()}
 
 
@@ -242,14 +249,17 @@ def _stage_upload(body: str) -> str:
     return "\n".join(out)
 
 
-def _write_anchor(upload: set, anchor_date, note: str, max_remove_pct=None):
-    """Declarative reconcile of ss_roster_history to `upload`. Returns
-    (current, add, rem, anchor_id); anchor_id is None if max_remove_pct refused it."""
+def _write_anchor(upload: set, anchor_date, note: str, max_remove_pct=None,
+                  side: str = "long"):
+    """Declarative reconcile of ONE side of ss_roster_history to `upload`.
+    Returns (current, add, rem, anchor_id); anchor_id is None if
+    max_remove_pct refused it."""
     import db_pg
     from psycopg2.extras import Json
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT ticker FROM ss_roster_history WHERE removed_on IS NULL")
+            cur.execute("SELECT ticker FROM ss_roster_history "
+                        "WHERE removed_on IS NULL AND side = %s", (side,))
             current = {r[0] for r in cur.fetchall()}
             add, rem = sorted(upload - current), sorted(current - upload)
             if (max_remove_pct is not None and current
@@ -257,18 +267,18 @@ def _write_anchor(upload: set, anchor_date, note: str, max_remove_pct=None):
                 return current, add, rem, None
             cur.execute(
                 "INSERT INTO ss_roster_anchor "
-                "(anchor_date, ticker_count, tickers, roster_before, diff_added, diff_removed, note) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                "(anchor_date, ticker_count, tickers, roster_before, diff_added, diff_removed, note, side) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                 (anchor_date, len(upload), Json(sorted(upload)), len(current),
-                 Json(add), Json(rem), note))
+                 Json(add), Json(rem), note, side))
             anchor_id = cur.fetchone()[0]
             for t in add:
-                cur.execute("INSERT INTO ss_roster_history (ticker, added_on, add_source, anchor_id) "
-                            "VALUES (%s, %s, 'anchor', %s)", (t, anchor_date, anchor_id))
+                cur.execute("INSERT INTO ss_roster_history (ticker, added_on, add_source, anchor_id, side) "
+                            "VALUES (%s, %s, 'anchor', %s, %s)", (t, anchor_date, anchor_id, side))
             for t in rem:
                 cur.execute("UPDATE ss_roster_history SET removed_on=%s, remove_source='anchor', "
-                            "anchor_id=%s, updated_at=now() WHERE ticker=%s AND removed_on IS NULL",
-                            (anchor_date, anchor_id, t))
+                            "anchor_id=%s, updated_at=now() WHERE ticker=%s AND removed_on IS NULL "
+                            "AND side=%s", (anchor_date, anchor_id, t, side))
         conn.commit()
     return current, add, rem, anchor_id
 
@@ -411,3 +421,70 @@ def maybe_send_anchor_prompt(now_et=None) -> str:
         return "sent:reminder"
 
     return "skip:nothing-due"
+
+
+# ─────────────────────────── Dashboard CSV (both sides, 9/29) ───────────────────────────
+# The SS dashboard's new layout exports signal_strength_stocks.csv with a
+# Position column (Long/Short). It is the only source of the SHORT side.
+
+CSV_HEADER = ("Ticker", "Name", "Position")
+
+
+def parse_dashboard_csv(text: str) -> dict:
+    """{'long': [...], 'short': [...]} from the dashboard CSV; raises ValueError
+    if it isn't that file."""
+    import csv
+    import io
+    rows = list(csv.DictReader(io.StringIO((text or "").lstrip("\ufeff"))))
+    if not rows or any(h not in rows[0] for h in CSV_HEADER):
+        raise ValueError("not a Signal Strength dashboard CSV (Ticker/Name/Position)")
+    out = {"long": [], "short": []}
+    for r in rows:
+        side = (r.get("Position") or "").strip().lower()
+        t = (r.get("Ticker") or "").strip().upper()
+        if side in out and t and t not in out[side]:
+            out[side].append(t)
+    return out
+
+
+def anchor_from_csv(text: str, anchor_date=None, commit: bool = False) -> str:
+    """Reconcile BOTH sides to the dashboard CSV. Dry run unless commit."""
+    sides = parse_dashboard_csv(text)
+    day = anchor_date or _utc_date()
+    lines = [f"SS dashboard CSV {day}: {len(sides['long'])} long · {len(sides['short'])} short"]
+    for side in ("long", "short"):
+        cur = _current_roster_set(side)
+        up = set(sides[side])
+        add, rem = sorted(up - cur), sorted(cur - up)
+        if commit:
+            # the short side's first load removes nothing; otherwise the same
+            # >50% removal guard the email path uses
+            _, add, rem, aid = _write_anchor(up, day, "dashboard_csv", side=side,
+                                             max_remove_pct=REPLACE_GUARD_PCT if cur else None)
+            if aid is None:
+                lines.append(f"  🛑 {side}: would remove {len(rem)}/{len(cur)} — NOT applied")
+                continue
+        lines.append(f"  {side}: {len(cur)} → {len(up)}  +{len(add)} {' '.join(add[:25])}"
+                     f"{' …' if len(add) > 25 else ''}  −{len(rem)} {' '.join(rem)}")
+    if commit:
+        _set_bot_state("ss_last_anchor_date", day.isoformat())
+        try:
+            from tools.ss_flow import stamp_unstamped
+            log.info("ss_flow stamp (csv anchor): %s", stamp_unstamped())
+        except Exception as e:
+            log.warning("ss_flow stamping failed: %s", e)
+    else:
+        lines.append("SIMULATED — nothing written (re-run with --commit)")
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    import sys
+    args = [a for a in sys.argv[1:] if a != "--commit"]
+    if len(args) == 2 and args[0] == "--csv":
+        import db_pg
+        db_pg._load_dotenv_fallback()
+        print(anchor_from_csv(open(args[1], encoding="utf-8-sig").read(),
+                              commit="--commit" in sys.argv))
+    else:
+        print("usage: python -m tools.ss_roster --csv signal_strength_stocks.csv [--commit]")

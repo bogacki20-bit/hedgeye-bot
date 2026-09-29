@@ -122,8 +122,8 @@ def _roster(tickers: list[str]) -> dict:
                       "AND week_of >= CURRENT_DATE - %s",
                       (tickers, ETFPRO_FRESH_DAYS)):
         out[t]["etfpro"] = True
-    for (t,) in _rows("SELECT ticker FROM ss_roster_current WHERE ticker=ANY(%s)",
-                      (tickers,)):
+    for (t,) in _rows("SELECT ticker FROM ss_roster_current "
+                      "WHERE ticker=ANY(%s) AND side = 'short'", (tickers,)):
         out[t]["ss"] = True
     # sector-pro rosters (operator 9/20): Retail Pro sided tags + Keith's
     # financials list — both explicitly sided, both count as short rosters

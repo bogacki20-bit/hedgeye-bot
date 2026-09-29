@@ -42,7 +42,9 @@ def pairs() -> list[list[str]]:
 
 def _parse_line(ln: str) -> dict:
     """JSON object, or the compact pipe form __tvLines() emits:
-    t|bar|close|mu|ml|va|vb|tvsym   or   t|MISS|tvsym|reason"""
+    t|bar|close|mu|ml|va|vb|tvsym[|rh|rl|lth|ltl]   or   t|MISS|tvsym|reason
+    The optional tail is the "MFR Range" indicator (short- and long-term
+    range high/low) — added 9/29, the screener's last-resort range tier."""
     ln = ln.strip()
     if ln.startswith("{"):
         return json.loads(ln)
@@ -50,8 +52,10 @@ def _parse_line(ln: str) -> dict:
     if len(p) >= 2 and p[1] == "MISS":
         return {"t": p[0], "s": p[2] if len(p) > 2 else None, "miss": "|".join(p[3:]) or "miss"}
     num = lambda x: None if x in ("", "null", "None", "undefined") else float(x)
+    rng = [num(x) for x in p[8:12]] + [None] * (4 - len(p[8:12]))
     return {"t": p[0], "bar": p[1], "close": num(p[2]), "mu": num(p[3]), "ml": num(p[4]),
-            "va": num(p[5]), "vb": num(p[6]), "s": p[7] if len(p) > 7 else None}
+            "va": num(p[5]), "vb": num(p[6]), "s": (p[7] or None) if len(p) > 7 else None,
+            "rh": rng[0], "rl": rng[1], "lh": rng[2], "ll": rng[3]}
 
 
 def ingest(path: str) -> dict:
@@ -77,11 +81,18 @@ def ingest(path: str) -> dict:
         for r in ok:
             cur.execute(
                 "INSERT INTO tv_levels (ticker, bar_date, tv_symbol, mfr_trend_upper, mfr_trend_lower, "
-                "vola_a, vola_b, bar_close) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
-                "ON CONFLICT (ticker, bar_date) DO UPDATE SET tv_symbol=EXCLUDED.tv_symbol, "
+                "vola_a, vola_b, bar_close, range_high, range_low, lt_range_high, lt_range_low) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (ticker, bar_date) DO UPDATE SET "
+                "tv_symbol=COALESCE(EXCLUDED.tv_symbol, tv_levels.tv_symbol), "
                 "mfr_trend_upper=EXCLUDED.mfr_trend_upper, mfr_trend_lower=EXCLUDED.mfr_trend_lower, "
-                "vola_a=EXCLUDED.vola_a, vola_b=EXCLUDED.vola_b, bar_close=EXCLUDED.bar_close, captured_at=now()",
-                (r["t"], r["bar"], r.get("s"), r.get("mu"), r.get("ml"), r.get("va"), r.get("vb"), r.get("close")))
+                "vola_a=EXCLUDED.vola_a, vola_b=EXCLUDED.vola_b, bar_close=EXCLUDED.bar_close, "
+                "range_high=COALESCE(EXCLUDED.range_high, tv_levels.range_high), "
+                "range_low=COALESCE(EXCLUDED.range_low, tv_levels.range_low), "
+                "lt_range_high=COALESCE(EXCLUDED.lt_range_high, tv_levels.lt_range_high), "
+                "lt_range_low=COALESCE(EXCLUDED.lt_range_low, tv_levels.lt_range_low), captured_at=now()",
+                (r["t"], r["bar"], r.get("s"), r.get("mu"), r.get("ml"), r.get("va"), r.get("vb"),
+                 r.get("close"), r.get("rh"), r.get("rl"), r.get("lh"), r.get("ll")))
         for r in miss:
             cur.execute(
                 "INSERT INTO tv_levels_misses (ticker, run_date, tv_symbol, reason) VALUES (%s,%s,%s,%s) "

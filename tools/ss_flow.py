@@ -38,7 +38,7 @@ def stamp_unstamped(dry_run: bool = False) -> dict:
         # Unstamped ADDS (non-seed) …
         cur.execute("""
             SELECT h.ticker, h.added_on, h.add_source FROM ss_roster_history h
-            WHERE h.add_source <> 'seed'
+            WHERE h.add_source <> 'seed' AND h.side = 'long'   -- flow study = the long list
               AND NOT EXISTS (SELECT 1 FROM ss_flow_events e
                               WHERE e.ticker = h.ticker AND e.event = 'add'
                                 AND e.event_date = h.added_on)
@@ -47,7 +47,7 @@ def stamp_unstamped(dry_run: bool = False) -> dict:
         # … and unstamped DROPS (a seed row's REMOVAL is still a real event).
         cur.execute("""
             SELECT h.ticker, h.removed_on, h.remove_source FROM ss_roster_history h
-            WHERE h.removed_on IS NOT NULL
+            WHERE h.removed_on IS NOT NULL AND h.side = 'long'
               AND NOT EXISTS (SELECT 1 FROM ss_flow_events e
                               WHERE e.ticker = h.ticker AND e.event = 'drop'
                                 AND e.event_date = h.removed_on)

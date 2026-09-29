@@ -22,10 +22,13 @@ Formatter: `tools/tt_levels.py`.
 
 ## Nightly run (scheduled task `tv-levels-overnight`, 00:05 ET weekdays)
 1. Open the bot's TradingView layout in Kris's Chrome (Claude-in-Chrome). It must
-   carry both indicators: "Myfractalrange Trend" and "Vola2vola volatility Trade & Trend".
+   carry three indicators: "Myfractalrange Trend", "Vola2vola volatility Trade & Trend"
+   (not saved in the layout: add it from Indicators → search "Vola2vola", leave
+   the layout UNSAVED) and "MFR Range" (legend "Ranges - D": st/lt range lines,
+   stored as tv_levels.range_* — the screener's last-resort range tier, 9/29).
 2. `py -m tools.tv_levels --pairs` → JSON of `[bot_ticker, tv_symbol]` (~755).
 3. Inject `tools/tv_levels.js` (javascript_tool), then `__tvStart(pairs)`.
-   ~0.75 s/symbol ≈ 10 min. Waits run on a Web Worker timer, because Chrome
+   ~8-10 s/symbol with MFR Range (it computes slowly) ≈ 2 h for ~750 names. Waits run on a Web Worker timer, because Chrome
    throttles hidden-tab timers to ~1/min after 5 min.
 4. Poll `__tvPeek(from, 25)` in chunks of 25 (tool output truncates long
    strings) and append each row as a JSON line to `data/tv_levels/<date>.jsonl`.

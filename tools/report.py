@@ -348,7 +348,7 @@ def _cash_total(cur):
 
 
 def _ss_current(cur) -> set:
-    cur.execute("SELECT ticker FROM ss_roster_history WHERE removed_on IS NULL")
+    cur.execute("SELECT ticker FROM ss_roster_history WHERE removed_on IS NULL AND side = 'long'")
     return {r[0] for r in cur.fetchall()}
 
 

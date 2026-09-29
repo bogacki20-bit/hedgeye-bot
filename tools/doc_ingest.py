@@ -67,6 +67,12 @@ _KIND_PATTERNS = [
     ("tier1alpha",
      r"tier_?\s*(one|1)_?\s*alpha|(?<![a-z0-9])t1a(?![a-z0-9])",
      r"tier\s+(one|1)\s+alpha"),
+    # Signal Strength dashboard export (new layout, 9/29): 'signal_strength_
+    # stocks.csv' with a Position (Long/Short) column — the only source of the
+    # short side (the email carries the longs only).
+    ("signal_strength",
+     r"signal_?\s*strength",
+     r"ticker,name,position,sector,analyst"),
     # Hedgeye's long/short-list PDF ('Updated Copy of Long Short List
     # M.D.YY.pdf'); masthead 'HEDGEYE POSITION MONITOR (MM/DD/YYYY)'.
     ("position_monitor",
@@ -180,6 +186,15 @@ def _maybe_deep_parse(kind, row_id, note_date, text) -> str:
         except Exception as e:
             log.warning("t1a deep parse failed: %s", e)
             return f"\n⚠ T1A deep-parse error: {e}"
+    if kind == "signal_strength":
+        try:
+            from tools.ss_roster import anchor_from_csv
+            return "\n" + anchor_from_csv(text, anchor_date=note_date, commit=True)
+        except ValueError as e:                 # not the dashboard CSV shape
+            return f"\n⚠ SS roster not updated: {e}"
+        except Exception as e:
+            log.warning("ss csv anchor failed: %s", e)
+            return f"\n⚠ SS roster update error: {e}"
     if kind == "position_monitor":
         try:
             from tools.pm_parse import ingest_hook

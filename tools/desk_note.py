@@ -144,9 +144,9 @@ def build_note(full: bool = False):
 
     # roster changes (last 2 days)
     roster = _rows("SELECT ticker, added_on, NULL FROM ss_roster_current "
-                   "WHERE added_on >= CURRENT_DATE - 2 "
+                   "WHERE added_on >= CURRENT_DATE - 2 AND side = 'long' "
                    "UNION ALL SELECT ticker, NULL, removed_on FROM ss_roster_history "
-                   "WHERE removed_on >= CURRENT_DATE - 2")
+                   "WHERE removed_on >= CURRENT_DATE - 2 AND side = 'long'")
     r_add = [t for t, a, _ in roster if a]
     r_del = [t for t, _, d in roster if d]
 

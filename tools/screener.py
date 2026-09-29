@@ -1202,8 +1202,12 @@ def run_screen_q(q: dict) -> str:
             # The broad roster is side-less, so only its LONGS reading is
             # meaningful; its shorts direction routes to Keith's sided list.
             if _sided_keiths(src, q["direction"]):
-                from tools.source_registry import sigstr_side
+                from tools.source_registry import sigstr_side, ss_side
                 members = sigstr_side(q["direction"])
+                if src == "sigstr":
+                    # 'signal strength shorts' = the dashboard's short side
+                    # (96 names, 9/29 CSV) + Keith's sided shorts.
+                    members = members | ss_side("short")
             elif src in ("retailpro", "finmon") and q["direction"]:
                 # Sector-pro monitors are sided (9/20): a direction query
                 # reads the side straight off the roster.
@@ -1344,8 +1348,10 @@ def run_screen_q(q: dict) -> str:
         head = (f"🔎 SCREEN — {' · '.join(filt)}  (side = POSITION side; "
                 f"TREND shown per row, ⚠️ = trend against position)")
     elif sigstr_trend_exempt:
-        head = (f"🔎 SCREEN — {' · '.join(filt)}  (side from Keith's Signal "
-                f"Longs/Shorts; no TREND gate — the list IS the call)")
+        who = ("the Signal Strength dashboard's short side + Keith's Signal Shorts"
+               if src == "sigstr" else "Keith's Signal Longs/Shorts")
+        head = (f"🔎 SCREEN — {' · '.join(filt)}  (side from {who}; "
+                f"no TREND gate — the list IS the call)")
     else:
         head = f"🔎 SCREEN — {' · '.join(filt)}  (TREND gate: {req_trend}, mandatory)"
 

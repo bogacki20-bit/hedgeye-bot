@@ -94,7 +94,7 @@ def compute_rows(cur, session, hist, trend_series):
     ss_now = set()
     try:
         cur.execute("""SELECT ticker FROM ss_roster_history
-                       WHERE added_on <= %s
+                       WHERE side = 'long' AND added_on <= %s
                          AND (removed_on IS NULL OR removed_on > %s)""",
                     (session, session))
         ss_now = {r[0] for r in cur.fetchall()}

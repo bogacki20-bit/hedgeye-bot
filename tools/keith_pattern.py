@@ -182,7 +182,7 @@ def build_series(cur) -> dict:
 def _ss_now(cur) -> set:
     try:
         cur.execute("SELECT ticker FROM ss_roster_history "
-                    "WHERE removed_on IS NULL")
+                    "WHERE removed_on IS NULL AND side = 'long'")
         return {r[0] for r in cur.fetchall()}
     except Exception as e:
         _log.warning("keith: SS roster unavailable: %s", e)

@@ -64,7 +64,7 @@ def rosters_asof(cur, session):
     out = {}
     try:
         cur.execute("""SELECT ticker FROM ss_roster_history
-                       WHERE added_on <= %s
+                       WHERE side = 'long' AND added_on <= %s
                          AND (removed_on IS NULL OR removed_on > %s)""",
                     (session, session))
         for (t,) in cur.fetchall():
