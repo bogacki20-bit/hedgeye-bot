@@ -1029,9 +1029,39 @@ def _st_ranges(tickers):
                 "ORDER BY ticker, snapshot_date DESC", (tickers,))
             for t, lo, hi, px, sd, fa in cur.fetchall():
                 out[t] = (lo, hi, px, sd, fa)
+            # Names MFR doesn't cover: TradingView's "MFR Range" read (tv_levels,
+            # 9/29 — matched MFR's own ranges 119/120 on equities). MFR dates a
+            # snapshot the day AFTER its session, TradingView by the session,
+            # so bar_date + 1 keeps the staleness check on one calendar.
+            missing = [t for t in tickers if t not in out]
+            if missing:
+                cur.execute(
+                    "SELECT DISTINCT ON (ticker) ticker, range_low::float, range_high::float, "
+                    "bar_close::float, bar_date + 1, captured_at FROM tv_levels "
+                    "WHERE ticker = ANY(%s) AND range_high > range_low "
+                    "ORDER BY ticker, bar_date DESC", (missing,))
+                for t, lo, hi, px, sd, fa in cur.fetchall():
+                    out[t] = (lo, hi, px, sd, fa)
+                    _TV_RANGED.add(t)
     except Exception as e:
         log.warning("SCREEN: short-term range fetch failed: %s", e)
     return out
+
+
+_TV_RANGED: set = set()      # tickers whose range came from TradingView this run
+
+
+def _tv_ranged(tickers) -> set:
+    """Of `tickers`, those with a usable TradingView range (for rows v_screener
+    marks has_range=false because MFR has none)."""
+    tickers = [t for t in tickers if t]
+    if not tickers:
+        return set()
+    import db_pg
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT DISTINCT ticker FROM tv_levels WHERE ticker = ANY(%s) "
+                    "AND range_high > range_low AND bar_date >= CURRENT_DATE - 10", (tickers,))
+        return {r[0] for r in cur.fetchall()}
 
 
 def _refresh_range_pos_live(rows):
@@ -1054,9 +1084,15 @@ def _refresh_range_pos_live(rows):
     # 2) Live price fetch (Yahoo). If unavailable, fall back to EOD — but the
     #    range-staleness flag above still stands.
     try:
-        from price_monitor import HEDGEYE_TO_YFINANCE, fetch_prices
-        symmap = {r["ticker"]: (HEDGEYE_TO_YFINANCE.get(r["ticker"]) or r["ticker"]) for r in rows}
-        live = fetch_prices(sorted({s for s in symmap.values() if s}))
+        # Same fetch MARKET uses (9/29): 1-minute Yahoo bars, price AND print
+        # time, persisted to live_quotes so the rest of the bot sees it too.
+        from tools.quotes import refresh
+        got = refresh([r["ticker"] for r in rows]).get("quotes", {})
+        symmap = {r["ticker"]: r["ticker"] for r in rows}
+        live = {t: q["price"] for t, q in got.items()}
+        for r in rows:
+            q = got.get(r["ticker"])
+            r["_px_at"] = q["quote_at"] if q else None
     except Exception as e:
         log.warning("SCREEN: live range_pos refresh unavailable (%s) - using EOD", e)
         for r in rows:
@@ -1070,6 +1106,8 @@ def _refresh_range_pos_live(rows):
         good = (lp is not None and lp > 0 and lo is not None and hi is not None and hi > lo
                 and (px_eod is None or (px_eod > 0 and _RP_LIVE_MIN <= lp / px_eod <= _RP_LIVE_MAX)))
         r["_rlo"], r["_rhi"] = lo, hi
+        if r["ticker"] in _TV_RANGED:
+            r["_rsrc"] = "tv"
         if good:
             r["range_pos"] = (lp - lo) / (hi - lo)
             r["_price"] = lp
@@ -1077,6 +1115,7 @@ def _refresh_range_pos_live(rows):
         else:
             r["_price"] = px_eod
             r["_rp_stale"] = True
+            r["_px_at"] = None
     _apply_shadow_failover(rows)
     # THE resolver (2026-08-26, the HYG defect), live-gated 2026-09-06:
     # rows just recomputed from a LIVE quote (_rp_stale=False) KEEP that
@@ -1160,7 +1199,26 @@ def _rp_str(r) -> str:
 
 def _px_str(r) -> str:
     px = r.get("_price")
-    return f"{float(px):.2f}" if px is not None else "?"
+    if px is None:
+        return "?"
+    s = f"{float(px):.2f}"
+    at = r.get("_px_at")
+    if at is not None:
+        from zoneinfo import ZoneInfo
+        et = at.astimezone(ZoneInfo("America/New_York"))
+        import datetime as _dt
+        today = _dt.datetime.now(ZoneInfo("America/New_York")).date()
+        s += f"@{et:%H:%M}" if et.date() == today else f"@{et:%m/%d}"
+    elif _market_open_now():
+        s += "⚠stale-px"
+    return s
+
+
+def _market_open_now() -> bool:
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    n = _dt.datetime.now(ZoneInfo("America/New_York"))
+    return n.weekday() < 5 and (9 * 60 + 30) <= n.hour * 60 + n.minute <= 16 * 60
 
 
 def _rng_str(r) -> str:
@@ -1274,6 +1332,13 @@ def run_screen_q(q: dict) -> str:
     # slices don't read v_screener) — matches, gated and DARK all share these dicts.
     _attach_tt(slice_)
 
+    try:
+        _tvr = _tv_ranged([r["ticker"] for r in slice_ if not r["has_range"]])
+        for r in slice_:
+            if not r["has_range"] and r["ticker"] in _tvr:
+                r["has_range"] = True
+    except Exception as e:
+        log.warning("SCREEN: TradingView range check failed (%s)", e)
     dark = sorted([r for r in slice_ if not r["has_range"]], key=lambda r: r["ticker"])
     ranged = [r for r in slice_ if r["has_range"]]
     _refresh_range_pos_live(ranged)
@@ -1511,7 +1576,7 @@ def run_screen_q(q: dict) -> str:
                   for r in dark]
     else:
         base = src_noun or ("held" if q["held"] else "tag-matched")
-        lines.append(f"🌑 DARK: none — every {base} name has an MFR range.")
+        lines.append(f"🌑 DARK: none — every {base} name has a range (MFR, or TradingView where MFR has none).")
     return "\n".join(lines)
 
 
