@@ -3,11 +3,12 @@
 2026-08-26 (the HYG 1.29-vs-0.89 defect): MFR publishes positionOnRange for
 both tiers and the bot re-derived rp from whichever band a view coalesced —
 sometimes Hedgeye's narrower trade band — with nothing to check it against.
-Resolution order, never silently falling through a tier:
+Resolution order, never silently falling through a tier (desk 10/5):
 
-  1. MFR's PUBLISHED short-term position (fresh)  -> 'mfr-published'
-  2. derived from a band ('derived-hdg' when the Hedgeye override supplied
-     the band, else 'derived-mfr')
+  1. derived from the ONE canonical band v_screener picks (hdg 7d > iin 7d
+     > mfr 5d > tv 10d) -> 'derived-hdg' / '-iin' / '-mfr' / '-tv'
+  2. MFR's PUBLISHED short-term position (fresh), only where no band exists
+     -> 'mfr-published' (tag mfr*)
   3. the shadow engine's band                      -> 'shadow'
   4. the wrapper's underlying, inverted if inverse -> 'wrapper'
   5. nothing                                       -> (None, None): DARK
@@ -45,8 +46,13 @@ ZONE_NEAR_BOTTOM = "NEAR BOTTOM"
 ZONE_BREAKDOWN = "BREAKDOWN"
 
 # short display tags — every surface that prints an rp prints one of these
-SRC_TAG = {"mfr-published": "mfr", "derived-mfr": "drv", "derived-hdg": "hdg",
-           "derived-iin": "iin", "shadow": "shd", "wrapper": "wrap"}
+# desk 10/5: "drv" was a mislabel (any band without a band_source key read
+# as derived-mfr). Every derived rp now carries the canonical band's real
+# source; MFR's published position (its own band, its fetch-time price) is
+# tagged "mfr*" and only fills in where no canonical band exists.
+SRC_TAG = {"mfr-published": "mfr*", "derived-mfr": "mfr", "derived-hdg": "hdg",
+           "derived-iin": "iin", "derived-tv": "tv", "shadow": "shd",
+           "wrapper": "wrap"}
 
 
 # ─────────────────────────── pure logic ───────────────────────────
@@ -63,16 +69,15 @@ def resolve_rp(published=None, derived=None, derived_src=None,
     this resolver let MFR's own positionOnRange beat them, so the ~36
     Hedgeye-covered names never took precedence (XLV printed 0.64/mfr
     where the 9/18 Hedgeye band 163-173 says 0.60/hdg)."""
-    if derived is not None and derived_src == "derived-hdg":
-        return float(derived), "derived-hdg"
-    # Investing Ideas TREND range (desk 9/22 #10): the Hedgeye layer
-    # BETWEEN the risk range and MFR — iin-derived outranks MFR-published
-    if derived is not None and derived_src == "derived-iin":
-        return float(derived), "derived-iin"
-    if published is not None:
-        return float(published), "mfr-published"
+    # desk 10/5 #1 (ONE canonical range per symbol): rp derived from the
+    # canonical band (hdg 7d > iin 7d > mfr 5d > tv 10d, chosen in
+    # v_screener) always wins, whatever its source — MFR's published
+    # position used its own band at its own fetch-time price, which is how
+    # BOOK RP printed 0.28 while MARKET printed 1.11 for CRWD.
     if derived is not None:
         return float(derived), (derived_src or "derived-mfr")
+    if published is not None:
+        return float(published), "mfr-published"
     if shadow is not None:
         return float(shadow), "shadow"
     if wrapper is not None:
@@ -208,7 +213,8 @@ def apply_rp_resolution(rows, record=True) -> list:
         else:
             shadow_rp = None
             derived_now = derived
-            derived_src = {"hdg": "derived-hdg", "iin": "derived-iin"}.get(
+            derived_src = {"hdg": "derived-hdg", "iin": "derived-iin",
+                           "mfr": "derived-mfr", "tv": "derived-tv"}.get(
                 r.get("band_source"), "derived-mfr")
         live_derived = (derived_now is not None
                         and r.get("_rp_stale") is False)

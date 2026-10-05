@@ -38,13 +38,17 @@ def _row(t, rp=None, side="long", acct="Individ", dark=False, **kw):
 # ─────────────────── D3: the resolution order, four tiers ───────────────────
 
 def test_resolution_order_never_silently_falls_through():
-    # 2026-09-20 (the src=mfr-on-all-69 defect): a FRESH HEDGEYE BAND is
-    # the senior range source by spec — it outranks MFR-published. MFR
-    # published still beats an MFR-derived value.
+    # desk 10/5 #1: ONE canonical band per symbol — rp derived from it wins
+    # whatever its source; MFR's published position only fills in where no
+    # canonical band exists.
     assert resolve_rp(0.89, 1.29, "derived-hdg", 0.5, 0.4) == \
         (1.29, "derived-hdg"), "fresh hedgeye band outranks published"
     assert resolve_rp(0.89, 1.29, "derived-mfr", 0.5, 0.4) == \
-        (0.89, "mfr-published"), "published beats mfr-derived"
+        (1.29, "derived-mfr"), "canonical mfr band beats MFR's published value"
+    assert resolve_rp(0.89, 1.29, "derived-tv", 0.5, 0.4) == \
+        (1.29, "derived-tv"), "a tv-only canonical band still beats published"
+    assert resolve_rp(0.89, None, None, 0.5, 0.4) == \
+        (0.89, "mfr-published"), "published fills in only with no band"
     # 9/22 #10: Investing Ideas TREND range sits BETWEEN hdg and mfr
     assert resolve_rp(0.89, 1.29, "derived-iin", 0.5, 0.4) == \
         (1.29, "derived-iin"), "iin band outranks mfr-published"
@@ -55,16 +59,16 @@ def test_resolution_order_never_silently_falls_through():
     assert resolve_rp(None, None, None, None, 0.4) == (0.4, "wrapper")
     assert resolve_rp() == (None, None), "nothing -> DARK, not a guess"
     # 0.0 is a real value at every tier, never treated as missing
-    assert resolve_rp(0.0, 1.0) == (0.0, "mfr-published")
+    assert resolve_rp(0.0, None) == (0.0, "mfr-published")
     assert resolve_rp(None, 0.0) == (0.0, "derived-mfr")
 
 
 # ──────────── 2026-09-06: live-derived rp outranks frozen published ──────────
 
 def test_live_gate_published_never_overrides_a_live_quote():
-    """A row recomputed from a LIVE quote (_rp_stale=False) keeps its derived
-    rp; the published fetch-time value only stands where no live quote backs
-    the row (_rp_stale True or absent — EOD report / book alerts shapes)."""
+    """desk 10/5: the derived rp from the canonical band wins on every row,
+    live quote or not; published (fetch-time value on MFR's own band) only
+    stands on rows with no derived value at all."""
     import tools.rp_resolve as rr
     real = rr.published_map
     rr.published_map = lambda tickers: {t: (0.62, 0.5, None) for t in tickers}
@@ -73,18 +77,21 @@ def test_live_gate_published_never_overrides_a_live_quote():
             {"ticker": "LIVE", "range_pos": 0.31, "_rp_stale": False},
             {"ticker": "EODF", "range_pos": 0.31, "_rp_stale": True},
             {"ticker": "NOKEY", "range_pos": 0.31},
+            {"ticker": "NOBAND", "range_pos": None},
         ]
         rr.apply_rp_resolution(rows, record=False)
     finally:
         rr.published_map = real
-    live, eod, nokey = rows
+    live, eod, nokey, noband = rows
     assert live["range_pos"] == 0.31 and live["rp_source"] == "derived-mfr", \
         "live quote must win over frozen published"
     assert live["_rp_derived"] == 0.31
-    assert eod["range_pos"] == 0.62 and eod["rp_source"] == "mfr-published", \
-        "no live quote -> published fallback stands"
-    assert nokey["range_pos"] == 0.62 and nokey["rp_source"] == "mfr-published", \
-        "rows without the flag (EOD report, book alerts) behave as before"
+    assert eod["range_pos"] == 0.31 and eod["rp_source"] == "derived-mfr", \
+        "canonical-band rp stands even without a live quote"
+    assert nokey["range_pos"] == 0.31 and nokey["rp_source"] == "derived-mfr", \
+        "rows without the flag use the canonical band too"
+    assert noband["range_pos"] == 0.62 and noband["rp_source"] == "mfr-published", \
+        "no canonical band -> published fills in"
 
 
 def test_screen_marks_the_published_fallback_visibly():

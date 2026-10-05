@@ -76,11 +76,18 @@ def build_note(full: bool = False):
     prev_book = {r[0]: r for r in _book(prev)} if prev else {}
 
     longs = shorts = 0.0
+    opt_net = opt_cost = 0.0
     sleeves: dict = {}
     for s, q, mv, gl, is_opt, exp, sector, bucket, cb in book:
         if s in CASH_LIKE or mv is None:
             continue
         mv = float(mv)
+        if is_opt:
+            # desk 10/5 #3: spread legs net to one position — counting them
+            # gross put the short put inside short exposure
+            opt_net += mv
+            opt_cost += float(cb or 0) * (1 if float(q or 0) >= 0 else -1)
+            continue
         eff = -abs(mv) if (s in INVERSE and mv > 0) else mv
         if eff >= 0:
             longs += eff
@@ -161,7 +168,7 @@ def build_note(full: bool = False):
     # ── thesis cards ──
     scr = {r[0]: r for r in _rows(
         "SELECT ticker, range_pos, trend_dir, price, range_low, range_high, "
-        "       tv_trade, tv_trend, tv_basis "
+        "       tv_trade, tv_trend, tv_basis, band_source, range_asof "
         "FROM v_screener WHERE ticker = ANY(%s)", (held,))}
     from tools.tt_levels import tt_tag
     sg = {r[0]: r for r in _rows(
@@ -187,6 +194,12 @@ def build_note(full: bool = False):
         side = "SHORT" if float(q or 0) < 0 else "long"
         v = scr.get(s)
         rp = f"{float(v[1]):.2f}" if v and v[1] is not None else "?"
+        if v and v[1] is not None and v[4] is not None:
+            # desk 10/5 #1: range, source and as-of next to every rp
+            rp += (f" [{float(v[4]):g}-{float(v[5]):g}]·{v[9] or '?'}"
+                   + (f"@{v[10]:%m/%d}" if v[10] else ""))
+            if abs(float(v[1])) > 2:
+                rp += "⚠chk"
         tr = (v[2] or "?") if v else "?"
         w = sg.get(s)
         wall = ""
@@ -232,9 +245,11 @@ def build_note(full: bool = False):
          f"STANCE: net {_money(longs + shorts)} ({longs / gross * 100:.0f}/"
          f"{-shorts / gross * 100:.0f} L/S) · gross {_money(gross)} · "
          f"cash {_money(cash)} · SPX regime: {regime}"
-         + (f" (tilt {spx_tilt:.2f})" if spx_tilt else ""),
+         + (f" (tilt {spx_tilt:.2f})" if spx_tilt else "")
+         + (f" · options net {_money(opt_net)} (cost {_money(opt_cost)}, "
+            f"outside L/S)" if (opt_net or opt_cost) else ""),
          "",
-         "EXPOSURE by sleeve (gross):"]
+         "EXPOSURE by sleeve (gross, ex-options):"]
     # T1A vs SG flip lines (desk 9/26) — right under STANCE, where the regime
     # call lives. Guarded: missing data prints its own "no data" line.
     try:

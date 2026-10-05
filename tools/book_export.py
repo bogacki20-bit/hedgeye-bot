@@ -25,6 +25,8 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 
+from tools.trading_calendar import sessions_since
+
 ACCOUNTS = {
     "X96383748": ("Individual", "long+short, $5,000 margin buffer"),
     "244859926": ("Rollover IRA", "long-only"),
@@ -132,12 +134,20 @@ def build_current_book() -> str:
         LL = None if is_opt else _lots.get(und)
         if LL and LL.get("oldest_open"):
             ed = LL["oldest_open"]
-            entered, held = str(ed), f"{(today - ed).days}d"
+            # 10/5: NYSE sessions, not calendar days; shorts count from the
+            # LAST short fill (printed), longs from the oldest open lot
+            last_d = next((d for d, _q, _px, _rp in reversed(LL.get("open") or [])
+                           if d is not None), None)
+            anchor = last_d if (side == "SHORT" and last_d) else ed
+            entered = str(ed)
+            held = f"{sessions_since(anchor, today)} sess"
+            if side == "SHORT" and last_d:
+                held += f" since last fill {last_d:%m/%d}"
             la = LL.get("last_add")
-            if la and (today - la).days <= 5:
-                held += f" ⏱added {(today - la).days}d ago (clock off)"
+            if la and sessions_since(la, today) <= 5:
+                held += f" ⏱added {sessions_since(la, today)} sess ago (clock off)"
         elif ed:
-            entered, held = str(ed), f"{(today - ed).days}d"
+            entered, held = str(ed), f"{sessions_since(ed, today)} sess"
         elif pre and span:
             entered, held = f"pre-{span}", f">{(today - span).days}d"
         else:

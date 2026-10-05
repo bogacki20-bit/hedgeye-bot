@@ -58,15 +58,18 @@ def _rp_series(cur, tickers, days=10) -> dict:
            ORDER BY m.ticker, m.snapshot_date""", (tickers, days))
     out: dict = {}
     for t, d, px, pub, lo, hi in cur.fetchall():
-        if pub is not None:
+        # desk 10/5 #1: derived from the band first (same-session Hedgeye
+        # band, else MFR's) — the rule every live surface now follows;
+        # MFR's published position only where no usable band exists
+        if (px is not None and lo is not None and hi is not None
+                and float(hi) > float(lo)):
+            rp = (float(px) - float(lo)) / (float(hi) - float(lo))
+        elif pub is not None:
             rp = float(pub)
             if lo is None or hi is None:
                 lo, hi = 0.0, 0.0
-        elif (px is None or lo is None or hi is None
-                or float(hi) <= float(lo)):
-            continue
         else:
-            rp = (float(px) - float(lo)) / (float(hi) - float(lo))
+            continue
         out.setdefault(t, []).append((d, round(rp, 3), float(lo), float(hi)))
     return out
 
@@ -273,7 +276,7 @@ def candidates_line(rows, cap=12) -> str:
     """P6 nomination, not recommendation — rule printed inline, no ranking
     beyond rp sort, no buy language. rows: [(ticker, rp, fill|None)] already
     filtered by the rule; fill is printed on held names (deploy context)."""
-    rule = "[rule: TREND=BULL + rp<0.35 + fill<80%]"
+    rule = "[rule: on SS long roster + TREND=BULL + rp<0.35 + fill<80%]"
     if not rows:
         return f"CANDIDATES: none {rule}"
     parts = [f"{t}({rp:.2f}{f',held {f:.0f}%fill' if f is not None else ''})"
@@ -621,7 +624,7 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
         f"{'tkr':<8}{'acct':<9}{'side':<6}{'$val':>9}{'%book':>7}"
         f"{'rpST':>7}{'rpLT':>6}  {'5d lo-hi':<11}{'trend':<9}"
         f"{'px':>9}{'TRADE':>9}{'TREND':>9}  "
-        f"{'PM bucket':<15}{'src':<6}{'lots (in·legs·sess·last-fill)':<34}"
+        f"{'PM bucket':<15}{'src@asof':<10}{'lots (in·legs·sess·last-fill)':<34}"
         f"{'top-corr'}"]
 
     def _lv(v):
@@ -639,9 +642,17 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
                 else f"{r['rp_5d_min']:.2f}-{r['rp_5d_max']:.2f}")
         pct = (f"{r['pct']:.1f}%" if r.get("pct") is not None else "n/a")
         src = SRC_TAG.get(r.get("rp_source"), r.get("rp_source") or "-")
+        # desk 10/5 #1: canonical range + as-of next to every rp
+        if r.get("asof"):
+            src += f"@{r['asof']:%m/%d}"
         tc = (corr_by_ticker or {}).get(r["ticker"])
         tc_s = f"{tc[0]} {tc[1]:+.2f}" if tc else "n/a"
         tags = []
+        lo_hi = r.get("rng") or (None, None)
+        if lo_hi[0] is not None and lo_hi[1] is not None:
+            tags.append(f"[{_lv(lo_hi[0])}-{_lv(lo_hi[1])}]")
+        if r.get("rp_now") is not None and abs(r["rp_now"]) > 2:
+            tags.append("⚠chk")
         if is_dark_row(r):
             tags.append("DARK")
         if r.get("low_signal"):
@@ -660,7 +671,7 @@ def format_book_rp(table_rows, clusters=None, corr_by_ticker=None,
             f"{_lv((r.get('tt') or (None, None, None))[0]):>9}"
             f"{_lv((r.get('tt') or (None, None, None))[1]):>9}"
             f"{'*' if (r.get('tt') or (None, None, None))[2] == 'bear-mirror' else ' '} "
-            f"{(r.get('bucket') or '-'):<15}{src:<6}"
+            f"{(r.get('bucket') or '-'):<15}{src:<10}"
             f"{(r.get('lot') or '-'):<34}{tc_s}"
             + (("   " + " ".join(tags)) if tags else ""))
 
@@ -848,6 +859,85 @@ def _tv_fill_dark(rows) -> None:
         r["low_signal"] = is_low_signal(lo, hi, px)
 
 
+
+def spread_math(long_leg, short_leg, today=None):
+    """Pure. Vertical-spread figures from two legs (dicts: strike, qty,
+    cost_basis, market_value, expiry, type). Debit verticals report max
+    gain = width x 100 x contracts - net debit; credit spreads report max
+    loss the mirror way. Breakeven: put debit = long K - debit/share, call
+    debit = long K + debit/share (credit: short K -/+ credit/share)."""
+    import datetime as _dt
+    today = today or _dt.date.today()
+    n = abs(float(long_leg["qty"]))
+    width = abs(float(long_leg["strike"]) - float(short_leg["strike"])) * 100 * n
+    net = float(long_leg["cost_basis"]) - float(short_leg["cost_basis"])
+    value = float(long_leg["market_value"]) + float(short_leg["market_value"])
+    debit = net > 0
+    per = abs(net) / (100 * n)
+    if long_leg["type"] == "P":
+        be = float(long_leg["strike"]) - per if debit else float(short_leg["strike"]) - per
+    else:
+        be = float(long_leg["strike"]) + per if debit else float(short_leg["strike"]) + per
+    return {"net": net, "value": value, "pl": value - net, "width": width,
+            "max_gain": (width - net) if debit else -net,
+            "max_loss": net if debit else (width + net),
+            "breakeven": be,
+            "pct_of_max": (value / width * 100) if (debit and width) else None,
+            "dte": (long_leg["expiry"] - today).days, "debit": debit}
+
+
+def option_spread_lines(cur) -> list:
+    """desk 10/5 #3: one row per vertical (same underlying/acct/expiry/type,
+    one long + one short leg of equal size), plus any unpaired legs — net
+    debit, max gain, breakeven, value as % of max, DTE. Kept out of the
+    stock rows and out of long/short exposure."""
+    import datetime as _dt
+    cur.execute(
+        """SELECT upper(underlying), account_number, opt_expiry, opt_type,
+                  opt_strike, quantity, cost_basis, market_value
+           FROM book_positions
+           WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
+             AND is_option AND COALESCE(quantity, 0) <> 0
+           ORDER BY 1, 2, 3, 4, 5""")
+    legs = [dict(u=u, acct=a, expiry=e, type=t, strike=k, qty=q,
+                 cost_basis=cb or 0, market_value=mv or 0)
+            for u, a, e, t, k, q, cb, mv in cur.fetchall()]
+    if not legs:
+        return []
+    groups: dict = {}
+    for L in legs:
+        groups.setdefault((L["u"], L["acct"], L["expiry"], L["type"]), []).append(L)
+    out = ["OPTIONS — spreads (not in stock rows or long/short exposure)"]
+    for (u, _acct, e, t), g in groups.items():
+        longs = [L for L in g if float(L["qty"]) > 0]
+        shorts = [L for L in g if float(L["qty"]) < 0]
+        kind = {"P": "put", "C": "call"}.get(t, t)
+        if (len(longs) == 1 and len(shorts) == 1
+                and abs(float(longs[0]["qty"])) == abs(float(shorts[0]["qty"]))):
+            m = spread_math(longs[0], shorts[0])
+            n = abs(float(longs[0]["qty"]))
+            label = (f"{u} {e:%b %d} {float(longs[0]['strike']):g}/"
+                     f"{float(shorts[0]['strike']):g} {kind} "
+                     f"{'debit' if m['debit'] else 'credit'} x{n:g}")
+            if m["debit"]:
+                out.append(f"  {label}: net debit ${m['net']:,.0f} · value "
+                           f"${m['value']:,.0f} ({m['pl']:+,.0f}) · max gain "
+                           f"${m['max_gain']:,.0f} · BE {m['breakeven']:.2f} · "
+                           f"{m['pct_of_max']:.0f}% of max · {m['dte']} DTE")
+            else:
+                out.append(f"  {label}: net credit ${-m['net']:,.0f} · value "
+                           f"${m['value']:,.0f} ({m['pl']:+,.0f}) · max loss "
+                           f"${m['max_loss']:,.0f} · BE {m['breakeven']:.2f} · "
+                           f"{m['dte']} DTE")
+        else:
+            for L in g:
+                out.append(f"  {u} {e:%b %d} {float(L['strike']):g}{t} "
+                           f"x{float(L['qty']):g}: cost ${float(L['cost_basis']):,.0f}"
+                           f" · value ${float(L['market_value']):,.0f} · "
+                           f"{(e - _dt.date.today()).days} DTE")
+    return out
+
+
 def build_book_rp() -> str:
     """IO assembly for BOOK RP v2: positions per (underlying, account) joined
     to _book_rows(include_dark=True) — which now resolves rp through
@@ -864,8 +954,16 @@ def build_book_rp() -> str:
                WHERE snapshot_date = (SELECT max(snapshot_date)
                                       FROM book_positions)
                  AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0
+                 AND NOT COALESCE(is_option, false)
                GROUP BY 1, 2""")
         pos = cur.fetchall()
+        # desk 10/5 #3: option legs print as their own SPREADS block —
+        # never folded into the stock row (VLO read $996 instead of $570)
+        try:
+            spread_lines = option_spread_lines(cur)
+        except Exception as e:  # noqa: BLE001
+            log.warning("BOOK RP spreads failed: %s", e)
+            spread_lines = [f"OPTIONS: unavailable ({e})"]
         # E1: %book is against the TOTAL book, CASH INCLUDED — the same
         # denominator as the 2026-08-25 position-cap policy.
         cur.execute(
@@ -911,6 +1009,7 @@ def build_book_rp() -> str:
         log.warning("lots_all unavailable for BOOK RP: %s", e)
         _lots = {}
     import datetime as _dt
+    from tools.trading_calendar import sessions_since
     _today = _dt.date.today()
 
     def _lot_str(t):
@@ -919,12 +1018,17 @@ def build_book_rp() -> str:
             return None
         oo = L["oldest_open"]
         legs = len(L["open"])
-        sess = (_today - oo).days
-        last_px = next((px for d, q, px, _rp in reversed(L["open"])
-                        if px is not None), None)
+        last = next(((d, px) for d, q, px, _rp in reversed(L["open"])
+                     if d is not None), (None, None))
+        # short clock (10/5): NYSE sessions since the LAST short fill, with
+        # that fill's date printed; longs keep the oldest-open anchor
+        anchor = last[0] if (L.get("side") == "short" and last[0]) else oo
+        sess = sessions_since(anchor, _today)
         s = f"in {oo:%m/%d}·{legs}leg·{sess}s"
-        if last_px is not None:
-            s += f"·lf {last_px:g}"
+        if last[1] is not None:
+            s += f"·lf {last[1]:g}"
+        if last[0] is not None:
+            s += f"@{last[0]:%m/%d}"
         la = L.get("last_add")
         if la and (_today - la).days <= 5:
             s += "·⏱scaling"
@@ -956,6 +1060,8 @@ def build_book_rp() -> str:
                      "cash_eq": t in cash_eq,
                      "lot": _lot_str(t),
                      "px": rp.get("price"),
+                     "rng": (rp.get("range_low"), rp.get("range_high")),
+                     "asof": rp.get("range_asof"),
                      "tt": tt_by.get(t),
                      "dark": rp.get("dark", False)})
 
@@ -970,11 +1076,12 @@ def build_book_rp() -> str:
     corr_line = (f"correlations: {covered}/{len(held)} positions have a 90d "
                  f"coefficient; {len(held) - covered} do not (n/a, never "
                  f"0.00)")
-    return book_asof_line() + "\n" + format_book_rp(
+    body = book_asof_line() + "\n" + format_book_rp(
         rows, clusters=cl, corr_by_ticker=tc,
         sector_cap_lines=_sector_cap_lines(),
         total_book=total_book, corr_coverage=corr_line,
         done_lines=done_lines, done_notes=done_notes)
+    return body + ("\n\n" + "\n".join(spread_lines) if spread_lines else "")
 
 
 def book_asof_line() -> str:
@@ -1394,9 +1501,13 @@ def build_report_v4(kind: str = "on-demand", full: bool = False,
 
         # ── P6 CANDIDATES (nomination by rule, judgment stays upstream) ──
         try:
-            cur.execute("""SELECT ticker, range_pos, held FROM v_screener
-                           WHERE trend_dir = 'BULLISH' AND range_pos < 0.35
-                           ORDER BY range_pos""")
+            # desk 10/5 #8: current Signal Strength long roster only — ROKU
+            # was nominated 10/05 after SS dropped it on 10/01
+            cur.execute("""SELECT v.ticker, v.range_pos, v.held FROM v_screener v
+                           JOIN ss_roster_current r ON r.ticker = v.ticker
+                                AND COALESCE(r.side, 'long') = 'long'
+                           WHERE v.trend_dir = 'BULLISH' AND v.range_pos < 0.35
+                           ORDER BY v.range_pos""")
             cands = []
             for t, rp, h in cur.fetchall():
                 fill = ctx.get(t, {}).get("fill") if h else None

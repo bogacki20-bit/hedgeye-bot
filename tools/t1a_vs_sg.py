@@ -19,6 +19,18 @@ def _t1a(day: dt.date) -> dict | None:
         return dict(zip([c.name for c in cur.description], row)) if row else None
 
 
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
+
+
+def _expected_note_date(day: dt.date) -> dt.date:
+    """SG notes are dated by session; on a weekend/holiday the last
+    session's note is current."""
+    from tools.trading_calendar import is_trading_day, previous_trading_day
+    return day if is_trading_day(day) else previous_trading_day(day)
+
+
 def _f(v, nd=0) -> str:
     return "—" if v is None else f"{float(v):,.{nd}f}"
 
@@ -27,14 +39,17 @@ def build_block(day: dt.date | None = None) -> str:
     from tools.sg_index_levels import latest
     day = day or dt.date.today()
     t, s = _t1a(day), latest("SPX", day)
-    if not t and not s:
+    s_dropped = None
+    if s and s["note_date"] < _expected_note_date(day):
+        s_dropped, s = s, None
+    if not t and not s and not s_dropped:
         return "🧭 T1A vs SG: no data yet."
     lines = []
     stale = []
     if t and t["report_date"] != day:
         stale.append(f"T1A {t['report_date']:%m/%d}")
-    if s and s["note_date"] != day:
-        stale.append(f"SG {s['note_date']:%m/%d}")
+    if s_dropped:
+        stale.append(f"SG {s_dropped['note_date']:%m/%d} (dropped)")
     hdr = f"🧭 T1A vs SG — SPX flip lines ({day:%m/%d})"
     lines.append(hdr + (f"  ⚠ stale: {', '.join(stale)}" if stale else ""))
     spot = (t or {}).get("spx_last") or (s or {}).get("ref_price")
@@ -57,8 +72,18 @@ def build_block(day: dt.date | None = None) -> str:
             lines.append(f"  vol-control flow $bn: ±1% {vc.get('-1')}/{vc.get('1')}"
                          f" · ±2% {vc.get('-2')}/{vc.get('2')} · ±3% {vc.get('-3')}/{vc.get('3')}"
                          + (f" · sys z {_f(t['sys_positioning_z'], 1)}" if t.get("sys_positioning_z") is not None else ""))
-    if s:
-        lines.append(f"  SG: tilt {_f(s['gamma_tilt'], 2)} · notional ${_f(s['gamma_notional_mm'])}M"
+    # desk 10/5 #7: a packet carried the 10/02 note's block (tilt 1.07 / CW
+    # 8,100, built off the 10/01 close) beside today's (1.19 / 7,800). The
+    # SG line now names its note + capture time, and a prior session's note
+    # is dropped rather than printed as if current.
+    if s_dropped:
+        lines.append(f"  SG: today's Founder's Note not captured yet — "
+                     f"{s_dropped['note_date']:%m/%d} note dropped (stale)")
+    elif s:
+        cap = s.get("parsed_at")
+        stamp = f"note {s['note_date']:%m/%d}" + (
+            f", captured {cap.astimezone(_ET):%m/%d %H:%M} ET" if cap else "")
+        lines.append(f"  SG ({stamp}): tilt {_f(s['gamma_tilt'], 2)} · notional ${_f(s['gamma_notional_mm'])}M"
                      f" · CW {_f(s['call_wall'])} · PW {_f(s['put_wall'])} · absγ {_f(s['abs_gamma_strike'])}")
     if t:
         lines.extend(_t1a_extras(t))

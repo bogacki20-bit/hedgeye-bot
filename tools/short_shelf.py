@@ -16,7 +16,9 @@ qualifying bounce. This module is the shelf that doctrine assumed:
                   stores ranks with NO side, so it can't vouch a short —
                   its rank is shown on the row instead.
                 - trend BEARISH from a fresh source (v_screener, gated)
-                - rp >= 0.65
+                - 0.65 <= rp <= 1 (rp > 1 = its own ABOVE-RANGE state,
+                  shown with distance to TRADE/TREND, never a fire)
+                - price >= 4% above the last cover (a real bounce, 10/5)
               and EXPIRES rows whose name left every short roster or
               flipped BULLISH — logged with a reason, never dropped.
   stats()     covers -> re-shorted count, and first vs second rental P/L
@@ -35,6 +37,7 @@ log = logging.getLogger(__name__)
 SENTINEL = "SHELF"
 SWEEP_SINCE = dt.date(2026, 9, 1)     # backfill horizon: the 9/14 covers
 REENTRY_RP = 0.65
+REENTRY_BOUNCE = 0.04                 # 10/5: price must be +4% off the last cover
 ETFPRO_FRESH_DAYS = 14                # weekly product
 SHORT_BUCKETS = ("active_short", "short_bench", "top_idea_short")
 
@@ -154,14 +157,14 @@ def evaluate() -> dict:
         return {"fires": [], "watching": [], "expired": []}
     tickers = sorted({r[1] for r in live})
     ros = _roster(tickers)
-    scr = {t: (rp, tr, ts, px) for t, rp, tr, ts, px in _rows(
-        "SELECT ticker, range_pos, trend_dir, trend_source, price "
+    scr = {t: (rp, tr, ts, px, trd, tnd) for t, rp, tr, ts, px, trd, tnd in _rows(
+        "SELECT ticker, range_pos, trend_dir, trend_source, price, tv_trade, tv_trend "
         "FROM v_screener WHERE ticker=ANY(%s)", (tickers,))}
 
-    fires, watching, expired = [], [], []
+    fires, watching, expired, above = [], [], [], []
     for rid, tkr, cov_d, cov_px, rpl, partial in live:
         m = ros.get(tkr, {})
-        rp, trend, _src, cur_px = scr.get(tkr, (None, None, None, None))
+        rp, trend, _src, cur_px, trd, tnd = scr.get(tkr, (None,) * 6)
         rp = float(rp) if rp is not None else None
         on_roster = (m.get("posmon") or m.get("etfpro") or m.get("retailpro")
                      or m.get("finpro") or (m.get("ss") and trend == "BEARISH"))
@@ -194,7 +197,18 @@ def evaluate() -> dict:
                 f"{trend or '?'} [{tags}]"
                 f"{' — still holds a piece' if partial else ''} · "
                 f"{px_s}{pl_s}")
-        if rp is not None and rp >= REENTRY_RP and trend == "BEARISH":
+        bounce = ((float(cur_px) - float(cov_px)) / float(cov_px)
+                  if cov_px and cur_px else None)
+        if rp is not None and rp > 1.0:
+            # 10/5: above the range top is its own state, not a re-entry —
+            # show how far price sits from the TRADE / TREND lines
+            def _d(lv):
+                return (f"{(float(cur_px) - float(lv)) / float(lv) * 100:+.1f}%"
+                        if lv and cur_px else "?")
+            above.append(f"{line} · vs TRD {trd or '?'} {_d(trd)} · "
+                         f"vs TND {tnd or '?'} {_d(tnd)}")
+        elif (rp is not None and rp >= REENTRY_RP and trend == "BEARISH"
+              and bounce is not None and bounce >= REENTRY_BOUNCE):
             fires.append((tkr, cov_d, f"{verb}: {line}"))
         else:
             watching.append(line)
@@ -208,7 +222,8 @@ def evaluate() -> dict:
             by_tkr[tkr] = (cur[0], cur[1], cur[2] + 1)
     fired = [line + (f" · {n} prior rental(s) on shelf" if n > 1 else "")
              for _, line, n in by_tkr.values()]
-    return {"fires": fired, "watching": watching, "expired": expired}
+    return {"fires": fired, "watching": watching, "expired": expired,
+            "above": above}
 
 
 def stats() -> str:
@@ -237,8 +252,11 @@ def handle_shelf_command(text: str):
              f"(swept: +{new} new, {re_n} marked re-entered)"]
         if ev["fires"]:
             L += ["", "🔔 " + "\n🔔 ".join(ev["fires"])]
+        if ev.get("above"):
+            L += ["", "⬆ above range top (rp>1) — not a re-entry; distance to TRADE/TREND:"]
+            L += ["  " + w for w in ev["above"]]
         if ev["watching"]:
-            L += ["", "watching (need roster + BEARISH + rp≥0.65):"]
+            L += ["", "watching (need roster + BEARISH + 0.65≤rp≤1 + ≥4% off cover):"]
             L += ["  " + w for w in ev["watching"]]
         if ev["expired"]:
             L += ["", "expired this pass:"] + ["  ✝ " + e for e in ev["expired"]]

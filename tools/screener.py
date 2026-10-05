@@ -485,7 +485,7 @@ def _ivpd_pct_for(tickers, window=60) -> dict:
 
 
 _SLICE_COLS = ("SELECT ticker, subsector, hedgeye_bucket_0629, hedgeye_group, "
-               "range_pos, momentum_ok, "
+               "range_pos, range_low, range_high, band_source, range_asof, price, momentum_ok, "
                "momentum_dir, divergence, hurst, iv, rv, ivpd, trend_dir, trend_source, "
                "held, has_range, tv_trade, tv_trend, tv_basis FROM v_screener")
 
@@ -609,12 +609,11 @@ WITH mem AS (SELECT DISTINCT unnest(%(members)s::text[]) AS ticker),
         WHERE snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
           AND asset_class <> 'cash' AND COALESCE(quantity, 0) <> 0)
 SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
-       lm.price,
-       COALESCE(hb.range_low,  lm.range_low)  AS range_low,
-       COALESCE(hb.range_high, lm.range_high) AS range_high,
-       (lm.price - COALESCE(hb.range_low, lm.range_low))
-         / NULLIF(COALESCE(hb.range_high, lm.range_high)
-                  - COALESCE(hb.range_low, lm.range_low), 0) AS range_pos,
+       -- desk 10/5 #1: range, price and rp come from v_screener's ONE
+       -- canonical band (hdg 7d > iin 7d > mfr 5d > tv 10d) so this lens,
+       -- BOOK RP and every other surface agree on the same symbol
+       COALESCE(vs.price, lm.price) AS price,
+       vs.range_low, vs.range_high, vs.range_pos, vs.range_asof,
        (lm.momentum_signal = 'momentumBullish') AS momentum_ok,
        CASE lm.momentum_signal WHEN 'momentumBullish' THEN 'BULLISH'
             WHEN 'momentumBearish' THEN 'BEARISH' WHEN 'momentumNeutral' THEN 'NEUTRAL'
@@ -626,10 +625,9 @@ SELECT m.ticker, tt.subsector, tt.hedgeye_bucket_0629,
             WHEN 'trendBearish' THEN 'BEARISH' WHEN 'trendNeutral' THEN 'NEUTRAL' END) AS trend_dir,
        CASE WHEN ht.trend IS NOT NULL THEN 'hedgeye'
             WHEN lm.trend_signal IN ('trendBullish','trendBearish','trendNeutral') THEN 'mfr' END AS trend_source,
-       CASE WHEN hb.ticker IS NOT NULL THEN 'hdg'
-            WHEN lm.range_low IS NOT NULL THEN 'mfr' END AS band_source,
+       vs.band_source,
        (h.ticker IS NOT NULL) AS held,
-       (lm.range_low IS NOT NULL) AS has_range,
+       (vs.range_low IS NOT NULL) AS has_range,
        tt.gics_sector, tt.hedgeye_group
 FROM mem m
 LEFT JOIN ticker_tags    tt ON tt.ticker = m.ticker
@@ -637,6 +635,7 @@ LEFT JOIN latest_mfr     lm ON lm.ticker = m.ticker
 LEFT JOIN hedgeye_trend  ht ON ht.ticker = m.ticker
 LEFT JOIN hdg_band       hb ON hb.ticker = m.ticker
 LEFT JOIN held           h  ON h.ticker  = m.ticker
+LEFT JOIN v_screener     vs ON vs.ticker = m.ticker
 """
 
 
@@ -1015,6 +1014,11 @@ def _snap_staleness(sd, batch_max_sd, today):
 
 
 def _st_ranges(tickers):
+    """{ticker: (lo, hi, eod_price, range_asof, src)} — the ONE canonical band
+    (desk 10/5 #1): v_screener's hdg 7d > iin 7d > mfr 5d > tv 10d, so SCREEN
+    prints the same range every other surface does. (Before 10/5 this read
+    the newest MFR snapshot with no age limit and ignored Hedgeye bands —
+    CRWD showed 256.98-303.49 here vs 230-268 on MARKET.)"""
     tickers = [t for t in {t for t in tickers if t}]
     if not tickers:
         return {}
@@ -1023,28 +1027,13 @@ def _st_ranges(tickers):
     try:
         with db_pg.get_conn() as c, c.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT ON (ticker) ticker, range_low::float, range_high::float, "
-                "price::float, snapshot_date, fetched_at "
-                "FROM mfr_snapshots WHERE ticker = ANY(%s) "
-                "ORDER BY ticker, snapshot_date DESC", (tickers,))
-            for t, lo, hi, px, sd, fa in cur.fetchall():
-                out[t] = (lo, hi, px, sd, fa)
-            # Names MFR doesn't cover: TradingView's "MFR Range" read (tv_levels,
-            # 9/29 — matched MFR's own ranges 119/120 on equities). MFR dates a
-            # snapshot the day AFTER its session, TradingView by the session,
-            # so bar_date + 1 keeps the staleness check on one calendar.
-            missing = [t for t in tickers if t not in out]
-            if missing:
-                cur.execute(
-                    "SELECT DISTINCT ON (ticker) ticker, range_low::float, range_high::float, "
-                    "bar_close::float, bar_date + 1, captured_at FROM tv_levels "
-                    "WHERE ticker = ANY(%s) AND range_high > range_low "
-                    "ORDER BY ticker, bar_date DESC", (missing,))
-                for t, lo, hi, px, sd, fa in cur.fetchall():
-                    out[t] = (lo, hi, px, sd, fa)
-                    _TV_RANGED.add(t)
+                "SELECT ticker, range_low::float, range_high::float, price::float, "
+                "range_asof, band_source FROM v_screener "
+                "WHERE ticker = ANY(%s) AND range_low IS NOT NULL", (tickers,))
+            for t, lo, hi, px, asof, src in cur.fetchall():
+                out[t] = (lo, hi, px, asof, src)
     except Exception as e:
-        log.warning("SCREEN: short-term range fetch failed: %s", e)
+        log.warning("SCREEN: canonical range fetch failed: %s", e)
     return out
 
 
@@ -1073,13 +1062,15 @@ def _refresh_range_pos_live(rows):
     except Exception as e:
         log.warning("SCREEN: range fetch failed (%s)", e)
         rng = {}
-    # snapshot-age staleness of the RANGE — fail loud on old bands (the USO fix)
-    sds = [sd for (_lo, _hi, _px, sd, _fa) in rng.values() if sd]
-    batch_max_sd = max(sds) if sds else None
+    # range freshness is gated per tier inside v_screener (10/5): a band that
+    # comes back IS current; no band = dark (prints n/a), never a stale number
     today = _dt.date.today()
     for r in rows:
-        sd = rng.get(r["ticker"], (None, None, None, None, None))[3]
-        r["_snap_stale"], r["_snap_age_days"] = _snap_staleness(sd, batch_max_sd, today)
+        c = rng.get(r["ticker"])
+        r["_snap_stale"] = False
+        r["_snap_age_days"] = (today - c[3]).days if c and c[3] else None
+        if c:
+            r["band_source"], r["_rasof"] = c[4], c[3]
 
     # 2) Live price fetch (Yahoo). If unavailable, fall back to EOD — but the
     #    range-staleness flag above still stands.
@@ -1101,13 +1092,15 @@ def _refresh_range_pos_live(rows):
             r["_rlo"] = r["_rhi"] = None
         return
     for r in rows:
-        lo, hi, px_eod, sd, fa = rng.get(r["ticker"], (None, None, None, None, None))
+        lo, hi, px_eod, _asof, src = rng.get(r["ticker"], (None,) * 5)
         lp = live.get(symmap.get(r["ticker"]))
         good = (lp is not None and lp > 0 and lo is not None and hi is not None and hi > lo
                 and (px_eod is None or (px_eod > 0 and _RP_LIVE_MIN <= lp / px_eod <= _RP_LIVE_MAX)))
         r["_rlo"], r["_rhi"] = lo, hi
-        if r["ticker"] in _TV_RANGED:
-            r["_rsrc"] = "tv"
+        if src:
+            r["_rsrc"] = src
+        if lo is None:
+            r["range_pos"] = None
         if good:
             r["range_pos"] = (lp - lo) / (hi - lo)
             r["_price"] = lp
@@ -1228,6 +1221,8 @@ def _rng_str(r) -> str:
     # range-source tag: only set when the shadow engine supplied the band, so
     # rows on a healthy MFR range render byte-identically to before.
     src = f"·{r['_rsrc']}" if r.get("_rsrc") else ""
+    asof = r.get("_rasof")
+    src += f"@{asof:%m/%d}" if asof else ""
     return f"[{float(lo):.2f}-{float(hi):.2f}]{src}"
 
 

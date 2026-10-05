@@ -211,6 +211,7 @@ def _book_rows(*, include_dark: bool = False) -> list:
                      "range_high": (float(r["range_high"])
                                     if r.get("range_high") is not None
                                     else None),
+                     "range_asof": r.get("range_asof"),
                      "rp_5d_max": hi, "rp_5d_min": lo, "wrap": wrap})
     return rows
 

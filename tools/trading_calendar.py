@@ -159,6 +159,12 @@ def validate_bar_date(bar_date, now=None) -> tuple:
     return True, "last bar %s is the last completed session" % bar_date
 
 
+def sessions_since(d: date, today: date | None = None) -> int:
+    """NYSE sessions after `d` up to and including `today` (10/5: the short
+    clock counted calendar days — a 9/22 entry read 13 on 10/5; it is 9)."""
+    return _sessions_between(d, today or date.today())
+
+
 def _sessions_between(a: date, b: date) -> int:
     n, c = 0, a
     while c < b:

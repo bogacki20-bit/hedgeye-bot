@@ -103,7 +103,7 @@ def test_conc_line_top3_and_top_cluster():
 def test_candidates_format_rule_inline_no_advice():
     line = candidates_line([("FXH", 0.20, None), ("NVO", 0.21, 52.0)])
     assert line == ("CANDIDATES: FXH(0.20) NVO(0.21,held 52%fill)  "
-                    "[rule: TREND=BULL + rp<0.35 + fill<80%]")
+                    "[rule: on SS long roster + TREND=BULL + rp<0.35 + fill<80%]")
     assert "buy" not in line.lower()
 
 

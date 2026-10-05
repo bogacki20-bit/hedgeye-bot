@@ -29,45 +29,62 @@ def _rows(sql, args=None):
 
 
 def fetch_and_store() -> dict | None:
-    """Fetch fronts, compute cracks, upsert today. None on feed failure."""
+    """Fetch fronts' daily bars, upsert EVERY bar in the window keyed by the
+    bar's own date. None on feed failure.
+
+    desk 10/5 #6: rows used to be stamped CURRENT_DATE with whatever print
+    the fetch saw — weekend rows, a missing 10/2, intraday partials mixed
+    with closes (9/29 stored HO 4.403 vs a 4.898 settle), so the gasoline
+    crack Δ1d read -8 against the wrong day. Prior sessions now carry their
+    closes; only the live session's row is a partial."""
     try:
         import yfinance as yf
-        px = {}
+        bars: dict = {}
         for sym, key in (("CL=F", "cl1"), ("HO=F", "ho1"), ("RB=F", "rb1")):
-            h = yf.Ticker(sym).history(period="5d")
+            h = yf.Ticker(sym).history(period="10d")
             if h is None or not len(h):
                 log.warning("energy_complex: no bars for %s", sym)
                 return None
-            px[key] = float(h["Close"].iloc[-1])
+            for ts, v in h["Close"].dropna().items():
+                bars.setdefault(ts.date(), {})[key] = float(v)
     except Exception as e:  # noqa: BLE001
         log.warning("energy_complex fetch failed: %s", e)
         return None
-    cl, ho, rb = px["cl1"], px["ho1"], px["rb1"]
-    row = {"cl1": cl, "ho1": ho, "rb1": rb,
-           "diesel_crack": ho * GAL_PER_BBL - cl,
-           "gas_crack": rb * GAL_PER_BBL - cl,
-           "crack_321": (2 * rb * GAL_PER_BBL + ho * GAL_PER_BBL - 3 * cl) / 3}
+    rows = []
+    for d in sorted(bars):
+        b = bars[d]
+        if len(b) < 3:
+            continue
+        cl, ho, rb = b["cl1"], b["ho1"], b["rb1"]
+        rows.append({"as_of": d, "cl1": cl, "ho1": ho, "rb1": rb,
+                     "diesel_crack": ho * GAL_PER_BBL - cl,
+                     "gas_crack": rb * GAL_PER_BBL - cl,
+                     "crack_321": (2 * rb * GAL_PER_BBL + ho * GAL_PER_BBL - 3 * cl) / 3})
+    if not rows:
+        return None
     import db_pg
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO energy_cracks_daily
-                (as_of, cl1, ho1, rb1, diesel_crack, gas_crack, crack_321)
-            VALUES (CURRENT_DATE, %(cl1)s, %(ho1)s, %(rb1)s,
-                    %(diesel_crack)s, %(gas_crack)s, %(crack_321)s)
-            ON CONFLICT (as_of) DO UPDATE SET
-                cl1=EXCLUDED.cl1, ho1=EXCLUDED.ho1, rb1=EXCLUDED.rb1,
-                diesel_crack=EXCLUDED.diesel_crack,
-                gas_crack=EXCLUDED.gas_crack, crack_321=EXCLUDED.crack_321,
-                fetched_at=now()""", row)
+        for row in rows:
+            cur.execute("""
+                INSERT INTO energy_cracks_daily
+                    (as_of, cl1, ho1, rb1, diesel_crack, gas_crack, crack_321)
+                VALUES (%(as_of)s, %(cl1)s, %(ho1)s, %(rb1)s,
+                        %(diesel_crack)s, %(gas_crack)s, %(crack_321)s)
+                ON CONFLICT (as_of) DO UPDATE SET
+                    cl1=EXCLUDED.cl1, ho1=EXCLUDED.ho1, rb1=EXCLUDED.rb1,
+                    diesel_crack=EXCLUDED.diesel_crack,
+                    gas_crack=EXCLUDED.gas_crack, crack_321=EXCLUDED.crack_321,
+                    fetched_at=now()""", row)
         conn.commit()
-    return row
+    return rows[-1]
 
 
-def _delta(cur_v, hist, key, back):
+def _delta(cur_v, hist, key, back, prec=1):
     if cur_v is None or len(hist) <= back or hist[back][1][key] is None:
         return ""
     d = float(cur_v) - float(hist[back][1][key])
-    return f" ({d:+.1f})" if abs(d) >= 0.05 else " (flat)"
+    # HO1 is $/gal: a 4c 5-day move printed "flat" at one decimal
+    return f" ({d:+.{prec}f})" if abs(d) >= 0.5 * 10 ** -prec else " (flat)"
 
 
 def build_block() -> list[str]:
@@ -75,7 +92,9 @@ def build_block() -> list[str]:
     fetch_and_store()
     raw = _rows("""
         SELECT as_of, cl1, ho1, rb1, diesel_crack, gas_crack, crack_321
-        FROM energy_cracks_daily ORDER BY as_of DESC LIMIT 6""")
+        FROM energy_cracks_daily ORDER BY as_of DESC LIMIT 12""")
+    from tools.trading_calendar import is_trading_day
+    raw = [r for r in raw if is_trading_day(r[0])][:6]
     if not raw:
         return ["⛽ ENERGY COMPLEX: feed unavailable (no stored rows)"]
     hist = [(r[0], {"cl1": r[1], "ho1": r[2], "rb1": r[3], "dc": r[4],
@@ -112,8 +131,8 @@ def build_block() -> list[str]:
 
     def line(label, key, unit, prec):
         s = f"  {label:<15}{float(v[key]):.{prec}f} {unit}"
-        d1 = _delta(v[key], hist, key, 1)
-        d5 = _delta(v[key], hist, key, 5)
+        d1 = _delta(v[key], hist, key, 1, prec)
+        d5 = _delta(v[key], hist, key, 5, prec)
         return (s + (f" Δ1d{d1}" if d1 else "") + (f" Δ5d{d5}" if d5 else "")
                 + rr.get(key, ""))
 

@@ -62,6 +62,13 @@ def _rows(sql, args=None):
 ET = ZoneInfo("America/New_York")
 
 
+def _in_session(now: dt.datetime | None = None) -> bool:
+    from tools.trading_calendar import is_trading_day
+    now = (now or _now_et()).astimezone(ET)
+    return (is_trading_day(now.date())
+            and dt.time(9, 30) <= now.time() <= dt.time(16, 0))
+
+
 def _now_et() -> dt.datetime:
     """Wall clock in ET, DST-aware. Railway runs in UTC — the 9/25 header
     printed '06:02 PM ET' for a 2:02 PM ET run."""
@@ -76,6 +83,10 @@ def _run_id() -> str:
 # while the name's sector ETF moved >= this = the quote didn't really refresh.
 STALE_ETF_MOVE = 0.0010
 DEAD_SESSIONS = 3          # identical close over this many sessions = dead feed
+# desk 10/5 #6: a name this run's fetch missed is only stale if its stored
+# quote is older than this — the 11:35 run collided with the 5-min poller,
+# priced 32/478, and flagged every name whose quote was 6 minutes old.
+STALE_AGE_MIN = 20
 _SECTOR_OF = {name: etf for etf, name in SECTOR_ETF}
 
 
@@ -118,9 +129,11 @@ def _screen_rows(tickers: list[str], live: bool = True, run_id: str | None = Non
         except Exception:
             priced = set()
     out = {}
-    for (t, lo, hi, trend, iv, rv, px, at, src, trd, tnd, basis, sector) in _rows(
+    for (t, lo, hi, trend, iv, rv, px, at, src, trd, tnd, basis, sector,
+         bsrc, asof) in _rows(
             "SELECT ticker, range_low, range_high, trend_dir, iv, rv, price, price_at, "
-            "       price_source, tv_trade, tv_trend, tv_basis, gics_sector "
+            "       price_source, tv_trade, tv_trend, tv_basis, gics_sector, "
+            "       band_source, range_asof "
             "FROM v_screener WHERE ticker = ANY(%s)", (tickers,)):
         band = (lo, hi) if lo is not None and hi is not None else None
         rp = None
@@ -128,9 +141,21 @@ def _screen_rows(tickers: list[str], live: bool = True, run_id: str | None = Non
             rp = (float(px) - float(lo)) / (float(hi) - float(lo))
         out[t] = {"rp": rp, "trend": trend, "iv": iv, "rv": rv, "px": px, "band": band,
                   "at": at, "src": src, "live": t in priced, "sector": sector,
-                  "tt": (trd, tnd, basis), "stale": None}
+                  "tt": (trd, tnd, basis), "stale": None,
+                  "bsrc": bsrc, "asof": asof}
         if live and t not in priced and px is not None:
-            out[t]["stale"] = "quote failed"
+            age = ((dt.datetime.now(dt.timezone.utc) - at).total_seconds() / 60
+                   if at is not None else None)
+            if age is not None and age > STALE_AGE_MIN and not _in_session():
+                # market shut: a quote from the last session's close is current
+                from tools.trading_calendar import last_completed_session
+                close = dt.datetime.combine(last_completed_session(), dt.time(15, 55),
+                                            tzinfo=ET)
+                if at >= close:
+                    age = 0
+            if age is None or age > STALE_AGE_MIN:
+                out[t]["stale"] = ("quote failed" if age is None else
+                                   f"quote failed, px {age:.0f}m old")
     if live and out:
         prev = _prev_run_prices(list(out), run_id)
         for t, d in out.items():
@@ -155,16 +180,28 @@ def _fetch(live: bool = True, run_id: str | None = None) -> dict:
     out = _screen_rows(univ, live=live, run_id=run_id)
     for t, sg in _sg_snaps(list(out)).items():
         out[t]["sg"] = sg
+    # desk 10/5 #6: VIX/UST10Y read Hedgeye's prev_close all day (10:13 and
+    # 11:35 printed identical) — price them live (^VIX / ^TNX), band from RR
+    live_px: dict = {}
+    if live:
+        try:
+            from tools.quotes import refresh
+            live_px = refresh(RR_EXTRAS, run_id=run_id or _run_id())["quotes"]
+        except Exception:
+            live_px = {}
     for t, trend, lo, hi, px, sd in _rows(
             "SELECT DISTINCT ON (ticker) ticker, trend, buy_trade, sell_trade, "
             "       prev_close, signal_date FROM hedgeye_risk_ranges "
             "WHERE ticker = ANY(%s) AND signal_date >= CURRENT_DATE - 7 "
             "ORDER BY ticker, signal_date DESC", (RR_EXTRAS,)):
+        at, src = None, f"RR close {sd:%m/%d}"
+        if t in live_px:
+            px, at, src = live_px[t]["price"], live_px[t]["quote_at"], "live"
         rp = None
         if lo is not None and hi is not None and px is not None and hi > lo:
-            rp = float((px - lo) / (hi - lo))
+            rp = float((float(px) - float(lo)) / (float(hi) - float(lo)))
         out[t] = {"rp": rp, "trend": trend, "iv": None, "rv": None,
-                  "band": (lo, hi), "px": px}
+                  "band": (lo, hi), "px": px, "at": at, "pxsrc": src}
     return out
 
 
@@ -287,12 +324,17 @@ def _line(t: str, d: dict) -> str:
     rp = d.get("rp")
     rp_s = f"{rp:+.2f}" if rp is not None and rp < 0 else \
            (f"{rp:.2f}" if rp is not None else "  ? ")
+    if rp is not None and abs(rp) > 2:
+        rp_s += "⚠chk"     # desk 10/5 #2: >1 band-width outside — gap or bad data
     tr = d.get("trend") or "?"
     band = d.get("band")
     px = d.get("px")
     rng = ""
     if px is not None and band:
-        rng = f"  {_px(px)} [{_px(band[0])}-{_px(band[1])}]"
+        # desk 10/5 #1: the canonical band's source + as-of ride every rp
+        tag = f"·{d['bsrc']}" if d.get("bsrc") else ""
+        tag += f"@{d['asof']:%m/%d}" if d.get("asof") else ""
+        rng = f"  {_px(px)} [{_px(band[0])}-{_px(band[1])}]{tag}"
     elif px is not None:
         rng = f"  {_px(px)}"
     # quote provenance (MARKET ticket 9/25): every line carries the price's
@@ -440,8 +482,10 @@ def build_market_update(full: bool = False) -> str:
         if d and d.get("band"):
             lo, hi = d["band"]
             rp_s = f"rp {d['rp']:.2f}" if d.get("rp") is not None else "rp ?"
-            lines.append(f"  {label} {_px(d['px'])} [{_px(lo)}-{_px(hi)}] {rp_s} "
-                         f"{d.get('trend') or ''}".rstrip())
+            when = (f"@{d['at'].astimezone(ET):%H:%M}" if d.get("at")
+                    else f"({d.get('pxsrc') or 'RR close'})")
+            lines.append(f"  {label} {_px(d['px'])} {when} [{_px(lo)}-{_px(hi)}] "
+                         f"{rp_s} {d.get('trend') or ''}".rstrip())
     rich = sum(1 for t in SECTORS
                if data.get(t, {}).get("iv") and data.get(t, {}).get("rv")
                and float(data[t]["iv"]) > float(data[t]["rv"]))

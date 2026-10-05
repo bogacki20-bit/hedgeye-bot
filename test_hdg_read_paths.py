@@ -103,9 +103,13 @@ def test_view_migration_overlays_hdg_bands_with_a_freshness_bound():
 def test_source_slice_sql_mirrors_the_band_overlay():
     src = _src("tools/screener.py")
     body = src.split("_SOURCE_SLICE_SQL")[1]
-    assert "hdg_band" in body and "band_source" in body
-    assert "COALESCE(hb.range_low, lm.range_low)" in body
-    assert "signal_date >= CURRENT_DATE - 7" in body
+    # desk 10/5: the source lens reads v_screener's canonical band (hdg 7d >
+    # iin 7d > mfr 5d > tv 10d) instead of its own hdg>mfr overlay
+    assert "band_source" in body and "LEFT JOIN v_screener" in body
+    assert "vs.range_low, vs.range_high, vs.range_pos" in body
+    view = _src("migrations/120_canonical_range.sql")
+    assert "r.signal_date >= (CURRENT_DATE - 7)" in view
+    assert "snapshot_date >= (CURRENT_DATE - 5)" in view
 
 
 def test_rp_series_joins_hdg_per_session():

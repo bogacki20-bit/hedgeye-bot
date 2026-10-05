@@ -30,8 +30,15 @@ YF_FUTURES = {"ES", "NQ", "RTY", "YM", "CL", "NG", "HO", "RB", "PL", "PA", "GC",
               "6E", "VX"}
 
 
+# desk 10/5: MFR's ETH / BTC are the coins; Yahoo's ETH / BTC are Grayscale's
+# mini-trust ETFs ($25 / $37) — rp read -12 / -10 against the coin bands.
+MFR_COINS = {"ETH": "ETH-USD", "BTC": "BTC-USD"}
+
+
 def yahoo_symbol(ticker: str) -> str | None:
     t = (ticker or "").strip().upper()
+    if t in MFR_COINS:
+        return MFR_COINS[t]
     try:
         from price_monitor import HEDGEYE_TO_YFINANCE
         if t in HEDGEYE_TO_YFINANCE:
@@ -89,7 +96,15 @@ def refresh(tickers: list[str] | None = None, run_id: str | None = None) -> dict
     tickers = tickers or _universe()
     run_id = run_id or f"q-{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
     ymap = {t: yahoo_symbol(t) for t in tickers}
-    got = _download(sorted({y for y in ymap.values() if y}))
+    want = sorted({y for y in ymap.values() if y})
+    got = _download(want)
+    # desk 10/5 #6: one retry for what the first pass missed — a MARKET run
+    # colliding with the 5-min poller got 32/478 back from Yahoo
+    missed = [y for y in want if y not in got]
+    if missed and len(missed) > max(5, len(want) // 10):
+        import time
+        time.sleep(3)
+        got.update(_download(missed))
     polled = dt.datetime.now(dt.timezone.utc)
     result = {}
     with db_pg.get_conn() as conn, conn.cursor() as cur:
