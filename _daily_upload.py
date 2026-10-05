@@ -62,14 +62,17 @@ run("3/3 outcomes (realized round trips)",
     ["-m", "tools.compute_outcomes", "--since", since])
 
 # non-trade cash flows (9/22: the 'missing $3K' was spending — the
-# Individual account doubles as checking). Ingest the newest
-# History_for_Account export when one exists in Downloads.
+# Individual account doubles as checking). Today's Accounts_History carries
+# the card/check rows too (10/2: the step only read History_for_Account, so
+# it re-read a weeks-old file daily); add a History_for_Account export only
+# when it's fresh.
+print("\n=== cash flows (spending/deposits) ===")
+import db_pg  # noqa: E402
+db_pg._load_dotenv_fallback()
+from tools.cash_flows import ingest as _cf_ingest  # noqa: E402
+print(_cf_ingest(act))
 hist = newest("History_for_Account_*.csv")
-if hist:
-    print("\n=== cash flows (spending/deposits) ===")
-    import db_pg  # noqa: E402
-    db_pg._load_dotenv_fallback()
-    from tools.cash_flows import ingest as _cf_ingest  # noqa: E402
+if hist and age_days(hist) <= 3:
     print(_cf_ingest(hist))
 
 # fill-level lot ledger (9/20): rebuild + context backfill on every

@@ -31,11 +31,18 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-SUBJECT_RE = re.compile(r"Signal\s+Strength\s+Stocks", re.I)
+# 10/2: Hedgeye added a second email, "Signal Strength Shorts: 93 Stocks
+# (2 added, 2 removed)" — same layout, the short side of the dashboard.
+SUBJECT_RE = re.compile(r"Signal\s+Strength\s+(Stocks|Shorts)", re.I)
 
 
 def is_signal_strength_subject(subject: str) -> bool:
     return bool(SUBJECT_RE.search(subject or ""))
+
+
+def side_from_subject(subject: str) -> str:
+    m = SUBJECT_RE.search(subject or "")
+    return "short" if m and m.group(1).lower() == "shorts" else "long"
 
 
 def _strip_html(html: str) -> str:
@@ -262,10 +269,11 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
 
     parsed = parse_body(html_body)
     snapshot_date = received_at.date() if received_at else date.today()
+    side = side_from_subject(subject)
 
     roster_tickers = [r["ticker"] for r in parsed["roster"]]
     summary = {
-        "message_id":    message_id, "subject": subject,
+        "message_id":    message_id, "subject": subject, "side": side,
         "snapshot_date": str(snapshot_date),
         "added":         parsed["added"],
         "removed":       parsed["removed"],
@@ -276,7 +284,10 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
         summary["roster_tickers"] = roster_tickers
         return summary
 
-    summary["upsert"] = upsert_deltas(parsed, snapshot_date, message_id)
+    # hedgeye_signal_strength is side-less and read as the LONG roster's
+    # deltas (active_slice) — keep the shorts email out of it.
+    if side == "long":
+        summary["upsert"] = upsert_deltas(parsed, snapshot_date, message_id)
 
     # Self-updating roster (step 3): apply deltas to ss_roster_history + count tripwire.
     # Defensive — a roster-applier failure must NOT break email parsing.
@@ -288,12 +299,12 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
         summary["roster"] = apply_deltas(
             parsed["added"], parsed["removed"], snapshot_date,
             source_email_id=message_id,
-            header_count=None if roster_tickers else header_count)
+            header_count=None if roster_tickers else header_count, side=side)
         if roster_tickers:
             from tools.ss_roster import anchor_from_email
             summary["anchor"] = anchor_from_email(
                 roster_tickers, snapshot_date, source_email_id=message_id,
-                header_count=header_count)
+                header_count=header_count, side=side)
     except Exception as e:
         log.warning("ss_roster apply/anchor failed (email still parsed): %s", e)
 

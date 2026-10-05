@@ -89,7 +89,14 @@ def ingest(path: str | pathlib.Path) -> dict:
             if kind == "other" and abs(amt) < 0.5:
                 continue
             nxt = r[header_amt + 1] if len(r) > header_amt + 1 else ""
-            pending = (nxt or "").strip().lower() == "processing" or not nxt
+            # History_for_Account: the next column is Cash Balance, blank or
+            # "Processing" while pending. Accounts_History: it's Settlement
+            # Date, which is blank for every settled card/check/dividend row
+            # (10/1 fix — those all landed as pending and tripped freshness).
+            if acct_col is None:
+                pending = (nxt or "").strip().lower() == "processing" or not nxt
+            else:
+                pending = (nxt or "").strip().lower() == "processing"
             acct = (r[acct_col].strip() if acct_col is not None and
                     r[acct_col].strip() else file_acct) or "unknown"
             h = hashlib.sha1(f"{acct}|{d}|{action}|{amt}".encode()).hexdigest()

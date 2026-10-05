@@ -35,18 +35,19 @@ def _norm(tickers) -> list[str]:
 
 
 def apply_deltas(added, removed, snapshot_date, source_email_id=None,
-                 header_count=None) -> dict:
-    """Apply Add/Remove to ss_roster_history. Idempotent + graceful; writes ONLY
-    ss_roster_history. Squawks if the post-apply roster count != email header."""
+                 header_count=None, side: str = "long") -> dict:
+    """Apply Add/Remove to ONE side of ss_roster_history. Idempotent + graceful;
+    writes ONLY ss_roster_history. Squawks if the post-apply count != header."""
     import db_pg
     added, removed = _norm(added), _norm(removed)
     applied_add, applied_remove, skipped = [], [], []
     with db_pg.get_conn() as conn:
         with conn.cursor() as cur:
-            # The "Signal Strength Stocks" email only carries the LONG table
-            # (the dashboard's shorts arrive via the CSV export — anchor_from_csv).
+            # "Signal Strength Stocks" = the LONG table; since 10/2 Hedgeye
+            # also mails "Signal Strength Shorts" (side='short'). The CSV
+            # export still anchors both sides (anchor_from_csv).
             cur.execute("SELECT ticker FROM ss_roster_history "
-                        "WHERE removed_on IS NULL AND side = 'long'")
+                        "WHERE removed_on IS NULL AND side = %s", (side,))
             current = {r[0] for r in cur.fetchall()}
 
             for t in added:                       # ADD: open a row only if not already open
@@ -54,8 +55,8 @@ def apply_deltas(added, removed, snapshot_date, source_email_id=None,
                     skipped.append(("add-noop-already-on", t))
                     continue
                 cur.execute(
-                    "INSERT INTO ss_roster_history (ticker, added_on, add_source, source_email_id) "
-                    "VALUES (%s, %s, 'delta', %s)", (t, snapshot_date, source_email_id))
+                    "INSERT INTO ss_roster_history (ticker, added_on, add_source, source_email_id, side) "
+                    "VALUES (%s, %s, 'delta', %s, %s)", (t, snapshot_date, source_email_id, side))
                 current.add(t)
                 applied_add.append(t)
 
@@ -65,17 +66,17 @@ def apply_deltas(added, removed, snapshot_date, source_email_id=None,
                     continue
                 cur.execute(
                     "UPDATE ss_roster_history SET removed_on=%s, remove_source='delta', "
-                    "updated_at=now() WHERE ticker=%s AND removed_on IS NULL AND side='long'",
-                    (snapshot_date, t))
+                    "updated_at=now() WHERE ticker=%s AND removed_on IS NULL AND side=%s",
+                    (snapshot_date, t, side))
                 current.discard(t)
                 applied_remove.append(t)
 
             cur.execute("SELECT count(*) FROM ss_roster_history "
-                        "WHERE removed_on IS NULL AND side = 'long'")
+                        "WHERE removed_on IS NULL AND side = %s", (side,))
             roster_count = cur.fetchone()[0]
         conn.commit()
 
-    log.info("ss_roster apply: +%s -%s skipped=%d roster=%d header=%s",
+    log.info("ss_roster apply (%s): +%s -%s skipped=%d roster=%d header=%s", side,
              applied_add, applied_remove, len(skipped), roster_count, header_count)
     # SS-flow stamping (migration 058): freeze structure+quad on the events
     # just applied. Idempotent scan — also catches anchor-driven transitions.
@@ -90,13 +91,13 @@ def apply_deltas(added, removed, snapshot_date, source_email_id=None,
         try:
             from notifier import send_telegram
             send_telegram("SS Roster",
-                          f"⚠️ roster count {roster_count} != email header {header_count} "
+                          f"⚠️ {side} roster count {roster_count} != email header {header_count} "
                           f"({snapshot_date}). Likely a missed delta — Friday's anchor will "
                           f"correct; check the parse. applied +{applied_add} -{applied_remove}",
                           priority=2)
         except Exception as e:
             log.warning("ss_roster count-mismatch squawk failed: %s", e)
-    return {"added": applied_add, "removed": applied_remove, "skipped": skipped,
+    return {"side": side, "added": applied_add, "removed": applied_remove, "skipped": skipped,
             "roster_count": roster_count, "header_count": header_count}
 
 
@@ -294,7 +295,7 @@ def _commit_anchor(pending: dict) -> str:
 
 
 def anchor_from_email(tickers, snapshot_date, source_email_id=None,
-                      header_count=None) -> dict:
+                      header_count=None, side: str = "long") -> dict:
     """Anchor to the full roster table in a dashboard-layout SS email (9/25+).
 
     Self-validating instead of human-confirmed: writes only if the table's row
@@ -311,12 +312,12 @@ def anchor_from_email(tickers, snapshot_date, source_email_id=None,
 
     current, add, rem, anchor_id = _write_anchor(
         set(upload), snapshot_date, f"email_table:{source_email_id}",
-        max_remove_pct=REPLACE_GUARD_PCT)
+        max_remove_pct=REPLACE_GUARD_PCT, side=side)
     if anchor_id is None:
         try:
             from notifier import send_telegram
             send_telegram("SS Roster",
-                          f"🛑 SS email table would remove {len(rem)}/{len(current)} names "
+                          f"🛑 SS {side} email table would remove {len(rem)}/{len(current)} names "
                           f"({snapshot_date}) — NOT applied. Check the email; paste "
                           f"SS: ... + CONFIRM REPLACE if it's real.", priority=2)
         except Exception as e:
@@ -324,16 +325,17 @@ def anchor_from_email(tickers, snapshot_date, source_email_id=None,
         return {"anchored": False, "reason": "replace-guard",
                 "would_add": add, "would_remove": rem}
 
-    _set_bot_state("ss_last_anchor_date", snapshot_date.isoformat())
+    if side == "long":   # the Friday paste prompt tracks the long list
+        _set_bot_state("ss_last_anchor_date", snapshot_date.isoformat())
     if add or rem:
         try:
             from tools.ss_flow import stamp_unstamped
             log.info("ss_flow stamp (email anchor): %s", stamp_unstamped())
         except Exception as e:
             log.warning("ss_flow stamping failed: %s", e)
-    log.info("ss email anchor %s: %d names, corrected +%s -%s",
-             anchor_id, len(upload), add, rem)
-    return {"anchored": True, "anchor_id": anchor_id, "count": len(upload),
+    log.info("ss email anchor %s (%s): %d names, corrected +%s -%s",
+             anchor_id, side, len(upload), add, rem)
+    return {"anchored": True, "side": side, "anchor_id": anchor_id, "count": len(upload),
             "roster_before": len(current), "corrected_add": add,
             "corrected_remove": rem}
 

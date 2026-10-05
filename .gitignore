@@ -33,3 +33,6 @@ data/hedgeye_mail/
 
 # TradingView overnight level reads (daily data, lives in Postgres tv_levels)
 data/tv_levels/
+
+# Macro Show transcripts (private Hedgeye content, 10/4)
+data/transcripts/
