@@ -289,6 +289,16 @@ def connect_imap() -> imaplib.IMAP4_SSL:
     return conn
 
 
+def _body_from_fetch(raw) -> bytes | None:
+    """The message literal from an imaplib FETCH reply. iCloud can put an
+    unsolicited FLAGS update (plain bytes) ahead of the (envelope, body)
+    tuple, so scan the whole reply instead of trusting raw[0]."""
+    for item in raw or []:
+        if isinstance(item, tuple) and len(item) >= 2 and item[1]:
+            return item[1]
+    return None
+
+
 def check_email(conn: imaplib.IMAP4_SSL) -> int:
     """One polling cycle. Returns the number of newly-saved emails this cycle."""
     since = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
@@ -362,7 +372,16 @@ def check_email(conn: imaplib.IMAP4_SSL) -> int:
             if not raw or not raw[0]:
                 log.warning(f"  [{uid_str}] empty fetch result (no raw[0])")
                 continue
-            raw_bytes = raw[0][1] if isinstance(raw[0], tuple) else None
+            raw_bytes = _body_from_fetch(raw)
+            if not raw_bytes:
+                # 2026-10-07: iCloud answered with only an unsolicited
+                # "FLAGS (\Seen)" update (mail read on the phone) and no body —
+                # every new email that morning was dropped and re-dropped each
+                # cycle. One retry usually returns the literal.
+                _, raw = conn.fetch(uid, "(BODY.PEEK[])")
+                raw_bytes = _body_from_fetch(raw)
+                if raw_bytes:
+                    log.info(f"  [{uid_str}] body recovered on retry")
             if not raw_bytes:
                 # Was previously a silent continue — now logged so this drop path
                 # is visible. raw[0] type tells us what iCloud returned.
