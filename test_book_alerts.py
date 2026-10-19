@@ -67,6 +67,65 @@ def test_missing_rp_never_crashes_or_guesses():
     assert not a and not ret
 
 
+# ── TRADE/TREND line crosses (2026-10-17) ──
+from tools.book_alerts import level_zone, detect_levels, close_summary
+
+
+def lrow(t, side, price, trade, trend, basis="bull"):
+    return {"ticker": t, "side": side, "price": price, "tv_trade": trade,
+            "tv_trend": trend, "tv_basis": basis, "tv_bar_date": "2026-10-15"}
+
+
+def test_level_zone_long_and_short():
+    # NET 10/16 close: 296.30 vs trade 334.02 / trend 299.18 -> trend break
+    assert level_zone("long", 296.30, 334.02, 299.18, "bull") == "trend_break"
+    assert level_zone("long", 310.0, 334.02, 299.18, "bull") == "trade_break"
+    assert level_zone("long", 340.0, 334.02, 299.18, "bull") == "ok"
+    # long in a bearish-trend name above its line: caution, never ok
+    assert level_zone("long", 354.72, 321.72, 353.63, "bear-mirror") == "trade_break"
+    assert level_zone("long", 350.0, 321.72, 353.63, "bear-mirror") == "trend_break"
+    # shorts mirror: EWW above a bull-basis trend is against the short
+    assert level_zone("short", 74.94, 73.21, 72.82, "bull") == "trend_break"
+    assert level_zone("short", 37.9, 38.41, 41.59, "bear-mirror") == "ok"
+    assert level_zone("short", 39.0, 38.41, 41.59, "bear-mirror") == "trade_break"
+    assert level_zone("long", None, 1, 1, "bull") is None
+    assert level_zone("long", 10, 11, None, "bull") is None
+
+
+def test_level_cross_fires_only_on_transition():
+    r = [lrow("NET", "long", 296.30, 334.02, 299.18)]
+    a, z = detect_levels(r, {})                       # first sight seeds
+    assert not a and z["NET"] == "trend_break"
+    a, _ = detect_levels(r, {"NET": "trade_break"})   # worsened -> fire
+    assert len(a) == 1 and a[0]["type"] == "trend_break" and "stop" in a[0]["line"]
+    assert "intraday" in a[0]["line"]
+    a, _ = detect_levels(r, {"NET": "trend_break"})   # standing -> silent
+    assert not a
+    a, _ = detect_levels(r, {"NET": "ok"}, at_close=True)
+    assert a[0]["type"] == "trend_break" and "on the close" in a[0]["line"]
+
+
+def test_level_trade_break_and_reclaim():
+    a, _ = detect_levels([lrow("QQQ", "long", 716.0, 735.67, 704.03)], {"QQQ": "ok"})
+    assert len(a) == 1 and a[0]["type"] == "trade_break" and "minimum" in a[0]["line"]
+    a, _ = detect_levels([lrow("QQQ", "long", 740.0, 735.67, 704.03)], {"QQQ": "trend_break"})
+    assert len(a) == 1 and a[0]["type"] == "trend_reclaim"
+    # improving trend_break -> trade_break is not an alert
+    a, _ = detect_levels([lrow("QQQ", "long", 710.0, 735.67, 704.03)], {"QQQ": "trend_break"})
+    assert not a
+
+
+def test_close_summary():
+    rows = [lrow("NET", "long", 296.30, 334.02, 299.18),
+            lrow("QQQ", "long", 709.8, 735.67, 704.03),
+            lrow("EWW", "short", 74.94, 73.21, 72.82),
+            lrow("XLV", "long", 177.0, 170.0, 160.0)]
+    s = close_summary(rows)
+    assert "NET 296.30 vs trend 299.18" in s and "EWW (S)" in s
+    assert "QQQ" in s.split("Below TRADE")[1] and "XLV" not in s
+    assert close_summary([rows[3]]) is None
+
+
 if __name__ == "__main__":
     import sys, inspect
     fails = 0

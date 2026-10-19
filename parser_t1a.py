@@ -245,6 +245,9 @@ def _msr_email(day: dt.date):
             "SELECT message_id, html_body FROM hedgeye_emails_raw "
             "WHERE subject ILIKE 'MARKET SITUATION REPORT:%%' "
             "  AND subject NOT ILIKE '%%WATCH%%' "
+            # 10/12: a 12:35 'MARKET SITUATION REPORT: … Webcast' email would
+            # otherwise win ORDER BY DESC for any afternoon --link run
+            "  AND subject NOT ILIKE '%%WEBCAST%%' "
             "  AND (received_at AT TIME ZONE 'America/New_York')::date = %s "
             "ORDER BY received_at DESC LIMIT 1", (day,))
         return cur.fetchone()

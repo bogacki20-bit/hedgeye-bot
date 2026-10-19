@@ -16,6 +16,13 @@ Alert types (facts + the operator's own rulebook line; never advice):
   TREND_FLIP — the DAY the adjusted trend turns against the position
          ("SBIT thesis break: BTC flipped BULLISH"). State memory in
          bot_state; only the transition alerts, not the standing condition.
+  TRADE_BREAK / TREND_BREAK / TREND_RECLAIM (2026-10-17) — the held name's
+         live price crosses its own TradingView TRADE / TREND line (tv_trade /
+         tv_trend from v_screener; longs below, shorts above). Keith's rule:
+         breaks TRADE -> stop buying / take it to the minimum; breaks TREND ->
+         it's a stop. Intraday crosses are labelled as such (his rule counts
+         the CLOSE); the first cycle after 16:00 ET sends one CLOSE summary of
+         every held name below trade / trend.
 
 Wrappers: trend is the UNDERLYING's, inverted where the linkage says so —
 the same adjusted trend_dir SCREEN displays (via tools.screener helpers).
@@ -35,6 +42,10 @@ log = logging.getLogger("book_alerts")
 BOOK_DIP_DELTA = float(os.getenv("BOOK_DIP_DELTA", "0.25"))
 _STATE_KEY = "book_trend_state"          # bot_state JSON {ticker: trend_dir}
 _RETREAT_KEY = "book_retreat_state"      # bot_state JSON {ticker: retreat}
+_LEVEL_KEY = "book_level_state"          # bot_state JSON {ticker: zone}
+
+# zone severity: a move to a WORSE zone alerts; trend_break -> ok reclaims
+_ZONES = {"ok": 0, "trade_break": 1, "trend_break": 2}
 
 
 # ─────────────────────────── pure logic ───────────────────────────
@@ -103,7 +114,129 @@ def detect(rows: list, delta: float = BOOK_DIP_DELTA,
     return out, retreats
 
 
+def level_zone(side: str, price, trade, trend, basis) -> str | None:
+    """Pure: where a held position sits vs its own TV lines.
+    'ok' | 'trade_break' | 'trend_break' | None (no price / no trend line).
+
+    LONG, bull basis: below trend = trend_break, below trade = trade_break.
+    LONG, bear basis (TV trend already BEARISH): below the trend line =
+      trend_break; above it the name is testing a flip but the trend has not
+      turned, so it stays trade_break (caution), never 'ok'.
+    SHORT mirrors it: above trend (or a bull-basis trend) is against you."""
+    if price is None or trend is None:
+        return None
+    p, tr = float(price), float(trend)
+    td = float(trade) if trade is not None else None
+    bear = (basis or "").startswith("bear")
+    if side == "long":
+        if p < tr:
+            return "trend_break"
+        if bear:
+            return "trade_break"
+        return "trade_break" if td is not None and p < td else "ok"
+    if side == "short":
+        if p > tr:
+            return "trend_break"
+        if not bear:
+            return "trade_break"
+        return "trade_break" if td is not None and p > td else "ok"
+    return None
+
+
+def detect_levels(rows: list, prev_zones: dict | None = None,
+                  at_close: bool = False) -> tuple[list, dict]:
+    """Pure detector for TRADE/TREND line crosses. Each row:
+      {ticker, side, price, tv_trade, tv_trend, tv_basis, tv_bar_date}
+    Fires only on a TRANSITION from a known prior zone (first sight seeds
+    silently, same rule as trend flips). Returns (alerts, zones)."""
+    prev_zones = prev_zones or {}
+    out, zones = [], {}
+    when = "on the close" if at_close else "intraday (Keith's rule counts the close)"
+    for r in rows:
+        t, side = r["ticker"], r.get("side")
+        z = level_zone(side, r.get("price"), r.get("tv_trade"),
+                       r.get("tv_trend"), r.get("tv_basis"))
+        if z is None:
+            continue
+        zones[t] = z
+        prev = prev_zones.get(t)
+        if prev is None or prev not in _ZONES or z == prev:
+            continue
+        p = float(r["price"])
+        tr = float(r["tv_trend"])
+        td = r.get("tv_trade")
+        lv = (f"price {p:,.2f} · trade {float(td):,.2f} · trend {tr:,.2f}"
+              if td is not None else f"price {p:,.2f} · trend {tr:,.2f}")
+        asof = f" (lines as of {r['tv_bar_date']})" if r.get("tv_bar_date") else ""
+        if (r.get("tv_basis") or "").startswith("bear"):
+            lv += " · trend dir BEARISH"
+        elif side == "short":
+            lv += " · trend dir BULLISH"
+        if _ZONES[z] > _ZONES[prev]:
+            if z == "trend_break":
+                out.append({"type": "trend_break", "ticker": t,
+                            "line": f"🛑 TREND BREAK {t} ({side.upper()}) {when}: "
+                                    f"{lv}{asof}. Rulebook: breaks TREND -> it's a stop."})
+            else:
+                out.append({"type": "trade_break", "ticker": t,
+                            "line": f"⚠️ TRADE BREAK {t} ({side.upper()}) {when}: "
+                                    f"{lv}{asof}. Rulebook: breaks TRADE -> stop "
+                                    f"buying / take it to the minimum."})
+        elif prev == "trend_break" and z == "ok":
+            out.append({"type": "trend_reclaim", "ticker": t,
+                        "line": f"✅ RECLAIMED {t} ({side.upper()}) {when}: back "
+                                f"above trade and trend — {lv}{asof}."})
+    return out, zones
+
+
+def close_summary(rows: list) -> str | None:
+    """One end-of-day message: every held name below trend / below trade."""
+    tb, rb = [], []
+    for r in rows:
+        z = level_zone(r.get("side"), r.get("price"), r.get("tv_trade"),
+                       r.get("tv_trend"), r.get("tv_basis"))
+        if z == "trend_break":
+            d = " (trend BEARISH)" if (r.get("tv_basis") or "").startswith("bear") else ""
+            tb.append(f"{r['ticker']}{' (S)' if r.get('side') == 'short' else ''} "
+                      f"{float(r['price']):,.2f} vs trend {float(r['tv_trend']):,.2f}{d}")
+        elif z == "trade_break":
+            rb.append(r["ticker"] + (" (S)" if r.get("side") == "short" else ""))
+    if not tb and not rb:
+        return None
+    lines = ["Held names vs their TradingView lines at the close."]
+    if tb:
+        lines.append("🛑 Below TREND (stop per rulebook):\n" + "\n".join(f"  {x}" for x in tb))
+    if rb:
+        lines.append("⚠️ Below TRADE (stop buying / minimum): " + ", ".join(rb))
+    return "\n".join(lines)
+
+
 # ─────────────────────────── data assembly ───────────────────────────
+
+def _level_rows() -> list:
+    """Held tickers (raw side — the held instrument's own lines, so inverse
+    ETFs like TBT are judged in their own frame) + live price and TV lines
+    straight from v_screener. Names without a TV trend line are dropped."""
+    from tools.book_direction import book_sides
+    import db_pg
+    sides = book_sides()
+    held = {t: (v.get("raw_side") or v.get("side")) for t, v in sides.items()
+            if v.get("side") in ("long", "short")}
+    if not held:
+        return []
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT ticker, price, tv_trade, tv_trend, tv_basis, tv_bar_date "
+                    "FROM v_screener WHERE ticker = ANY(%s)", (list(held),))
+        got = cur.fetchall()
+    rows = []
+    for t, price, trade, trend, basis, bd in got:
+        if trend is None or price is None:
+            continue
+        rows.append({"ticker": t, "side": held[t], "price": float(price),
+                     "tv_trade": float(trade) if trade is not None else None,
+                     "tv_trend": float(trend), "tv_basis": basis,
+                     "tv_bar_date": str(bd) if bd else None})
+    return rows
 
 def _book_rows(*, include_dark: bool = False) -> list:
     """Holdings with adjusted trend (screener's own COALESCE + BTCQ + wrapper
@@ -270,6 +403,29 @@ def run_book_alerts(dry_run: bool = False) -> dict:
     prev_retreats = _load_state(_RETREAT_KEY)
     alerts, retreats = detect(rows, prev_trends=prev_trends,
                               prev_retreats=prev_retreats)
+
+    # TRADE/TREND line crosses — independent assembly, so a failure here
+    # never blocks dip/rip/flip (and vice versa).
+    level_rows, zones = [], None
+    from zoneinfo import ZoneInfo
+    from datetime import datetime as _dt
+    now_et = _dt.now(ZoneInfo("America/New_York"))
+    at_close = (now_et.hour, now_et.minute) >= (16, 0)
+    try:
+        level_rows = _level_rows()
+        lv_alerts, zones = detect_levels(level_rows, _load_state(_LEVEL_KEY),
+                                         at_close=at_close)
+        alerts += lv_alerts
+        summary["levels_tracked"] = len(level_rows)
+        summary["below_trend"] = sorted(t for t, z in zones.items() if z == "trend_break")
+        if at_close:
+            msg = close_summary(level_rows)
+            if msg:
+                alerts.append({"type": "close_summary", "ticker": "_BOOK",
+                               "line": msg})
+    except Exception as e:
+        log.exception("book_alerts: level assembly failed")
+        summary["level_error"] = str(e)
     summary["alerts"] = len(alerts)
     summary["in_zone"] = sum(1 for v in retreats.values()
                              if v >= BOOK_DIP_DELTA)   # standing, not alerted
@@ -289,8 +445,10 @@ def run_book_alerts(dry_run: bool = False) -> dict:
                     continue
                 try:
                     from notifier import send_telegram
-                    send_telegram(f"📗 BOOK {a['type'].upper()} {a['ticker']}",
-                                  a["line"])
+                    title = ("📗 BOOK vs TRADE/TREND — CLOSE"
+                             if a["type"] == "close_summary"
+                             else f"📗 BOOK {a['type'].upper()} {a['ticker']}")
+                    send_telegram(title, a["line"])
                     summary["sent"].append(f"{a['type']}:{a['ticker']}")
                 except Exception as e:
                     log.warning("book_alerts telegram failed: %s", e)
@@ -303,6 +461,8 @@ def run_book_alerts(dry_run: bool = False) -> dict:
         _save_state(_STATE_KEY, {r["ticker"]: r.get("trend_dir") for r in rows
                                  if r.get("trend_dir")})
         _save_state(_RETREAT_KEY, retreats)
+        if zones is not None:
+            _save_state(_LEVEL_KEY, zones)
     return summary
 
 

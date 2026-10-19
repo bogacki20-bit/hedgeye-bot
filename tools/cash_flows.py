@@ -97,7 +97,13 @@ def ingest(path: str | pathlib.Path) -> dict:
                 pending = (nxt or "").strip().lower() == "processing" or not nxt
             else:
                 pending = (nxt or "").strip().lower() == "processing"
-            acct = (r[acct_col].strip() if acct_col is not None and
+            # 10/12: Fidelity lists not-yet-posted card charges as
+            # "OUTSTAND AUTH" with a FUTURE run date; they re-appear under a
+            # normal description once posted, so they must stay pending
+            # (excluded from spend) or the charge counts twice.
+            if "OUTSTAND AUTH" in action.upper() or d > dt.date.today():
+                pending = True
+            acct =(r[acct_col].strip() if acct_col is not None and
                     r[acct_col].strip() else file_acct) or "unknown"
             h = hashlib.sha1(f"{acct}|{d}|{action}|{amt}".encode()).hexdigest()
             rows.append((acct, d, kind, amt, action[:180], pending, h))
