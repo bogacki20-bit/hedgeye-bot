@@ -98,6 +98,56 @@ def _prev_run_prices(tickers: list[str], run_id: str) -> dict:
         "  AND price IS NOT NULL ORDER BY ticker, run_id DESC", (tickers, run_id))}
 
 
+RET_HORIZONS = (("1w", 7), ("1m", 30), ("3m", 91))   # calendar days back
+
+
+def _returns(data: dict) -> None:
+    """Trending returns (operator 10/19, Macro Show 1W/1M/3M table): stamp
+    d['ret'] = {'1w': pct, '1m': pct, '3m': pct} on every row that has a
+    price, vs the MFR close on/just before each horizon date. mfr_snapshots
+    holds one close per name per trading day (history from 2026-05)."""
+    tickers = [t for t, d in data.items() if d and d.get("px") is not None]
+    if not tickers:
+        return
+    today = _now_et().date()
+    hist: dict = {}
+    for t, sd, px in _rows(
+            "SELECT ticker, snapshot_date, price FROM mfr_snapshots "
+            "WHERE ticker = ANY(%s) AND snapshot_date >= %s AND price IS NOT NULL "
+            "ORDER BY ticker, snapshot_date", (tickers, today - dt.timedelta(days=100))):
+        hist.setdefault(t, []).append((sd, float(px)))
+    for t in tickers:
+        h = hist.get(t)
+        if not h:
+            continue
+        now = float(data[t]["px"])
+        ret = {}
+        for label, days in RET_HORIZONS:
+            cut = today - dt.timedelta(days=days)
+            base = [p for d, p in h if d <= cut]
+            # need a close within 7 days of the horizon, or it isn't that horizon
+            near = [d for d, p in h if d <= cut]
+            if base and (cut - near[-1]).days <= 7 and base[-1]:
+                ret[label] = (now / base[-1] - 1) * 100
+        data[t]["ret"] = ret
+
+
+def _ret_tag(d: dict) -> str:
+    r = d.get("ret") or {}
+    if not r:
+        return ""
+    return "  " + " ".join(f"{k}{r[k]:+.1f}" for k, _ in RET_HORIZONS if k in r)
+
+
+def _ss_roster() -> dict:
+    """{'long': [...], 'short': [...]} — current Signal Strength roster."""
+    out = {"long": [], "short": []}
+    for t, side in _rows("SELECT ticker, side FROM ss_roster_history "
+                         "WHERE removed_on IS NULL ORDER BY ticker"):
+        out.setdefault(side, []).append(t)
+    return out
+
+
 def _dead_feeds(tickers: list[str]) -> set:
     """Names whose MFR close hasn't changed across DEAD_SESSIONS snapshots."""
     return {t for (t,) in _rows(
@@ -347,7 +397,13 @@ def _line(t: str, d: dict) -> str:
     from tools.tt_levels import tt_tag
     tt = tt_tag(*d["tt"]) if d.get("tt") else ""
     return (f"{_ARROW.get(tr, '·')} {t:<8}{rp_s:<6}{tr[:4]}"
-            f"{rng}{when}{stale}{tt}{_sg_suffix(d)}{_vol_tag(d.get('iv'), d.get('rv'))}")
+            f"{rng}{when}{stale}{tt}{_ret_tag(d)}{_sg_suffix(d)}"
+            f"{_vol_tag(d.get('iv'), d.get('rv'))}")
+
+
+def _rp_key(rows: dict, t: str, missing: float = 9.0) -> float:
+    d = rows.get(t) or {}
+    return d["rp"] if d.get("rp") is not None else missing
 
 
 def _pm_name_rows(names: list[str], live: bool = True, run_id: str | None = None) -> dict:
@@ -366,6 +422,8 @@ def _pm_name_rows(names: list[str], live: bool = True, run_id: str | None = None
 def build_market_update(full: bool = False) -> str:
     run_id = _run_id()
     data = _fetch(run_id=run_id)
+    if full:
+        _returns(data)
     now = _now_et().strftime("%m/%d %I:%M %p")
 
     add_long, add_short, stretched = [], [], []
@@ -422,6 +480,18 @@ def build_market_update(full: bool = False) -> str:
     except Exception as e:
         lines.append(f"⛽ ENERGY COMPLEX unavailable: {e}")
 
+    if full:
+        # trending returns, ranked — the Macro Show's sector-performance table
+        lines.append("")
+        lines.append("📈 TRENDING RETURNS (1w · 1m · 3m, ranked by 1m)")
+        ranked = [(t, data[t]["ret"]) for t in INDEXES + SECTORS + THEMES + COMMODITIES + MACRO
+                  if t in data and data[t].get("ret", {}).get("1m") is not None]
+        ranked.sort(key=lambda x: -x[1]["1m"])
+        for t, r in ranked:
+            cells = "  ".join(f"{k} {r[k]:+6.1f}%" if k in r else f"{k}    n/a"
+                              for k, _ in RET_HORIZONS)
+            lines.append(f"  {t:<8}{cells}")
+
     lines.append("")
     lines.append("INDEXES")
     for t in INDEXES:
@@ -433,11 +503,24 @@ def build_market_update(full: bool = False) -> str:
     #    ranged line (arrives as several chunked Telegram messages). ──
     buckets = _pm_buckets(include_bench=full)
     name_rows = {}
+    ss = _ss_roster() if full else {"long": [], "short": []}
     if full:
         all_names = [t.lstrip("●") for b in buckets.values()
                      for t in b["long"] + b["short"]
                      + b.get("long_bench", []) + b.get("short_bench", [])]
-        name_rows = _pm_name_rows(all_names, run_id=run_id)
+        name_rows = _pm_name_rows(all_names + ss["long"] + ss["short"], run_id=run_id)
+        _returns(name_rows)
+        # Signal Strength rosters — the whole SS book at once (operator 10/19),
+        # each name ranked by range position: longs low-in-range first (add
+        # zone), shorts high-in-range first (short-the-bounce zone).
+        for side, title, key in (("long", "SIGNAL STRENGTH — LONGS", lambda t: _rp_key(name_rows, t)),
+                                 ("short", "SIGNAL STRENGTH — SHORTS", lambda t: -_rp_key(name_rows, t, -9))):
+            names = sorted(ss.get(side, []), key=key)
+            lines.append("")
+            lines.append(f"{title} ({len(names)})")
+            for t in names:
+                d = name_rows.get(t)
+                lines.append("  " + (_line(t, d) if d else f"· {t:<8}(no range data)"))
     lines.append("")
     lines.append("SECTORS — Hedgeye PM (● top idea)")
     for etf, sector in SECTOR_ETF:

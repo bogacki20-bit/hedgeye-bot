@@ -183,6 +183,12 @@ if __name__ == "__main__":
                         s = run_book_alerts()
                         if s.get("sent") or s.get("error"):
                             log.info("book_alerts: %s", s)
+                        # AI-bubble short watch (2026-10-19): bearish-trend
+                        # names bouncing into the top of range / TRADE line.
+                        from tools.ai_short_watch import run_ai_short_watch
+                        w = run_ai_short_watch()
+                        if w.get("sent") or w.get("error"):
+                            log.info("ai_short_watch: %s", w)
                 except Exception as e:
                     log.warning("book_alerts cycle failed: %s", e)
                 _t.sleep(int(os.getenv("BOOK_ALERT_INTERVAL", "900")))

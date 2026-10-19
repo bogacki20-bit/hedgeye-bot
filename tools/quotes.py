@@ -108,7 +108,9 @@ def refresh(tickers: list[str] | None = None, run_id: str | None = None) -> dict
     polled = dt.datetime.now(dt.timezone.utc)
     result = {}
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        for t, y in ymap.items():
+        # ticker order: the IBKR streamer upserts live_quotes too, in the same
+        # order, so the two writers queue on row locks instead of deadlocking (10/19)
+        for t, y in sorted(ymap.items()):
             q = got.get(y) if y else None
             cur.execute(
                 "INSERT INTO quote_snapshots (run_id, ticker, price, fetched_at, quote_at) "
