@@ -37,7 +37,17 @@ def pairs() -> list[list[str]]:
         cur.execute("SELECT DISTINCT ticker FROM hedgeye_risk_ranges "
                     "WHERE signal_date >= CURRENT_DATE - 30 ORDER BY 1")
         tickers += [t for (t,) in cur.fetchall() if t not in set(tickers)]
-    return [[t, tv_symbol(t)] for t in tickers if tv_symbol(t)]
+    out = [[t, tv_symbol(t)] for t in tickers if tv_symbol(t)]
+    have = {t for t, _ in out}
+    # Macro Sunday + factor board extras (10/25): foreign 10y yields, CNY, and
+    # factor/country ETFs the screener doesn't cover yet.
+    MACRO_EXTRAS = [["GB10Y", "TVC:GB10Y"], ["JP10Y", "TVC:JP10Y"], ["CA10Y", "TVC:CA10Y"],
+                    ["DE10Y", "TVC:DE10Y"], ["USD/CNY", "FX_IDC:USDCNY"],
+                    ["JOET", "BATS:JOET"], ["SPHB", "BATS:SPHB"], ["IVE", "BATS:IVE"],
+                    ["IVW", "BATS:IVW"], ["LVHI", "BATS:LVHI"], ["KWEB", "BATS:KWEB"],
+                    ["EWT", "BATS:EWT"], ["CYB", "BATS:CYB"], ["EWI", "BATS:EWI"], ["FXA", "BATS:FXA"], ["CEW", "BATS:CEW"], ["UDN", "BATS:UDN"],
+                    ["EWO", "BATS:EWO"], ["ECH", "BATS:ECH"], ["GXG", "BATS:GXG"], ["EEM", "BATS:EEM"], ["EZU", "BATS:EZU"], ["EFNL", "BATS:EFNL"], ["GREK", "BATS:GREK"], ["EIDO", "BATS:EIDO"], ["EIRL", "BATS:EIRL"], ["EWN", "BATS:EWN"], ["EPU", "BATS:EPU"], ["EPOL", "BATS:EPOL"], ["PGAL", "BATS:PGAL"], ["KSA", "BATS:KSA"], ["EWP", "BATS:EWP"], ["EWD", "BATS:EWD"], ["THD", "BATS:THD"], ["TUR", "BATS:TUR"]]
+    return out + [p for p in MACRO_EXTRAS if p[0] not in have]
 
 
 def _parse_line(ln: str) -> dict:

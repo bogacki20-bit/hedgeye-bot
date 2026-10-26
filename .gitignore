@@ -37,3 +37,7 @@ data/tv_levels/
 # Macro Show transcripts (private Hedgeye content, 10/4)
 data/transcripts/
 data/fills_autoingest_state.json
+
+# local data dumps (personal positions/trades)
+exports/bot_dump_*
+outputs/briefs/
