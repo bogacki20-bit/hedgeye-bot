@@ -55,6 +55,7 @@ SOURCE_CAPITAL_ALLOCATION_PRO = "capital_allocation_pro"
 SOURCE_HEDGAI_SIGNALS         = "hedgai_signals"
 SOURCE_BITCOIN_TREND_TRACKER  = "bitcoin_trend_tracker"
 SOURCE_MARKET_SITUATION_REPORT = "market_situation_report"
+SOURCE_RESEARCH_DIGEST        = "research_digest"
 
 # Other Hedgeye content streams (not subscribed standalone but emails arrive
 # via bundles or free distribution):

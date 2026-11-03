@@ -23,7 +23,12 @@ import urllib.request
 
 import numpy as np
 
-OUT_DIR = pathlib.Path(__file__).resolve().parent.parent / "data" / "transcripts" / "macro_show"
+_TRANSCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "data" / "transcripts"
+OUT_DIR = _TRANSCRIPTS / "macro_show"
+# --show the_call (10/20): same pipeline for The Call @ Hedgeye replays
+SHOWS = {"macro_show": "THE MACRO SHOW", "the_call": "THE CALL @ HEDGEYE", "big_theme": "THE BIG THEME"}
+TITLE = SHOWS["macro_show"]
+LOCK = _TRANSCRIPTS / "macro_show" / ".transcribe.lock"   # one CPU-heavy batch at a time, any show
 SR = 16000
 
 
@@ -70,7 +75,7 @@ def transcribe_pcm(model, pcm: np.ndarray, date: str, model_name: str,
     tmp = dest.with_suffix(".part")
     para, start = [], None
     with tmp.open("w", encoding="utf-8") as f:
-        f.write(f"THE MACRO SHOW — {date} · {_ts(info.duration)} · transcribed locally "
+        f.write(f"{TITLE} — {date} · {_ts(info.duration)} · transcribed locally "
                 f"({model_name}; auto speech-to-text, names/numbers can be misheard)\n\n")
         for seg in segments:
             if start is None:
@@ -100,8 +105,9 @@ def run(links_path: str, model_name: str = "small.en") -> None:
     pathlib.Path(links_path).unlink(missing_ok=True)
     # One batch transcribes at a time (a later batch may decode while an
     # earlier one is still transcribing — decoding is network-bound).
-    lock = OUT_DIR / ".transcribe.lock"
+    lock = LOCK
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -123,6 +129,11 @@ def run(links_path: str, model_name: str = "small.en") -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    if len(args) == 3 and args[0] == "--show" and args[1] in SHOWS:
+        OUT_DIR = _TRANSCRIPTS / args[1]
+        TITLE = SHOWS[args[1]]
+        args = args[2:]
+    if len(args) != 1:
         sys.exit(__doc__)
-    run(sys.argv[1])
+    run(args[0])

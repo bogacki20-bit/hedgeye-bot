@@ -12,7 +12,7 @@ with db_pg.get_conn() as c, c.cursor() as cur:
     cur.execute("""select symbol, sum(quantity), sum(cost_basis), sum(market_value) from book_positions
                    where snapshot_date=(select max(snapshot_date) from book_positions) and quantity<0 group by 1""")
     shorts={r[0]:tuple(float(x or 0) for x in r[1:]) for r in cur.fetchall()}
-    cur.execute("select ticker, range_low, range_high, tv_trade, tv_mfr_upper, tv_mfr_lower from v_screener where ticker=any(%s)",(list(shorts),))
+    cur.execute("select ticker, range_low, range_high, tv_trade, tv_trend, tv_trend from v_screener where ticker=any(%s)",(list(shorts),))
     lv={r[0]:[float(x) if x is not None else None for x in r[1:]] for r in cur.fetchall()}
     cur.execute("""select distinct on (ticker, side) ticker, side, removed_on from ss_roster_history
                    where ticker=any(%s) order by ticker, side, added_on desc""",(list(shorts),))

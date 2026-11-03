@@ -44,9 +44,11 @@ LIKELY_NOT_MFR = {
     'BRENT', 'GOLD', 'COPPER', 'SILVER', 'BITCOIN', 'UST10Y', 'USD',
     'DAX', 'NIKKEI', 'SHANGHAI', 'HANG_SENG', 'KOSPI',
     'SPX', 'NDX', 'RUT', 'COMPQ', 'DJIA',
+    'VIX', 'WTIC', 'NATGAS', 'NIKK', 'SSEC', 'UST2Y', 'UST30Y',
+    'FDRXX',  # money-market fund, not an MFR asset
 }
 
-out_dir = r'C:\Projects\hedgeye-bot\outputs'
+out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'outputs')
 os.makedirs(out_dir, exist_ok=True)
 out_path = os.path.join(out_dir, 'mfr_to_add.txt')
 

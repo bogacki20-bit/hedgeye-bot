@@ -360,6 +360,8 @@ def _dispatch_message(token, chat_id, text):
     def _note(): from tools.desk_note import handle_note_command;         return handle_note_command(text)
     def _shlf(): from tools.short_shelf import handle_shelf_command;      return handle_shelf_command(text)
     def _fill(): from tools.intraday_fills import handle_fill_command;    return handle_fill_command(text)
+    def _ais():  from tools.ai_short_watch import handle_ai_short_command; return handle_ai_short_command(text)
+    def _pmb():  from tools.pm_baskets import handle_pm_baskets_command;  return handle_pm_baskets_command(text)
 
     # report runs BEFORE screen: report owns exact sentinels (REPORT*, BOOK
     # FULL) while screen's orphan-modifier catcher claims loose words like
@@ -371,6 +373,7 @@ def _dispatch_message(token, chat_id, text):
     for name, fn in (("doc_buffer", _doc), ("ss_roster", _ss),
                      ("quad", _quad), ("report", _rpt), ("market", _mkt),
                      ("note", _note), ("shelf", _shlf), ("fill", _fill),
+                     ("ai_shorts", _ais), ("pm_baskets", _pmb),
                      ("screen", _scr),
                      ("quad_confirm", _qc), ("moves", _mv), ("backlog", _bl),
                      ("coverage", _cov),

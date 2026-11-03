@@ -21,7 +21,7 @@ with db_pg.get_conn() as c, c.cursor() as cur:
     STALK_L=[t for t in STALK_L if (t,'long') not in SS_OFF]+sorted(t for t,s in SS_ON if s=='long' and t not in STALK_L)
     STALK_S=[t for t in STALK_S if (t,'short') not in SS_OFF]+sorted(t for t,s in SS_ON if s=='short' and t not in STALK_S)
     allt=sorted(set(SECT+STALK_L+STALK_S+list(book)+AI))
-    cur.execute("select ticker, range_low, range_high, tv_trade, tv_mfr_upper, tv_mfr_lower, trend_dir, gics_sector from v_screener where ticker = any(%s)",(allt,))
+    cur.execute("select ticker, range_low, range_high, tv_trade, tv_trend, tv_trend, trend_dir, gics_sector from v_screener where ticker = any(%s)",(allt,))
     lv={r[0]:r[1:] for r in cur.fetchall()}
 from tools.range_structure import structure
 RS=structure(allt)
@@ -58,6 +58,11 @@ def line(t,tag=""):
     return f"{t:6}{tag:14}{sst}{rs} {o['p']:9.2f} {o['chg']:+5.1f}% 5d{o['r5']:+5.1f} 20d{o['r20']:+6.1f} rp {rp} {a} tr {o['tr'] or 0:8.2f} tn {o['tn'] or 0:8.2f} {o['td'] or '-':8} streak {o['streak']:+d} vol {o['vol']} {'DECEL' if o['dec'] else ''}"
 print(f"time {now:%H:%M} frac {frac:.2f}")
 print("== SS CHANGES (2d)"); [print(f"  {'OUT' if r else 'IN '} {s:5} {t:6} {(r or a):%m/%d}") for t,s,a,r in SS_CHG]
+with db_pg.get_conn() as c, c.cursor() as cur:
+    cur.execute("""select distinct on (name) name, signal_date, product, direction, basis, thesis from research_calls
+                   where kind='ticker' and name=any(%s) and signal_date>=current_date-14 order by name, signal_date desc, id desc""",(list(book)+STALK_L+STALK_S+AI,))
+    RES=cur.fetchall()
+print("== RESEARCH (14d, held + stalk)"); [print(f"  {t:6}{'HELD ' if t in book else '     '}{d:%m/%d} {p[:18]:18} {dr:8}{b[:3]} {th}") for t,d,p,dr,b,th in RES]
 print("== SECTORS"); [print(line(t)) for t in SECT]
 print("== BOOK")
 for t,(ac,mv,q) in sorted(book.items(), key=lambda x:-abs(float(x[1][1]))):

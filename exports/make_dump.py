@@ -50,7 +50,7 @@ def mask(v):
 readme = [f"# Hedgeye bot data dump {START} .. 2026-10-23", "",
           "Structured data only. Email bodies / research prose / personal spending excluded; account numbers masked to last 4.",
           "Positions are long (+) / short (-) market values. range_pos = (price - range_low)/(range_high - range_low).",
-          "TV lines: trade = Vola2vola upper line; trend = MFR Trend band (bot uses lower edge; backtest suggests midpoint).", "",
+          "TV lines: trade = Vola2vola Trade line (vola_b); trend = MFR Trend band (bot uses lower edge; backtest suggests midpoint).", "",
           "| file | rows | description |", "|---|---|---|"]
 with db_pg.get_conn() as c:
     cur = c.cursor()

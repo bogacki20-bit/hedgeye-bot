@@ -1,7 +1,7 @@
 import sys; sys.path.insert(0, r'C:\Users\bogac\hedgeye-bot'); sys.stdout.reconfigure(encoding='utf-8')
 import db_pg, yfinance as yf, datetime as dt
 with db_pg.get_conn() as c, c.cursor() as cur:
-    cur.execute("""select w.ticker, w.layer, v.range_low, v.range_high, v.tv_trade, v.tv_mfr_upper, v.tv_mfr_lower, v.trend_dir
+    cur.execute("""select w.ticker, w.layer, v.range_low, v.range_high, v.tv_trade, v.tv_trend, v.tv_trend, v.trend_dir
                    from (select unnest(%s) ticker, null::text layer) w left join v_screener v on v.ticker=w.ticker""", (sys.argv[1:],))
     rows=cur.fetchall()
 now=dt.datetime.now(); mins=max(1,(now.hour*60+now.minute)-(9*60+30))

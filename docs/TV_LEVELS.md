@@ -1,10 +1,12 @@
 # TradingView TRADE / TREND levels — overnight capture
 
-**Rule (Kris, 2026-09-26):** the bot's replication of Keith's Alpha Code is a blend:
+**Superseded 11/2/2026:** TRADE = 34-day EMA and TREND = 89-day EMA (`tools/level_lines.py`, `level_lines` table, migration 125). `v_screener.tv_trade` / `tv_trend` read those. TradingView now supplies the ranges and is the fallback for names without an EMA. MFR Trend band, solved 11/2: mid of 63-day high/low ± mid × population stdev of 63-day log returns.
+
+**Old rule (Kris, 2026-09-26):** the bot's replication of Keith's Alpha Code was a blend:
 - **TREND = MFR Trend (Myfractalrange Trend) daily band**: lower edge for
   bullish names, upper edge for bearish.
-- **TRADE = Vola2vola volatility Trade & Trend daily line**: upper line for
-  bullish names, lower for bearish.
+- **TRADE = Vola2vola volatility Trade & Trend daily line titled "Trade"** (`vola_b`, the
+  curve) on every name (Kris, 11/2). `vola_a`, the step line, is the indicator's own Trend, unused.
 
 Tested against 11 of Keith's published levels (SPX, Gold, Bitcoin, WTI, Brent):
 TREND exact on SPX (7501 vs 7501.67) and Gold. TRADE exact on SPX (7651 vs 7650.61).

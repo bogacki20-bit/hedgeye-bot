@@ -20,9 +20,9 @@ def test_spx_9_17_reproduces_keiths_alpha_code():
     assert abs(d["trend"] - 7501) < 1 and abs(d["trade"] - 7651) < 1, d
 
 
-def test_bearish_is_the_mirror():
+def test_bearish_trend_mirrors_and_trade_stays_the_trade_line():
     d = derive(60.20, 58.59, 61.67, 63.21, "BEARISH")
-    assert d["trend"] == 60.20 and d["trade"] == 61.67 and d["basis"] == "bear-mirror"
+    assert d["trend"] == 60.20 and d["trade"] == 63.21 and d["basis"] == "bear-mirror"
 
 
 def test_missing_vola_plot_uses_the_one_present():

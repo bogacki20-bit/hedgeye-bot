@@ -126,12 +126,11 @@ QUAD_NAME = {"1": "Goldilocks", "2": "Reflation", "3": "Stagflation", "4": "Defl
 
 
 def trade_trend(px, va, vb, mlo, mup, invert=False):
-    """TRADE = price vs the Vola2vola lines (above both = Bull, below both = Bear);
-    TREND = price vs the MFR Trend band midpoint (Keith's TREND ~ band middle)."""
+    """TRADE = price vs the 34-day EMA (fed in as vb);
+    TREND = price vs the 89-day EMA (fed in as mlo/mup)."""
     tr = td = None
-    if px is not None and va is not None and vb is not None:
-        hi, lo = max(va, vb), min(va, vb)
-        tr = "BULLISH" if px > hi else "BEARISH" if px < lo else "NEUTRAL"
+    if px is not None and vb is not None:
+        tr = "BULLISH" if px > vb else "BEARISH"
     if px is not None and mlo is not None and mup is not None:
         td = "BULLISH" if px >= (mlo + mup) / 2 else "BEARISH"
     if invert:
@@ -141,8 +140,8 @@ def trade_trend(px, va, vb, mlo, mup, invert=False):
 
 
 def levels(px, va, vb, mlo, mup):
-    """(price, TRADE line, TREND line): TRADE = upper Vola2vola line, TREND = MFR band middle."""
-    tl = max(va, vb) if va is not None and vb is not None else None
+    """(price, TRADE line, TREND line): TRADE = 34-day EMA, TREND = 89-day EMA (fed in as vb and ml/mu)."""
+    tl = vb
     tn = (mlo + mup) / 2 if mlo is not None and mup is not None else None
     return (px, tl, tn)
 
@@ -161,10 +160,10 @@ def action(trend, rp, etf):
     return None
 
 
-TV_INDEX = {"US": "SPX", "Germany": "DAX", "Japan": "NIKK", "China": "SSEC"}
-TV_FX = {"Germany": ("EUR/USD", False), "Eurozone": ("EUR/USD", False), "UK": ("GBP/USD", False),
-         "Japan": ("USD/YEN", True), "Canada": ("CAD/USD", False), "China": ("USD/CNY", True),
-         "US": ("USD", False)}
+from tools.macro_symbols import INDEX_TV, YIELD_TV, FX_TV  # noqa: E402
+
+TV_INDEX = {c: v[0] for c, v in INDEX_TV.items()}
+TV_FX = {c: (v[0], v[2]) for c, v in FX_TV.items()}
 
 
 def recommend(trend, rp, quad):
@@ -195,6 +194,36 @@ ROLL_WARN = 4.0   # % — a futures move bigger than this gets a "check contract
 
 
 # ── data ──────────────────────────────────────────────────────────────────
+def premarket(symbols):
+    """{sym: (live price, prior close, pct)} — pre/post-market price when there is one
+    (10/26: brief said 'BUY EWZ dip' off Friday's close while EWZ was -26% premarket)."""
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(sym):
+        try:
+            i = yf.Ticker(sym).info
+            prev = i.get("regularMarketPreviousClose") or i.get("previousClose")
+            reg = i.get("regularMarketPrice")
+            live = i.get("preMarketPrice") or i.get("postMarketPrice") or reg
+            # use the extended-hours print only when it's newer than the regular close
+            if i.get("preMarketPrice") and i.get("marketState") in ("PRE", "PREPRE", "CLOSED"):
+                live = i["preMarketPrice"]
+            elif i.get("postMarketPrice") and i.get("marketState") in ("POST", "POSTPOST"):
+                live = i["postMarketPrice"]
+            else:
+                live = reg
+            base = reg if live is not reg and reg else prev
+            if live and base:
+                return sym, (float(live), float(base), 100 * (live / base - 1))
+        except Exception:
+            pass
+        return sym, None
+
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        return {k: v for k, v in ex.map(one, sorted(set(symbols))) if v}
+
+
 def yahoo(symbols):
     """{sym: (last, prev_close, pct, asof)} — prev = the prior daily close."""
     import yfinance as yf
@@ -237,13 +266,17 @@ def db():
                               mfr_trend_upper, range_low, range_high, vola_a, vola_b
                        FROM tv_levels ORDER BY ticker, bar_date DESC""")
         tv = {r[0]: r[1:7] for r in cur.fetchall()} if False else None
-        cur.execute("""SELECT DISTINCT ON (ticker) ticker, bar_date, bar_close, mfr_trend_lower,
-                              mfr_trend_upper, range_low, range_high, vola_a, vola_b
-                       FROM tv_levels ORDER BY ticker, bar_date DESC""")
+        cur.execute("""SELECT DISTINCT ON (l.ticker) l.ticker, l.bar_date, l.bar_close,
+                              COALESCE(x.ema89, l.mfr_trend_lower), COALESCE(x.ema89, l.mfr_trend_upper),
+                              l.range_low, l.range_high, COALESCE(x.ema34, l.vola_a), COALESCE(x.ema34, l.vola_b)
+                       FROM tv_levels l
+                       LEFT JOIN LATERAL (SELECT ema34, ema89 FROM level_lines z WHERE z.ticker = l.ticker AND l.ticker <> 'USD'
+                                          ORDER BY z.bar_date DESC LIMIT 1) x ON true
+                       ORDER BY l.ticker, l.bar_date DESC""")
         tvx = {r[0]: r[1:] for r in cur.fetchall()}
         tv = {k: v[:6] for k, v in tvx.items()}
         cur.execute("""SELECT b.symbol, sum(b.market_value), v.price, v.range_low, v.range_high,
-                              v.tv_trade, v.tv_mfr_upper, v.tv_mfr_lower, v.trend_dir
+                              v.tv_trade, v.tv_trend, v.tv_trend, v.trend_dir
                        FROM book_positions b LEFT JOIN v_screener v ON v.ticker = b.symbol
                        WHERE b.snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
                          AND b.asset_class <> 'cash' AND b.symbol NOT IN ('BUXX','CLOX','SKYDWS')
@@ -254,7 +287,7 @@ def db():
                               support_strike, spx_last
                        FROM t1a_snapshots ORDER BY report_date DESC LIMIT 1""")
         t1a = cur.fetchone()
-        cur.execute("SELECT ticker, trend_dir, range_pos, price, range_low, range_high, tv_vola_a, tv_vola_b, tv_mfr_lower, tv_mfr_upper FROM v_screener WHERE ticker = ANY(%s)",
+        cur.execute("SELECT ticker, trend_dir, range_pos, price, range_low, range_high, tv_trade, tv_trade, tv_trend, tv_trend FROM v_screener WHERE ticker = ANY(%s)",
                     (list(COUNTRY_ETF.values()) + list(FX_ETF.values()) + [EM_FX_PROXY],))
         f = lambda x: float(x) if x is not None else None
         scr, scr_lines = {}, {}
@@ -270,8 +303,8 @@ def db():
                                         WHEN 'Rollover IRA' THEN 'IRA' WHEN 'ROTH IRA' THEN 'Roth'
                                         ELSE b.account_name END, '/') AS accts,
                    sum(b.market_value), sum(b.total_gl_dollar), sum(b.cost_basis),
-                   v.price, v.range_low, v.range_high, v.tv_vola_a, v.tv_vola_b,
-                   v.tv_mfr_lower, v.tv_mfr_upper, v.trend_dir,
+                   v.price, v.range_low, v.range_high, v.tv_trade, v.tv_trade AS tv_trade2,
+                   v.tv_trend, v.tv_trend AS tv_trend2, v.trend_dir,
                    coalesce(t.hedgeye_group, v.hedgeye_group), coalesce(t.hedgeye_bucket_0629, v.hedgeye_bucket_0629),
                    (SELECT side FROM ss_roster_history s WHERE s.ticker = b.symbol AND s.removed_on IS NULL LIMIT 1)
             FROM book_positions b
@@ -279,11 +312,11 @@ def db():
             LEFT JOIN ticker_tags t ON t.ticker = b.symbol
             WHERE b.snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
               AND b.asset_class <> 'cash' AND b.symbol NOT IN ('SKYDWS')
-            GROUP BY b.symbol, v.price, v.range_low, v.range_high, v.tv_vola_a, v.tv_vola_b,
-                     v.tv_mfr_lower, v.tv_mfr_upper, v.trend_dir, 14, 15""")
+            GROUP BY b.symbol, v.price, v.range_low, v.range_high, v.tv_trade,
+                     v.tv_trend, v.trend_dir, 14, 15""")
         book_full = cur.fetchall()
-        cur.execute("""SELECT v.ticker, v.price, v.range_low, v.range_high, v.tv_vola_a, v.tv_vola_b,
-                              v.tv_mfr_lower, v.tv_mfr_upper, v.trend_dir,
+        cur.execute("""SELECT v.ticker, v.price, v.range_low, v.range_high, v.tv_trade, v.tv_trade AS tv_trade2,
+                              v.tv_trend, v.tv_trend AS tv_trend2, v.trend_dir,
                               coalesce(t.hedgeye_group, v.hedgeye_group), coalesce(t.hedgeye_bucket_0629, v.hedgeye_bucket_0629),
                               (SELECT side FROM ss_roster_history s WHERE s.ticker = v.ticker AND s.removed_on IS NULL LIMIT 1)
                        FROM v_screener v LEFT JOIN ticker_tags t ON t.ticker = v.ticker
@@ -347,6 +380,8 @@ def trend_cell(t):
 # ── build ─────────────────────────────────────────────────────────────────
 def build():
     rr, rr_date, tv, book, t1a, scr, rr_prev, tvx, scr_lines, book_full, acct_tot, under = db()
+    pre = premarket([r[0] for r in book_full] + list(INVERSE.values()) +
+                    [e for e in COUNTRY_ETF.values() if e])
     quads, qcols = country_quads()
     syms = [f[1] for f in FUTURES] + [c[1][0] for c in COUNTRIES] + \
            [c[3][0] for c in COUNTRIES if c[3]] + [c[1] for c in COMMODITIES] + ["BTC-USD"]
@@ -374,10 +409,18 @@ def build():
     # 2) countries — every leg gets a range (Hedgeye RR first, then TradingView/ETF)
     c_rows = []
     for name, (isym, ikey), ytk, fx, qname in COUNTRIES:
+        ytk = YIELD_TV.get(name, (ytk, None))[0]
         il, ip, ipct, _ = y.get(isym, (None, None, None, None))
         it, ib, is_, irp = rr_rp(ikey, il)
+        if irp is None and TV_INDEX.get(name) in tvx:      # index's own TradingView range
+            _r = tvx[TV_INDEX[name]]
+            if _r[1] is not None and _r[4] is not None and _r[5] is not None:
+                ib, is_ = float(_r[4]), float(_r[5])
+                irp = rpos(float(_r[1]), ib, is_)
         etf = COUNTRY_ETF.get(name)
         et, erp, _, elo, ehi = scr.get(etf, (None, None, None, None, None))
+        if etf in pre and elo is not None and ehi is not None:
+            erp = rpos(pre[etf][0], elo, ehi)                 # live (premarket) position
         idx = dict(pct=ipct, trend=it or et, rp=irp if irp is not None else erp,
                    rng=(f"{ib:,.0f}–{is_:,.0f}" if ib else (f"{etf} {elo:.2f}–{ehi:.2f}" if elo else "")))
         # 10y yield: Hedgeye RR (US) else TradingView range
@@ -413,6 +456,9 @@ def build():
                 ft = {"BULLISH": "BEARISH", "BEARISH": "BULLISH"}.get(ft or "", ft)
                 frp = (1 - frp) if frp is not None else None
             fd.update(label=flabel, pct=fp, trend=ft, rp=frp, rng=frng)
+        if not fd["label"] and FX_TV.get(name, ("",))[0] == "EUR/USD":   # euro members share EUR
+            fd["label"] = "EUR/USD"
+            fd["pct"] = y.get("EURUSD=X", (None, None, None))[2]
         fetf = FX_ETF.get(name) or (EM_FX_PROXY if name not in ("Hong Kong", "Saudi Arabia", "Denmark") else None)
         fd["etf"] = fetf
         if name == "US":
@@ -441,6 +487,16 @@ def build():
         if ikey and ikey in rr:
             idx["tt"] = (idx["tt"][0], rr[ikey][0])          # Hedgeye's own TREND wins
         el = scr_lines.get(etf)
+        if (not el or el[1] is None) and etf in tvx:     # ETF not in the screener: use its TradingView row
+            _d, _c, _ml, _mu, _rl, _rh, _va, _vb = tvx[etf]
+            g = lambda x: float(x) if x is not None else None
+            el = (g(_c), g(_va), g(_vb), g(_ml), g(_mu))
+            if _rl is not None and _rh is not None:
+                elo, ehi = g(_rl), g(_rh)
+                erp = rpos(pre[etf][0] if etf in pre else g(_c), elo, ehi)
+            idx["rp"] = idx["rp"] if idx["rp"] is not None else erp
+        if el and etf in pre:                       # judge trade/trend on the LIVE price
+            el = (pre[etf][0],) + tuple(el[1:])
         idx["etf_tt"] = trade_trend(*el) if el else (None, None)
         idx["etf_rp"] = erp
         yd["tt"] = tvtt(ytk) if ytk else (None, None)
@@ -448,6 +504,13 @@ def build():
             yd["tt"] = (yd["tt"][0], rr[ytk][0])
         fk = TV_FX.get(name)
         fd["tt"] = tvtt(*fk) if fk else (None, None)
+        if fd.get("rp") is None and fk and fk[0] in tvx:
+            _r = tvx[fk[0]]
+            if _r[1] is not None and _r[4] is not None and _r[5] is not None:
+                _p = rpos(float(_r[1]), float(_r[4]), float(_r[5]))
+                fd["rp"] = (1 - _p) if (_p is not None and fk[1]) else _p
+        if fd.get("trend") is None and fd["tt"][1]:
+            fd["trend"] = fd["tt"][1]
         if fd.get("trend") and (fd["tt"][1] is None or (fx and fx[2] in rr)):
             fd["tt"] = (fd["tt"][0], fd["trend"])   # Hedgeye's published TREND wins
         idx["lv"] = tvlv(TV_INDEX.get(name)) if TV_INDEX.get(name) else None
@@ -511,16 +574,22 @@ def build():
 
     # 4b) full book brief
     book_rows = []
+    # (pre-fetched live prices for the book + ETFs live in `pre`)
     f = lambda x: float(x) if x is not None else None
     for (sym, accts, mv, gl, cost, px, lo, hi, va, vb, ml, mu, td, grp, bucket, ss) in book_full:
         mv, gl, cost, px, lo, hi, va, vb, ml, mu = map(f, (mv, gl, cost, px, lo, hi, va, vb, ml, mu))
         if mv is None or abs(mv) < 1:
             continue
+        gap = None
+        if sym in pre:
+            px, gap = pre[sym][0], pre[sym][2]
         short = mv < 0
         inv_of = INVERSE.get(sym)
         if inv_of and inv_of in under:          # judge the inverse ETF as a SHORT of its underlying
             u = under[inv_of]
             px, lo, hi, va, vb, ml, mu = map(f, u[:7])
+            if inv_of in pre:
+                px = pre[inv_of][0]
             td, grp, bucket, ss = u[7], u[8], u[9], u[10]
             short = True
         rp = rpos(px, lo, hi)
@@ -571,6 +640,8 @@ def build():
             act = act.replace("HOLD SHORT", "HOLD") + f" · (inverse ETF = short {inv_of}; levels shown are {inv_of}'s)"
             if ss == "short":
                 act = act.replace(f" · (inverse", f" · Keith's Signal Strength says SHORT {inv_of} ✓ · (inverse")
+        if gap is not None and abs(gap) >= 3:
+            act = f"GAP {gap:+.0f}% · " + act
         book_rows.append(dict(sym=sym if not inv_of else f"{sym} → short {inv_of}", accts=accts, mv=mv, pnl=pnl,
                               px=px, rp=rp, tl=tl, tn=tn, short=short, grp=(grp or "").title(),
                               lists=", ".join(lists), act=act))
@@ -598,11 +669,14 @@ def build():
     if "VIX" in rr:
         ifthen.append((f"VIX > {rr['VIX'][2]:.1f} (range top)", "Chop zone: halve position sizes"))
 
+    for sym, (lv, base, g) in pre.items():
+        if abs(g) >= 8:
+            notes.append((1.2, f"GAP: {sym} {g:+.0f}% premarket ({lv:.2f})"))
     notes.sort(key=lambda x: x[0])
     fut = next((n[1] for n in notes if n[1].startswith("S&P")), "")
     vix = next((n[1] for n in notes if n[1].startswith("VIX")), "")
     com = next((n[1] for n in notes if n[1].startswith("Brent")), "")
-    alerts = [n[1] for n in notes if n[1].startswith("BTC")]
+    alerts = [n[1] for n in notes if n[1].startswith(("BTC", "GAP"))]
     headline = [x for x in (f"{fut} · {vix}".strip(" ·"), com, line_asia, line_eu) if x] + alerts
     return dict(now=now, rr_date=rr_date, fut=fut_rows, countries=c_rows, qcols=qcols,
                 euro_bonds=[(l, tv.get(t)) for l, t in EURO_BONDS], com=com_rows,
@@ -681,7 +755,7 @@ def render(b):
                     "US ETF · last", "Trade", "Trend", "Pos",
                     "10y", "Trade", "Trend", "Pos",
                     "Ccy", "vs $", "Trade", "Trend", "Pos", "Call"], rows))
-    out.append("<div class='mut'>Trade / Trend = the line levels (green = price on the bullish side, red = bearish). Trade = Vola2vola upper line, Trend = MFR Trend band middle. Call = country ETF + currency ETF action from trend + range position; quad is context (signals win when they disagree). "
+    out.append("<div class='mut'>Trade / Trend = the line levels (green = price on the bullish side, red = bearish). Trade = 34-day EMA, Trend = 89-day EMA. Call = country ETF + currency ETF action from trend + range position; quad is context (signals win when they disagree). "
                "BUY (dip) = bullish & low in range · SHORT (bounce) = bearish & high in range.</div>")
     eb = []
     for label, r in b["euro_bonds"]:
@@ -725,7 +799,7 @@ def render(b):
                      f"<td class='mut' style='text-align:left'>{e(r['lists'])}</td>"
                      f"<td class='{acls}' style='text-align:left'><b>{e(r['act'])}</b></td>")
     out.append(tbl(["Position", "Acct", "Value", "P/L", "Last", "Pos", "Trade", "Trend", "Group", "Hedgeye lists", "Action"], brows))
-    out.append("<div class='mut'>Last = prior close (premarket starts 4:00). Trade/Trend green = position on the right side of the line "
+    out.append("<div class='mut'>Last = premarket/live price when trading, else prior close; GAP = moved ≥3% vs the close. Trade/Trend green = position on the right side of the line "
                "(for shorts, green = price below the line). Sorted: stops first, then trims/covers, adds, watch, holds.</div>")
 
     out.append("<h2>If / then playbook</h2>")
@@ -743,6 +817,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--open", action="store_true")
     a = ap.parse_args()
+    try:
+        from tools.level_lines import refresh
+        print("level lines:", refresh())
+    except Exception as e:  # noqa: BLE001
+        print("level lines refresh failed:", e)
     b = build()
     OUT.mkdir(parents=True, exist_ok=True)
     page = render(b)

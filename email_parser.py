@@ -987,6 +987,15 @@ def _process_new_email(parsed: dict) -> None:
                 )
         except Exception as e:
             log.warning(f"  product-specific parser failed: {e}")
+        # What the report says, for every research product including the
+        # ones with no dedicated parser (ISM, Housing tracker, Big Theme).
+        # Gated by RESEARCH_DIGEST_ENABLED; a failure never blocks the email.
+        try:
+            import research_digest
+            rd_result = research_digest.process_one(item["id"])
+            log.info(f"  research_digest: {rd_result}")
+        except Exception as e:
+            log.warning(f"  research_digest failed: {e}")
     except Exception as e:
         log.warning(f"  ticker/refresh hook outer error: {e}")
 

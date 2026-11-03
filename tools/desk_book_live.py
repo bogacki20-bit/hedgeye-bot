@@ -3,7 +3,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 import db_pg, yfinance as yf
 with db_pg.get_conn() as c, c.cursor() as cur:
     cur.execute("""select b.symbol, b.account_name, sum(b.market_value), sum(b.quantity), max(v.gics_sector), max(v.range_low), max(v.range_high),
-                   max(v.tv_trade), max(v.tv_mfr_upper), max(v.tv_mfr_lower), max(v.trend_dir), max(t.hedgeye_bucket_0629),
+                   max(v.tv_trade), max(v.tv_trend), max(v.tv_trend), max(v.trend_dir), max(t.hedgeye_bucket_0629),
                    (select max(side) from ss_roster_history s where s.ticker=b.symbol and s.removed_on is null)
                    from book_positions b left join v_screener v on v.ticker=b.symbol
                    left join ticker_tags t on t.ticker=b.symbol

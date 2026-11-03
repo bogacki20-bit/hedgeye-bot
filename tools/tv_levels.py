@@ -1,7 +1,7 @@
 """TradingView TRADE/TREND levels — the bot's Alpha Code blend (Kris, 9/26).
 
     TREND = MFR Trend daily band   (bullish: lower edge · bearish: upper edge)
-    TRADE = Vola2vola daily line   (bullish: upper line · bearish: lower line)
+    TRADE = Vola2vola Trade line   (vola_b on every name, Kris 11/2)
 
 Tested 9/26 against 11 of Keith's published levels: TREND exact on SPX/Gold,
 TRADE exact on SPX. Every tested code was bullish; the bearish mirror is an
@@ -47,7 +47,10 @@ def pairs() -> list[list[str]]:
                     ["IVW", "BATS:IVW"], ["LVHI", "BATS:LVHI"], ["KWEB", "BATS:KWEB"],
                     ["EWT", "BATS:EWT"], ["CYB", "BATS:CYB"], ["EWI", "BATS:EWI"], ["FXA", "BATS:FXA"], ["CEW", "BATS:CEW"], ["UDN", "BATS:UDN"],
                     ["EWO", "BATS:EWO"], ["ECH", "BATS:ECH"], ["GXG", "BATS:GXG"], ["EEM", "BATS:EEM"], ["EZU", "BATS:EZU"], ["EFNL", "BATS:EFNL"], ["GREK", "BATS:GREK"], ["EIDO", "BATS:EIDO"], ["EIRL", "BATS:EIRL"], ["EWN", "BATS:EWN"], ["EPU", "BATS:EPU"], ["EPOL", "BATS:EPOL"], ["PGAL", "BATS:PGAL"], ["KSA", "BATS:KSA"], ["EWP", "BATS:EWP"], ["EWD", "BATS:EWD"], ["THD", "BATS:THD"], ["TUR", "BATS:TUR"]]
-    return out + [p for p in MACRO_EXTRAS if p[0] not in have]
+    out += [p for p in MACRO_EXTRAS if p[0] not in have]
+    have = {k for k, _ in out}
+    from tools.macro_symbols import tv_pairs      # every country's index, 10y, FX
+    return out + [p for p in tv_pairs() if p[0] not in have]
 
 
 def _parse_line(ln: str) -> dict:
@@ -115,13 +118,12 @@ def ingest(path: str) -> dict:
 
 def derive(mu, ml, va, vb, trend_dir: str | None) -> dict:
     """Pure: raw indicator values + trend direction -> {trend, trade, basis}."""
-    vals = [x for x in (va, vb) if x is not None]
     bear = (trend_dir or "").upper().startswith("BEAR")
     out = {"trend": None, "trade": None, "basis": "bear-mirror" if bear else "bull"}
     if mu is not None and ml is not None:
         out["trend"] = float(mu) if bear else float(ml)
-    if vals:
-        out["trade"] = float(min(vals)) if bear else float(max(vals))
+    if vb is not None:
+        out["trade"] = float(vb)
     return out
 
 

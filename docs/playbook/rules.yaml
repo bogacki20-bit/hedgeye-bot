@@ -1,0 +1,291 @@
+# PRIVATE - distilled from Hedgeye subscription content (The Macro Show). Keep local.
+# Machine-readable twin of docs/playbook/KEITH_PLAYBOOK.md.
+# Only rules an agent can evaluate from data: price vs trade/trend lines, rp,
+# VIX level, HY OAS, quad, list membership, 1m return sign.
+# Gamma, MOVE, NASVOL/RVX rules are prose-only (see playbook sections 4 and 6).
+# Recommend-only: actions are recommendations for Kris, never orders.
+
+meta:
+  source: data/transcripts/macro_show/*.txt (2026-08-04 .. 2026-10-19, auto speech-to-text)
+  version: 1
+  built: 2026-10-20
+
+# Variables an evaluator must supply per ticker per day (close-based).
+variables:
+  close: last close
+  prev_close: prior close
+  trade_line: Hedgeye TRADE level (<= 3 weeks), first number of the alpha code
+  trend_line: Hedgeye TREND level (>= 3 months), second number of the alpha code
+  prev_trade_line: prior day's TRADE level
+  prev_trend_line: prior day's TREND level
+  trend_state: bullish | bearish | neutral (Risk Range color)
+  prev_trend_state: prior day's trend_state
+  rr_low: Risk Range low end
+  rr_high: Risk Range top end
+  prev_rr_high: prior day's Risk Range top end
+  rp: (close - rr_low) / (rr_high - rr_low); 0 = low end, 1 = top end
+  oversold: true if Hedgeye flagged the name oversold (Risk Range / alert)
+  held_side: long | short | none
+  position_pct: position as % of account
+  cost_basis_gain: unrealized P&L sign (+ / -)
+  asset_class: equity | commodity | crypto | fixed_income | fx
+  vix: VIX close
+  hy_oas_bp: ICE BofA US High Yield OAS, basis points
+  quad_monthly: Hedgeye US monthly quad (1-4)
+  on_ss_long: on Signal Strength long list
+  on_ss_short: on Signal Strength short list
+  ss_added_today / ss_removed_today: list membership changes vs prior day
+  ret_1m: 1-month total return
+  prev_ret_1m: prior day's 1-month return
+  long_count: number of long positions in the account
+
+# Derived states (used in conditions below)
+derived:
+  trade_bull: close > trade_line
+  trend_bull: close > trend_line
+  broke_trade_down: prev_close >= prev_trade_line and close < trade_line
+  broke_trend_down: prev_close >= prev_trend_line and close < trend_line
+  state_changed_today: trend_state != prev_trend_state or broke_trade_down or (prev_close < prev_trade_line and close > trade_line)
+  lower_high: rr_high < prev_rr_high
+
+rules:
+
+  # ---------- Signal states ----------
+  - id: SIG-01-bull-trade-trend
+    condition: trade_bull and trend_bull
+    action_long: Hold; buy dips in increments up to the max. Best setup is at the low end of the range (see SIG-02).
+    action_short: Do not short. If short, cover (see SHORT-01).
+    sizing: Add 50-100 bp per increment; never above class max.
+    source_dates: ["2026-10-16", "2026-09-24", "2026-08-25"]
+
+  - id: SIG-02-bull-at-low-end
+    condition: trade_bull and trend_bull and rp <= 0.2
+    action_long: Strongest buy setup - add.
+    action_short: Do not short.
+    sizing: Larger increment allowed (e.g. up to 150 bp) to move from min toward max; stay within band.
+    source_dates: ["2026-09-24"]
+
+  - id: SIG-03-bull-at-top-end
+    condition: trade_bull and trend_bull and rp >= 0.8
+    action_long: No new buys; sell some on green / trim toward minimum.
+    action_short: Do not short (trend bullish).
+    sizing: Trim toward class minimum; rebuild on dips.
+    source_dates: ["2026-08-25", "2026-10-19", "2026-09-24"]
+
+  - id: SIG-04-trade-break
+    condition: held_side == long and trend_bull and broke_trade_down
+    action_long: Stop buying (yellow light); reduce to minimum.
+    action_short: No new short while trend is bullish.
+    sizing: Reduce to class minimum (equity 2%, commodity/crypto 1%).
+    source_dates: ["2026-09-02", "2026-08-12", "2026-10-15"]
+
+  - id: SIG-05-bear-trade-bull-trend
+    condition: (not trade_bull) and trend_bull
+    action_long: Hold at minimum; do not add. If a bounce fails below trade, take to minimum; back above trade = keep.
+    action_short: Do not short a bullish trend.
+    sizing: Class minimum.
+    source_dates: ["2026-10-19", "2026-10-16"]
+
+  - id: SIG-06-trend-break
+    condition: held_side == long and broke_trend_down
+    action_long: STOP - exit the position. Quad does not override. If cost_basis_gain is negative, flag tax-loss harvest.
+    action_short: Becomes a short candidate only once trade is also bearish; short bounces, not day 1 (see SIG-10).
+    sizing: Go to 0.
+    source_dates: ["2026-10-15", "2026-09-22", "2026-10-16"]
+
+  - id: SIG-07-bear-trade-trend
+    condition: (not trade_bull) and (not trend_bull) and trend_state == bearish
+    action_long: Do not own; dips are not dips. If held, exit.
+    action_short: Short all bounces - add as rp rises toward the top end / on green days.
+    sizing: Shorts built in 50-100 bp increments.
+    source_dates: ["2026-10-15", "2026-10-16", "2026-10-19"]
+
+  - id: SIG-08-pos-trade-bear-trend
+    condition: trade_bull and (not trend_bull)
+    action_long: Wait and watch; no buy.
+    action_short: Do not add to shorts while price is rising through trade.
+    sizing: none
+    source_dates: ["2026-10-19", "2026-10-16"]
+
+  - id: SIG-09-neutral-trend
+    condition: trend_state == neutral
+    action_long: Do not buy; prefer a bullish trade+trend alternative.
+    action_short: No action.
+    sizing: none
+    source_dates: ["2026-08-28", "2026-09-08"]
+
+  - id: SIG-10-first-day-reversal
+    condition: state_changed_today
+    action_long: No large adds or new full positions today; at most one increment.
+    action_short: Do not go big on a new short today; wait at least one session.
+    sizing: <= 1 increment (50-100 bp).
+    source_dates: ["2026-10-16"]
+
+  - id: SIG-11-lower-high-topping
+    condition: held_side == long and lower_high and rp >= 0.6
+    action_long: Topping sequence starts (lower high -> trade break -> trend break). Buy less aggressively, sell more aggressively; consider trimming toward minimum.
+    action_short: No action until trade breaks.
+    sizing: Trim toward minimum.
+    source_dates: ["2026-10-02", "2026-10-01", "2026-09-08"]
+
+  # ---------- Shorts ----------
+  - id: SHORT-01-cover-on-bull-flip
+    condition: held_side == short and trade_bull and trend_bull
+    action_long: n/a
+    action_short: Cover.
+    sizing: Go to 0.
+    source_dates: ["2026-10-16", "2026-09-22"]
+
+  - id: SHORT-02-cover-at-low-end
+    condition: held_side == short and (rp <= 0.1 or oversold)
+    action_long: n/a
+    action_short: Cover to minimum; reload on green / higher in the range. (Bond shorts - cover when yields hit top of their range.)
+    sizing: Reduce short to class minimum.
+    source_dates: ["2026-10-02", "2026-08-18", "2026-09-17"]
+
+  - id: SHORT-03-no-short-positive-1m
+    condition: ret_1m > 0
+    action_long: n/a
+    action_short: Do not initiate a short.
+    sizing: none
+    source_dates: ["2026-10-19"]
+
+  # ---------- 1-month momentum ----------
+  - id: MOM-01-1m-flip-negative
+    condition: held_side == long and prev_ret_1m >= 0 and ret_1m < 0
+    action_long: Flag as very negative; if trade also broken, reduce to minimum.
+    action_short: Short candidate only if trend also bearish.
+    sizing: Class minimum if trade broken.
+    source_dates: ["2026-10-19"]
+
+  # ---------- Sizing ----------
+  - id: SIZE-01-commodity-crypto-band
+    condition: asset_class in [commodity, crypto] and held_side == long
+    action_long: Keep within 1%-4%; below 1% = exit.
+    action_short: n/a
+    sizing: {min_pct: 1.0, max_pct: 4.0}
+    source_dates: ["2026-09-10", "2026-10-15", "2026-09-24"]
+
+  - id: SIZE-02-equity-min
+    condition: asset_class == equity and held_side == long
+    action_long: Minimum position 2%; max is Kris's choice (Keith gives no number).
+    action_short: n/a
+    sizing: {min_pct: 2.0, max_pct: null}
+    source_dates: ["2026-10-19", "2026-08-13", "2026-08-18"]
+
+  - id: SIZE-03-increments
+    condition: any add or trim
+    action_long: Move 50-100 bp at a time; never ~300 bp in one go; never 10 bp moves.
+    action_short: Same increments for shorts.
+    sizing: {increment_bp_min: 50, increment_bp_max: 100, smallest_move_bp: 25}
+    source_dates: ["2026-08-18", "2026-10-19", "2026-08-13"]
+
+  - id: SIZE-04-max-positions
+    condition: long_count >= 30
+    action_long: No new long without exiting one (long-only account max 30).
+    action_short: n/a
+    sizing: {max_long_positions: 30}
+    source_dates: ["2026-08-11", "2026-09-15"]
+
+  # ---------- Volatility ----------
+  - id: VOL-01-investable
+    condition: vix < 19
+    action_long: Investable bucket - buying dips in bullish trade+trend names is allowed.
+    action_short: Short only bearish trade+trend names on bounces.
+    sizing: Normal increments.
+    source_dates: ["2026-08-06", "2026-08-21", "2026-09-29"]
+
+  - id: VOL-02-chop
+    condition: vix >= 19
+    action_long: Chop bucket - expect Risk Range to change; prefer assets whose vol is still investable; trade range edges, no chasing.
+    action_short: Short bounces near the top of the range.
+    sizing: No stated % change; be selective.
+    source_dates: ["2026-08-25", "2026-10-16", "2026-10-19"]
+
+  # ---------- Credit ----------
+  - id: CREDIT-01-hy-oas-300
+    condition: hy_oas_bp >= 300
+    action_long: Credit breakout warning - do not own high yield or credit-dependent / levered names.
+    action_short: Short HY and levered credit names (on bounces, per SIG-07).
+    sizing: none
+    source_dates: ["2026-09-29", "2026-10-15", "2026-10-19"]
+
+  # ---------- Quads ----------
+  - id: QUAD-00-signal-beats-quad
+    condition: quad favors the asset and (not trend_bull)
+    action_long: Do not buy. The signal overrides the quad; a trend break is a stop regardless of quad.
+    action_short: Do not short a quad-disfavored asset unless its signal is bearish.
+    sizing: none
+    source_dates: ["2026-08-11", "2026-09-15", "2026-10-15"]
+
+  - id: QUAD-01
+    condition: quad_monthly == 1
+    action_long: Favor small-cap value, low-quality / high-short-interest, high-yield credit (signal permitting).
+    action_short: n/a
+    sizing: none
+    source_dates: ["2026-08-25", "2026-08-11"]
+
+  - id: QUAD-02
+    condition: quad_monthly == 2
+    action_long: Favor tech/growth, high beta, USD, Bitcoin, energy (signal permitting).
+    action_short: Favor shorts in bonds (yields rise most), utilities; avoid gold longs; avoid financials if curve flattening.
+    sizing: none
+    source_dates: ["2026-10-01", "2026-09-29", "2026-09-22"]
+
+  - id: QUAD-03
+    condition: quad_monthly == 3
+    action_long: Favor energy, tech, healthcare, REITs, gold (signal permitting).
+    action_short: Avoid small-cap longs.
+    sizing: none
+    source_dates: ["2026-08-04", "2026-09-01"]
+
+  - id: QUAD-04
+    condition: quad_monthly == 4
+    action_long: Raise cash, reduce risk, fewer longs; avoid high beta momentum, high short interest, credit, tech.
+    action_short: More shorts; HY spreads widen, curve compresses; USD tends up.
+    sizing: Fewer positions (Keith cut from 30 to ~20 longs).
+    source_dates: ["2026-08-04", "2026-08-18", "2026-08-17"]
+
+  - id: QUAD-05-counter-trend-week
+    condition: quad_monthly unchanged and one week of price action resembles a different quad
+    action_long: Treat as a counter-trend move, not a quad change; reposition only on signal breaks.
+    action_short: Same.
+    sizing: none
+    source_dates: ["2026-10-19", "2026-10-15"]
+
+  # ---------- List membership ----------
+  - id: LIST-01-ss-short-no-long
+    condition: on_ss_short
+    action_long: Do not own; exit if held long.
+    action_short: Short candidate (bounces).
+    sizing: none
+    source_dates: ["2026-08-06", "2026-10-15"]
+
+  - id: LIST-02-ss-add
+    condition: ss_added_today and on_ss_long and trade_bull and trend_bull
+    action_long: Add candidate (start at minimum, build incrementally).
+    action_short: n/a
+    sizing: Start at class minimum.
+    source_dates: ["2026-08-07", "2026-08-18"]
+
+  - id: LIST-03-ss-removed
+    condition: held_side == long and ss_removed_today
+    action_long: Lost signal strength - review/exit; early warning before sector flips.
+    action_short: n/a
+    sizing: none
+    source_dates: ["2026-10-16", "2026-10-15"]
+
+  - id: LIST-04-no-bench
+    condition: asset_class == equity and (not on_ss_long) and stock is a single-name small-cap/energy idea
+    action_long: Do not buy the bench - only names on the Signal Strength list.
+    action_short: n/a
+    sizing: none
+    source_dates: ["2026-10-19"]
+
+  # ---------- Tax ----------
+  - id: TAX-01-harvest-trend-break
+    condition: held_side == long and (broke_trend_down or ((not trade_bull) and (not trend_bull))) and cost_basis_gain == "-"
+    action_long: Sell and harvest the loss; redeploy to higher-probability positions.
+    action_short: n/a
+    sizing: Go to 0.
+    source_dates: ["2026-09-21", "2026-10-15", "2026-10-01"]

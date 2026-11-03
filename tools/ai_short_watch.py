@@ -148,9 +148,11 @@ def run_ai_short_watch(dry_run: bool = False) -> dict:
 
 def board() -> str:
     """On-demand table: every watch name, where it sits, zone or not."""
-    rows = sorted(_rows(), key=lambda r: (r.get("severity_pct") or 0, r["ticker"]))
+    # in-zone names first, then closest to the zone (highest rp) down
+    rows = sorted(_rows(), key=lambda r: (not in_zone(r)[0],
+                                          -(r["rp"] if r.get("rp") is not None else -9)))
     out = ["AI SHORT WATCH — bearish-trend names, bounce zone = rp ≥ "
-           f"{AI_SHORT_RP:.2f} or at TRADE"]
+           f"{AI_SHORT_RP:.2f} or at TRADE · 🎯 = in zone now"]
     for r in rows:
         z, why = in_zone(r)
         rp = f"{r['rp']:.2f}" if r.get("rp") is not None else " n/a"
@@ -159,6 +161,16 @@ def board() -> str:
                    f"rp {rp} TRADE {trd} trend {r.get('trend_dir') or '?'}"
                    f"{' · SS ' + r['ss_side'] if r.get('ss_side') else ''}")
     return "\n".join(out)
+
+
+SENTINELS = ("AI SHORTS", "AI SHORT", "AISHORTS", "AI SHORT WATCH", "AI WATCH")
+
+
+def handle_ai_short_command(text: str):
+    """Telegram: AI SHORTS -> the board (sentinel-gated; None declines)."""
+    if (text or "").strip().upper() not in SENTINELS:
+        return None
+    return board()
 
 
 if __name__ == "__main__":
