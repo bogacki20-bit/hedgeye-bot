@@ -1,4 +1,4 @@
-"""Trade / Trend lines: 34-day and 89-day EMAs, Keith's number wins (Kris 11/2)."""
+"""Trade / Trend lines: Vola Trade, 34-day fallback, 89-day Trend; Keith's number wins (Kris 11/2, 11/5)."""
 import datetime as dt
 import os
 import sys
@@ -44,6 +44,12 @@ def test_keith_wins_then_email_then_ema():
     assert pick_level("trend", None, None, 284.0, False)[:2] == (284.0, "89-day EMA")
     assert pick_level("trade", None, 287.0, 280.0, False)[:2] == (280.0, "34-day EMA")
     assert pick_level("trade", None, None, None, False)[0] is None
+
+
+def test_trade_uses_vola_after_keith_and_before_the_ema():
+    assert pick_level("trade", 97.0, None, 96.7, True, vola=93.5)[:2] == (97.0, "Keith Alpha Code")
+    assert pick_level("trade", None, None, 96.7, True, vola=93.5)[:2] == (93.5, "Vola2vola Trade")
+    assert pick_level("trend", None, None, 284.0, False, vola=93.5)[:2] == (284.0, "89-day EMA")
 
 
 def test_parses_the_trend_and_tail_table():

@@ -1,15 +1,15 @@
-"""Trade / Trend lines (Kris, locked 11/2/2026).
+"""Trade / Trend lines.
 
-    TRADE = 34-day EMA of the daily close
-    TREND = 89-day EMA of the daily close
+    TRADE = Vola2vola Trade line, from tv_levels.vola_b (Kris, 11/5/2026)
+    TREND = 89-day EMA of the daily close (Kris, 11/2/2026)
 
-Closest match found to Keith's published Alpha Codes, not his formula. Stored
-nightly in level_lines; v_screener.tv_trade / tv_trend read it (migration 125),
-so every screen and alert uses the same numbers.
+The 34-day EMA is stored too and is the Trade fallback when a name has no Vola
+bar from the last 5 days. EMAs are stored nightly in level_lines; v_screener
+reads the lines (migration 127), so every screen and alert uses the same numbers.
 
 lookup() answers "what's the level for this ticker": Keith's number first
-(keith_levels), then his ranges (ETF Pro, Risk Range), then the EMAs, with the
-source and how far to trust it.
+(keith_levels), then his ranges (ETF Pro, Risk Range), then Vola and the EMAs,
+with the source and how far to trust it.
 
     py -m tools.level_lines --refresh
     py -m tools.level_lines --lookup SCHA BNO OKTA
@@ -31,9 +31,11 @@ TREND_SPAN = 89
 MIN_BARS = 150           # enough for the 89-day EMA to settle
 ALPHA_MAX_AGE = 5        # days an Alpha Code stays current
 TT_MAX_AGE = 35          # the Trend & Tail email is monthly
+VOLA_MAX_AGE = 5         # days a Vola Trade bar stays current
 PROXY = {"SCHA": "IWM", "VTWO": "IWM"}
 SYMBOL_OVERRIDE = {"USD": "USD"}             # the 2x semis ETF we hold, not the dollar index
-NO_YAHOO = {"UST2Y", "CAD/USD"}              # Yahoo's series is a different instrument
+TV_KEY = {"USD": "USD_SEMI"}                 # tv_levels' USD key is the dollar index
+NO_YAHOO = {"UST2Y", "CAD/USD", "USD_SEMI"}  # Yahoo's series is a different instrument, or no such symbol
 MAX_GAP = 0.40                               # vs TradingView's close: wrong instrument or a split
 
 
@@ -168,12 +170,14 @@ def load_trend_tail() -> int:
                          for r in parse_trend_tail(row[1])])
 
 
-def pick_level(kind: str, alpha, tt, ema, macro: bool) -> tuple:
+def pick_level(kind: str, alpha, tt, ema, macro: bool, vola=None) -> tuple:
     """Pure: (level, source, trust) for 'trade' or 'trend'."""
     if alpha is not None:
         return alpha, "Keith Alpha Code", "his number"
     if kind == "trend" and tt is not None:
         return tt, "Keith Trend & Tail email", "his number"
+    if kind == "trade" and vola is not None:
+        return vola, "Vola2vola Trade", "Kris's line; use the 2% buffer"
     if ema is None:
         return None, "no data", "none"
     trust = "good, usually within 1% of Keith" if macro else "rough, thin test on stocks; use the 2% buffer"
@@ -204,13 +208,18 @@ def lookup(tickers: list[str]) -> dict:
             cur.execute("SELECT range_low, range_high, bias, week_of FROM hedgeye_etf_pro_ranges WHERE ticker=%s "
                         "ORDER BY week_of DESC LIMIT 1", (src,))
             ep = cur.fetchone()
+            cur.execute("SELECT vola_b FROM tv_levels WHERE ticker=%s AND bar_date >= %s AND vola_b IS NOT NULL "
+                        "ORDER BY bar_date DESC LIMIT 1",
+                        (TV_KEY.get(t, t), today - dt.timedelta(days=VOLA_MAX_AGE)))
+            vb = cur.fetchone()
             cur.execute("SELECT buy_trade, sell_trade, trend, signal_date FROM hedgeye_risk_ranges "
                         "WHERE ticker=%s AND buy_trade IS NOT NULL ORDER BY signal_date DESC LIMIT 1", (src,))
             rr = cur.fetchone() if t != "USD" else None      # his USD range is the dollar index
             g = lambda x: float(x) if x is not None else None
             cur.execute("SELECT 1 FROM tv_levels WHERE ticker=%s AND tv_symbol !~ '^(BATS|OTC|NYSE|NASDAQ|AMEX)' LIMIT 1", (t,))
             macro = bool(cur.fetchone()) or tt is not None or ep is not None
-            trade = pick_level("trade", g(a_tr[0]) if a_tr else None, None, g(ll[0]) if ll else None, macro)
+            trade = pick_level("trade", g(a_tr[0]) if a_tr else None, None, g(ll[0]) if ll else None, macro,
+                               vola=g(vb[0]) if vb else None)
             trend = pick_level("trend", g(a_tn[0]) if a_tn else None, g(tt[0]) if tt else None,
                                g(ll[1]) if ll else None, macro)
             out[t] = {"proxy": src if src != t else None, "trade": trade, "trend": trend,

@@ -268,7 +268,7 @@ def db():
         tv = {r[0]: r[1:7] for r in cur.fetchall()} if False else None
         cur.execute("""SELECT DISTINCT ON (l.ticker) l.ticker, l.bar_date, l.bar_close,
                               COALESCE(x.ema89, l.mfr_trend_lower), COALESCE(x.ema89, l.mfr_trend_upper),
-                              l.range_low, l.range_high, COALESCE(x.ema34, l.vola_a), COALESCE(x.ema34, l.vola_b)
+                              l.range_low, l.range_high, COALESCE(l.vola_b, x.ema34), COALESCE(l.vola_b, x.ema34)
                        FROM tv_levels l
                        LEFT JOIN LATERAL (SELECT ema34, ema89 FROM level_lines z WHERE z.ticker = l.ticker AND l.ticker <> 'USD'
                                           ORDER BY z.bar_date DESC LIMIT 1) x ON true

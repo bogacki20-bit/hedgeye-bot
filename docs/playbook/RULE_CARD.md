@@ -4,11 +4,12 @@ Source of truth for every desk call. Built on Keith's *Master The Market* (ch. 3
 "Laggard / rotate out" never overrides it. Tools: `tools/desk_rot.py`, `tools/desk_shorts.py`, `tools/desk_sizing.py`, `tools/range_structure.py`.
 
 ## Lines
-- **TRADE = 34-day EMA of the daily close. TREND = 89-day EMA of the daily close (Kris locked 11/2/2026).** On every position, long or short. When Keith publishes a level, his number wins. These are the closest match found to his Alpha Codes (34-day: 93% within 1% on levels it wasn't fit to; 89-day: 68% within 1%, thin on single stocks), not his formula. Vola2vola and the MFR Trend band are no longer exit lines.
+- **TRADE = Vola2vola Trade line (Kris, 11/5/2026). TREND = 89-day EMA of the daily close (Kris, 11/2/2026).** On every position, long or short. When Keith publishes a level, his number wins. The 34-day EMA is the Trade fallback when a name has no Vola bar from the last 5 days. The MFR Trend band is not an exit line.
+- **A range low or high is never a Trade or Trend line (Kris, 11/4/2026).** Quote ranges as context only; a break needs his stated line, Alpha Code, Vola Trade, or the EMA.
 - rp = (price − range low) / (range high − range low).
 - **Range structure** = today's risk range vs 5 sessions ago: HH/HL (higher high, higher low), LH (lower high), etc.
 - Breaks are called at the **3:45 PM check if still through the line** (closing prices matter).
-- **Which level (Kris, 11/2):** Keith's published number first (Alpha Code, monthly Trend & Tail email), then his ranges (ETF Pro, Risk Range), then the EMAs. An ETF can use a close proxy's levels (SCHA uses IWM). On the EMAs alone, call a break only when price is **about 2% through**: the buffer stays at 2% until Kris changes it.
+- **Which level (Kris, 11/2):** Keith's published number first (Alpha Code, monthly Trend & Tail email), then his ranges (ETF Pro, Risk Range), then Vola Trade and the EMAs. An ETF can use a close proxy's levels (SCHA uses IWM). On Vola Trade or the EMA alone, call a break only when price is **about 2% through**: the buffer stays at 2% until Kris changes it.
 
 ## Position size: MIN / MAX (% of that account)
 | Asset class | MIN | MAX |

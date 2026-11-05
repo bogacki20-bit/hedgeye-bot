@@ -1,8 +1,8 @@
 """TRADE / TREND tag for every screen (Kris 9/26: "trade and trend in all the cards").
 
-Values come from v_screener.tv_trade / tv_trend (migration 125): TRADE = 34-day
-EMA, TREND = 89-day EMA (tools/level_lines.py), with the TradingView lines as the
-fallback. One formatter so every card prints it the same way:
+Values come from v_screener.tv_trade / tv_trend (migration 127): TRADE = Vola2vola
+Trade line, TREND = 89-day EMA (tools/level_lines.py), with the 34-day EMA and the
+MFR band as the fallbacks. One formatter so every card prints it the same way:
 
     TRD 63.21 TND 58.59
     TRD 61.67 TND 60.20·mir    fallback row with an old bearish mirror
