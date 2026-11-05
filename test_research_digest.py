@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from research_digest import SCHEMA, is_research, product_of, same_report, validate  # noqa: E402
+from research_digest import SCHEMA, is_reissue, is_research, product_of, same_report, validate  # noqa: E402
 
 CALL = {"kind": "ticker", "name": "omf", "direction": "short", "basis": "inferred", "thesis": "x"}
 
@@ -27,6 +27,15 @@ def test_logistics_and_rosters_are_skipped():
                     "Signal Strength Shorts: 70 Stocks (7 added, 4 removed)",
                     ""):
         assert not is_research(subject), subject
+
+
+def test_same_title_is_a_reissue_only_on_the_same_day():
+    import datetime as dt
+    d = dt.date(2026, 11, 3)
+    seen = {("10 etf go-anywhere portfolio", d)}
+    assert is_reissue("10 etf go-anywhere portfolio", d, seen)
+    assert not is_reissue("10 etf go-anywhere portfolio", d + dt.timedelta(days=1), seen)
+    assert not is_reissue("l1 watch | weekly update", d, seen)
 
 
 def test_product_uses_known_name_then_the_subject_head():

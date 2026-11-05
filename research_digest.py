@@ -16,6 +16,8 @@ CLI: py research_digest.py [--pending [DAYS] [--dump DIR] | --load FILE | --run 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+from zoneinfo import ZoneInfo
 import json
 import logging
 import os
@@ -87,6 +89,12 @@ def same_report(subject: str) -> str:
     """Reissues differ only by a tag and line wrap: '(*Chartbook Link Fixed*) ...'."""
     s = re.sub(r"^\s*\(\*.*?\*\)", "", subject or "")
     return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def is_reissue(key: str, day: dt.date, seen: set) -> bool:
+    """Pure: a reissue lands the same ET day as the original. The same title on another day is a
+    new report (Go-Anywhere, L1 Watch, the monthly Nowcast), not a repeat."""
+    return (key, day) in seen
 
 
 def validate(d: dict) -> dict:
@@ -214,14 +222,14 @@ def pending(days: int) -> list[tuple]:
                 WHERE d.id IS NULL AND e.received_at > NOW() - make_interval(days => %s)
                 ORDER BY e.received_at""", (days,))
         rows = cur.fetchall()
-        cur.execute("""SELECT title FROM research_digest
+        cur.execute("""SELECT title, signal_date FROM research_digest
                         WHERE signal_date >= CURRENT_DATE - %s::int""", (days + 7,))
-        seen = {same_report(t[0]) for t in cur.fetchall()}
+        seen = {(same_report(t), d) for t, d in cur.fetchall()}
     out = []
     for r in rows:
-        key = same_report(r[2])
-        if is_research(r[2]) and key not in seen:
-            seen.add(key)
+        key, day = same_report(r[2]), r[1].astimezone(ZoneInfo("America/New_York")).date()
+        if is_research(r[2]) and not is_reissue(key, day, seen):
+            seen.add((key, day))
             out.append(r)
     return out
 
