@@ -248,7 +248,7 @@ def _cli() -> int:
             fmt = lambda x: f"{x[0]:,.2f} ({x[1]}; {x[2]})" if x[0] is not None else "none"
             print(f"{t}{' via ' + r['proxy'] if r['proxy'] else ''}: TRADE {fmt(r['trade'])} · TREND {fmt(r['trend'])}"
                   + (f" · TAIL {r['tail']:,.2f}" if r["tail"] else "")
-                  + (f" · ETF Pro {r['etf_pro'][0]:g}-{r['etf_pro'][1]:g} {r['etf_pro'][2]} ({r['etf_pro'][3]})" if r["etf_pro"] else "")
+                  + (f" · ETF Pro {r['etf_pro'][0] or 0:g}-{r['etf_pro'][1] or 0:g} {r['etf_pro'][2]} ({r['etf_pro'][3]})" if r["etf_pro"] else "")
                   + (f" · Risk Range {r['risk_range'][0]:g}-{r['risk_range'][1]:g} {r['risk_range'][2]} ({r['risk_range'][3]})" if r["risk_range"] else "")
                   + (f" · closes through {r['bar']}" if r["bar"] else ""))
     return 0

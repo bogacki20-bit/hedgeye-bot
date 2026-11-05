@@ -12,6 +12,8 @@ Two sections (BULLISH / BEARISH) — bullish are LONG ideas, bearish are SHORT.
 The parser:
   1. Extracts each ticker + range + bias
   2. Upserts hedgeye_etf_pro_ranges (PK: ticker, week_of)
+     Update emails have no table, only "We are ADDING Long : Name (TICKER)" lines:
+     those go to hedgeye_etf_pro_changes and are applied to the latest week's rows.
   3. Notes the tickers in hedgeye_ticker_inventory + history (source='etf_pro')
   4. Calls unified_refresh.refresh_all_for_tickers so MFR/SG/Yahoo update in lockstep
   5. Stamps hedgeye_emails_raw.classified_as='etf_pro' + parsed_at
@@ -23,6 +25,7 @@ CLI:
   py parser_etf_pro.py --latest-weekly            # parse the most recent weekly
   py parser_etf_pro.py --backfill                 # parse all unparsed ETF Pro emails
   py parser_etf_pro.py --probe <message_id>       # parse but don't write (preview)
+  py parser_etf_pro.py --changes-backfill         # load every past update email's changes
 """
 from __future__ import annotations
 
@@ -139,6 +142,24 @@ def parse_body(html_body: str) -> list[dict]:
     return rows
 
 
+UPDATE_SECTION_RE = re.compile(
+    r"We are (ADDING|REMOVING)\s+(Long|Short)\s*:(.*?)(?=We are (?:ADDING|REMOVING)|How to Use|$)",
+    re.I | re.S)
+UPDATE_ITEM_RE = re.compile(r"\(([A-Z][A-Z0-9.\-]{0,7})\)(?:\s*-\s*\(\s*([\d,.]+)\s*-\s*([\d,.]+)\s*\))?")
+
+
+def parse_update_body(html_body: str) -> list[dict]:
+    """Pure: {ticker, action add/remove, bias, range_low, range_high} from an update email.
+    Removes quote the old range; adds carry none."""
+    num = lambda x: float(x.replace(",", "")) if x else None
+    out = []
+    for act, side, body in UPDATE_SECTION_RE.findall(_strip_html_to_text(html_body or "")):
+        for t, lo, hi in UPDATE_ITEM_RE.findall(body):
+            out.append({"ticker": t, "action": "add" if act.upper() == "ADDING" else "remove",
+                        "bias": side.lower(), "range_low": num(lo), "range_high": num(hi)})
+    return out
+
+
 # ─────────────────────────── Week-of helper ───────────────────────────
 
 def _monday_of(d: date) -> date:
@@ -193,6 +214,51 @@ def upsert_rows(rows: list[dict], week_of: date, source_email_id: str | None) ->
                     failed += 1
             conn.commit()
     return {"written": written, "failed": failed}
+
+
+def store_changes(changes: list[dict], signal_date: date, week_of: date, message_id: str) -> dict:
+    """Keep every change, and apply it to the latest week's rows. An email from an older week
+    changes nothing there, and one from a newer week never starts a new week: readers treat
+    max(week_of) as the full list."""
+    import db_pg
+    applied = 0
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT max(week_of) FROM hedgeye_etf_pro_ranges")
+        latest = cur.fetchone()[0]
+        for c in changes:
+            cur.execute(
+                "INSERT INTO hedgeye_etf_pro_changes (message_id, signal_date, ticker, action, bias, range_low, range_high) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (message_id, ticker, action) DO NOTHING",
+                (message_id, signal_date, c["ticker"], c["action"], c["bias"], c["range_low"], c["range_high"]))
+            if latest is None or week_of < latest:
+                continue
+            if c["action"] == "remove":
+                cur.execute("DELETE FROM hedgeye_etf_pro_ranges WHERE ticker=%s AND week_of=%s", (c["ticker"], latest))
+            else:
+                cur.execute(
+                    "INSERT INTO hedgeye_etf_pro_ranges (ticker, week_of, description, bias, source_email_id, parsed_at) "
+                    "VALUES (%s,%s,%s,%s,%s,NOW()) ON CONFLICT (ticker, week_of) DO UPDATE SET "
+                    "description=EXCLUDED.description, bias=EXCLUDED.bias, "
+                    "source_email_id=EXCLUDED.source_email_id, parsed_at=NOW()",
+                    (c["ticker"], latest, f"{c['bias'].upper()} | added {signal_date} | update email", c["bias"], message_id))
+            applied += 1
+        conn.commit()
+    return {"changes": len(changes), "applied": applied, "latest_week": str(latest)}
+
+
+def changes_backfill() -> dict:
+    """Load every past update email oldest first, so the latest week ends up correct."""
+    import db_pg
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT message_id, received_at, html_body FROM hedgeye_emails_raw "
+                    "WHERE subject ~* %s ORDER BY received_at ASC", (UPDATE_SUBJECT_RE.pattern,))
+        mails = cur.fetchall()
+    total = applied = 0
+    for mid, at, body in mails:
+        r = store_changes(parse_update_body(body), at.date(), _monday_of(at.date()), mid)
+        total += r["changes"]
+        applied += r["applied"]
+    return {"emails": len(mails), "changes": total, "applied_to_latest_week": applied}
 
 
 def note_in_inventory(rows: list[dict], message_id: str | None) -> int:
@@ -278,6 +344,7 @@ def process_email(message_id: str, *, dry_run: bool = False,
         return {"error": "subject does not look like ETF Pro", "subject": subject}
 
     rows = parse_body(html_body)
+    changes = parse_update_body(html_body) if kind == "update" else []
     week_of = _monday_of(received_at.date()) if received_at else date.today()
 
     summary = {
@@ -287,7 +354,8 @@ def process_email(message_id: str, *, dry_run: bool = False,
         "kind":          kind,
         "week_of":       str(week_of),
         "rows_parsed":   len(rows),
-        "tickers":       sorted({r["ticker"] for r in rows}),
+        "changes":       changes,
+        "tickers":       sorted({r["ticker"] for r in rows} | {c["ticker"] for c in changes}),
         "dry_run":       dry_run,
     }
     if dry_run:
@@ -297,9 +365,14 @@ def process_email(message_id: str, *, dry_run: bool = False,
     upsert = upsert_rows(rows, week_of, source_email_id=message_id)
     summary["upsert"] = upsert
     summary["noted_in_inventory"] = note_in_inventory(rows, message_id)
+    if changes:
+        day = received_at.date() if received_at else date.today()
+        summary["applied"] = store_changes(changes, day, week_of, message_id)
     stamp_email_parsed(message_id)
     if rows and fan_out:
         summary["fan_out"] = fan_out_refresh([r["ticker"] for r in rows])
+    elif changes and fan_out:
+        summary["fan_out"] = fan_out_refresh([c["ticker"] for c in changes if c["action"] == "add"])
     elif rows:
         summary["fan_out"] = "skipped (fan_out=False)"
     return summary
@@ -407,6 +480,8 @@ def _cli() -> int:
     ap.add_argument("--fanout-latest", action="store_true",
                     help="Run MFR/SG/Yahoo refresh for the most recent weekly's tickers")
     ap.add_argument("--probe", help="Parse one email by message_id but don't write")
+    ap.add_argument("--changes-backfill", action="store_true",
+                    help="Load the changes from every past update email")
     args = ap.parse_args()
 
     logging.basicConfig(
@@ -414,7 +489,9 @@ def _cli() -> int:
         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
     )
 
-    if args.probe:
+    if args.changes_backfill:
+        result = changes_backfill()
+    elif args.probe:
         result = process_email(args.probe, dry_run=True)
     elif args.message_id:
         result = process_email(args.message_id)

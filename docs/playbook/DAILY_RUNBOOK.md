@@ -13,21 +13,23 @@ Never end a turn during market hours without a sleep running.
 |---|---|---|
 | First touch | RC, keep-awake, heartbeat. tv_levels older than ~20 h → run the capture, no ask (fresh pairs, book + macro first). Monday: hedgeye_quad older than 7 days → read the dashboard. | Levels fresh, heartbeat running |
 | By 7:30 | Read the brief. Check every Action against the rule card and send Kris the conflicts. | Conflicts sent |
-| 7:15–9:00 | Email ingest alive. SS roster matches the latest emails. New Financials/Retail/CapAlloc calls in `data/stalk/ledger.csv`. Fill earnings from the morning mail. Monday: Position Monitor capture + dry-run, then ASK before `--commit`. | Kris has the changes |
+| 7:15–9:00 | Email ingest alive. SS roster matches the latest emails. New Financials/Retail/CapAlloc calls in `data/stalk/ledger.csv`. Fill earnings from the morning mail. Monday: Position Monitor capture, dry-run and `--commit` without asking (Kris 11/2); ask only if it looks wrong. | Kris has the changes |
+| By 8:30, after close | Research: `py research_digest.py --pending 7`, digest what it lists, then `py -m tools.research_tilt`. Send Kris what's against the book, new ideas with 2+ sources, and any process change the research argues for, as a proposal. Only Kris changes a rule. | Tilt sent |
 | 9:00 | Book calls by account, OUT → IN, each tagged with its rule and trigger price. Net fills and `book_activity` first. | Calls sent |
 | 9:00 | BUXX: check the last ex-dividend date. Within 7 days → tell Kris the window, price, rp and pace; flag it the first day. Don't rely on the `BUXX Accumulator 0945` task alone (it never sent an alert in Sept or Oct). | Kris told, or no window open |
 | 9:32 | Read the SpotGamma Founder's Note. Flag agreement or conflict with Hedgeye/T1A/the book; log its calls. | Note summarized |
-| 10:00, 12:30, 3:00 | Check-in: `desk_rot`, `desk_shorts`, `desk_sizing`. Send market read, SS changes, then a ranked "execute next" list across SS shorts and longs with rule, trigger price and earnings gate. | Check-in sent |
+| 10:00, 12:30, 3:00 | Check-in: `desk_rot`, `desk_shorts`, `desk_sizing`, `research_tilt`. Send market read, SS changes, then a ranked "execute next" list across SS shorts and longs with rule, trigger price and earnings gate. | Check-in sent |
 | 3:45 | Call trade/trend breaks still through the line. | Breaks sent, or "none" |
 | After 4:00 | Re-run the scans on closing prices. | Close read sent |
 | Evening | The Call + Macro Show transcripts (links expire ~1 h), process notes. Confirm the 6:45 PM daily pack built. | Files sent |
 
 ## Every call
+- Read `docs/playbook/RULE_CARD.md` and memory `desk-accuracy-checklist` at first touch and after every compaction, before the first call.
 - Stamp intraday reads "as of HH:MM".
 - Know the tool traps: `desk-accuracy-checklist` item 10.
-- Trade = 34-day EMA, Trend = 89-day EMA on every position (Kris locked 11/2). Keith's published number wins; 2% buffer on EMA-only breaks.
-- Research: task `research-digest-daily` loads new reports at 11:45 AM and 7:45 PM. Before any call on a name, run `python research_digest.py --lookup NAME` and use it; `desk_rot` shows it for held and stalk names. If the task did not run, digest by hand.
+- Trade = Vola2vola, Trend = 89-day EMA on every position (Kris 11/5, 11/2). Keith's published number wins; 2% buffer on our own lines.
+- Research: task `research-digest-daily` is meant to load new reports at 11:45 AM and 7:45 PM, but app tasks miss, so check `--pending 7` yourself. ETF Pro update emails and Real-Time Alerts load on their own. Before any call on a name, run `python research_digest.py --lookup NAME` and use it; `desk_rot` shows it for held and stalk names. If the task did not run, digest by hand.
 - No buys within 2 days of earnings; the tools have no gate, so check by hand.
 
 ## Ask Kris first
-Position Monitor `--commit`, code changes, commit/push/deploy.
+Code changes, commit/push/deploy.

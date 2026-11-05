@@ -36,7 +36,7 @@ _SKIP = re.compile(
     r"GEOPOLITICAL EVENT|Access Here|Access Show|Good news:|"
     r"RISK\s+RANGE|Real-Time Alert|Signal Strength|Keith'?s Signal|Daily ETF Re-Rank|"
     r"ETF Pro Change|Position Monitors? *\||Position Monitors Update|Weekly Position Monitor|"
-    r"Model Portfolio Changes|Trend & Tail Levels|Updated Levels|Go-Anywhere Portfolio|"
+    r"Model Portfolio Changes|Trend & Tail Levels|Updated Levels|"
     r"ETF Pro Plus|MARKET SITUATION REPORT: VIDEO",
     re.I)
 
