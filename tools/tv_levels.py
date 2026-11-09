@@ -48,6 +48,8 @@ def pairs() -> list[list[str]]:
                     ["EWT", "BATS:EWT"], ["CYB", "BATS:CYB"], ["EWI", "BATS:EWI"], ["FXA", "BATS:FXA"], ["CEW", "BATS:CEW"], ["UDN", "BATS:UDN"],
                     ["EWO", "BATS:EWO"], ["ECH", "BATS:ECH"], ["GXG", "BATS:GXG"], ["EEM", "BATS:EEM"], ["EZU", "BATS:EZU"], ["EFNL", "BATS:EFNL"], ["GREK", "BATS:GREK"], ["EIDO", "BATS:EIDO"], ["EIRL", "BATS:EIRL"], ["EWN", "BATS:EWN"], ["EPU", "BATS:EPU"], ["EPOL", "BATS:EPOL"], ["PGAL", "BATS:PGAL"], ["KSA", "BATS:KSA"], ["EWP", "BATS:EWP"], ["EWD", "BATS:EWD"], ["THD", "BATS:THD"], ["TUR", "BATS:TUR"]]
     out += [p for p in MACRO_EXTRAS if p[0] not in have]
+    # Bond-proxy stalk names (11/6) the screener doesn't carry yet.
+    out += [[t, f"BATS:{t}"] for t in "XEL KMB DUK PG CL JNJ ABBV MRK CB PGR TRV CHD".split() if t not in have]
     out.append(["USD_SEMI", "BATS:USD"])          # the book's USD is the 2x semis ETF; key USD stays the dollar index
     have = {k for k, _ in out}
     from tools.macro_symbols import tv_pairs      # every country's index, 10y, FX

@@ -86,8 +86,8 @@ def product_of(subject: str) -> str:
 
 
 def same_report(subject: str) -> str:
-    """Reissues differ only by a tag and line wrap: '(*Chartbook Link Fixed*) ...'."""
-    s = re.sub(r"^\s*\(\*.*?\*\)", "", subject or "")
+    """Reissues differ only by a tag and line wrap: '(*Chartbook Link Fixed*) ...', '[CORRECTED LINK] ...'."""
+    s = re.sub(r"^\s*(\(\*.*?\*\)|\[.*?\])", "", subject or "")
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
@@ -262,12 +262,16 @@ def main() -> None:
         for d in docs if isinstance(docs, list) else [docs]:
             print(d["message_id"][:12], store(d.pop("message_id"), d, d.pop("extractor", "desk")))
     elif a.dump:
+        from tools.report_capture import captured_text
         rows = pending(a.pending if a.pending is not None else 2)
         with db_pg.get_conn() as conn, conn.cursor() as cur:
             for i, (mid, when, subj) in enumerate(rows):
                 cur.execute("SELECT text_body, html_body FROM hedgeye_emails_raw WHERE message_id=%s",
                             (mid,))
                 body = prc.text_of(*cur.fetchone())
+                full = captured_text(mid)
+                if full:
+                    body = f"{body}\n\nFULL REPORT (captured from the portal)\n{full}"
                 with open(os.path.join(a.dump, f"{i:03d}.txt"), "w", encoding="utf-8") as f:
                     f.write(f"ID {mid}\nDATE {when.date()}\nSUBJ {re.sub(r'\s+', ' ', subj)}\n\n{body}")
         print(f"{len(rows)} written to {a.dump}")

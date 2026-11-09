@@ -51,6 +51,9 @@ for t,(q,cb,mv) in shorts.items():
     elif tr and p>tr: act=f"COVER HALF {math.ceil(q/2)} (above trade)"
     elif third and lo and p<=lo: act=f"COVER {third} (at range low)"
     elif third and (pnl>=3 or (rp is not None and rp<=0.25)): act=f"COVER {third} (+3%/rp<=.25)"
+    # a 1-share short can't be split: cover it whole at the first trigger (Kris 11/6 after the XLI miss)
+    elif q==1 and lo and p<=lo: act="COVER 1 (at range low; 1-share = all)"
+    elif q==1 and (pnl>=3 or (rp is not None and rp<=0.25)): act="COVER 1 (+3%/rp<=.25; 1-share = all)"
     elif rp is not None and rp>=0.65 and pnl<0: act="RELOAD zone (add once, green day 3)"
     else: act="hold"
     day=f"{100*(p/prev-1):+6.1f}%" if prev else "      "

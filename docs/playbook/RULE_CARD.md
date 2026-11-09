@@ -6,6 +6,7 @@ Source of truth for every desk call. Built on Keith's *Master The Market* (ch. 3
 ## Lines
 - **TRADE = Vola2vola Trade line (Kris, 11/5/2026). TREND = 89-day EMA of the daily close (Kris, 11/2/2026).** On every position, long or short. When Keith publishes a level, his number wins. The 34-day EMA is the Trade fallback when a name has no Vola bar from the last 5 days. The MFR Trend band is not an exit line.
 - **A range low or high is never a Trade or Trend line (Kris, 11/4/2026).** Quote ranges as context only; a break needs his stated line, Alpha Code, Vola Trade, or the EMA.
+- **Formations (Keith's process slide, Kris 11/5/2026).** Bullish = price > Trade > Trend > Tail: buy the dips. Bearish = price < Trade < Trend < Tail: short strength, repeatedly. `py -m tools.formations`. The stated Trend signal outranks price: a bearish-trend name isn't a Bullish Formation because of one rally above the lines. The entry is the Trade test: run up, sell off, test Trade, hold, rise again; on the short side, bounce into Trade, fail, roll over (`--setups`). This reads which names to favor; it doesn't replace the exit lines. Tail exists only where Keith publishes it, so most single stocks read as 2-line.
 - rp = (price − range low) / (range high − range low).
 - **Range structure** = today's risk range vs 5 sessions ago: HH/HL (higher high, higher low), LH (lower high), etc.
 - Breaks are called at the **3:45 PM check if still through the line** (closing prices matter).
@@ -43,6 +44,7 @@ Source of truth for every desk call. Built on Keith's *Master The Market* (ch. 3
 - Entry: bearish trend, 3+ day bounce on falling volume, rp ≥ 0.65, below trade, short on a GREEN day. Lower highs in the range = best.
 - Above TRADE → cover half. Above TREND → cover all.
 - Cover ⅓–½ at +3–5% or rp ≤ 0.25; another ⅓ at the range low; last ⅓ to the trade line.
+- 1-share short: cover it all at the first trigger. Take the money; don't hold to the stop (Kris 11/6).
 - One add max. Size 0.5–2% of the account (Individual: ~$145–575).
 - At MAX: −6% stop → cover.
 

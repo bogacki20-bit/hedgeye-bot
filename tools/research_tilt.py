@@ -7,6 +7,7 @@ them against the book:
     WITH      held names research agrees with
     IDEAS     names not held where 2+ separate sources agree and none disagrees
     READS     the latest regime and process reads from the digests
+    GLOBAL    country quad path changes and next-quarter turns (tools/country_quads.py)
 
 It proposes. The rule card still decides, and only Kris changes a rule.
 
@@ -17,6 +18,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+
+from tools.country_quads import watch_lines
 
 DIR = {"long": 1, "bullish": 1, "short": -1, "bearish": -1}
 READ_PRODUCTS = ("early_look", "macro_show", "the_call_summary", "the_call", "market_situation_report")
@@ -111,6 +114,7 @@ def run(days: int) -> int:
                     "WHERE product = ANY(%s) AND signal_date >= %s AND (regime_read IS NOT NULL OR process_read IS NOT NULL) "
                     "ORDER BY product, signal_date DESC, id DESC", (list(READ_PRODUCTS), since))
         reads = cur.fetchall()
+        global_lines = watch_lines(cur)
 
     def where(t: str) -> str:
         p, tr, rp = px.get(t, (None, None, None))
@@ -149,6 +153,8 @@ def run(days: int) -> int:
             print(f"  {product} {day:%m/%d} regime: {regime[:220]}")
         if process:
             print(f"  {product} {day:%m/%d} process: {process[:220]}")
+    print("\nGLOBAL QUADS")
+    print("\n".join(global_lines))
     return 0
 
 
