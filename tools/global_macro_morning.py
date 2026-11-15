@@ -70,7 +70,8 @@ BOARD = [
         ("UST 20y+ TLT", "TLT", "TLT", "px"), ("UST 7-10y IEF", "IEF", "IEF", "px"),
         ("UST 1-3y SHY", "SHY", "SHY", "px"), ("US TIPS TIP", "TIP", "TIP", "px"),
         ("Germany govt", "EXX6.DE", "EXX6.DE", "px"), ("Euro govt", "IBGL.L", "IBGL.L", "px"),
-        ("UK gilts", "IGLT.L", "IGLT.L", "px"), ("Canada govt", "XGB.TO", "XGB.TO", "px"),
+        ("UK gilts", "IGLT.L", "IGLT.L", "px"), ("Japan govt (JGB)", "2561.T", "2561.T", "px"),
+        ("Canada govt", "XGB.TO", "XGB.TO", "px"),
         ("Australia bonds", "IAF.AX", "IAF.AX", "px"), ("Global ex-US", "BNDX", "BNDX", "px"),
         ("EM USD debt", "EMB", "EMB", "px"), ("EM local debt", "EMLC", "EMLC", "px"),
     ]),
@@ -167,6 +168,29 @@ def _ctx(m):
     return cloud, trade, rp, read
 
 
+COMPUTED_CLOUD = ["2561.T"]
+
+
+def _computed_cloud(tk, today):
+    """MFR Trend band from daily OHLC: mid = (63-bar high + 63-bar low) / 2, band = mid +/- mid * sigma,
+    sigma = population stdev of 63 daily log returns. Uses completed bars only (before today)."""
+    import numpy as np
+    import yfinance as yf
+    try:
+        h = yf.Ticker(tk).history(period="9mo", auto_adjust=False)
+        h.index = h.index.tz_localize(None)
+        h = h[h.index < today].dropna(subset=["High", "Low", "Close"])
+        if len(h) < 64:
+            return None
+        w = h.tail(63)
+        mid = (w["High"].max() + w["Low"].min()) / 2
+        sig = float(np.log(h["Close"]).diff().tail(63).std(ddof=0))
+        return {"price": float(h["Close"].iloc[-1]), "bull": mid * (1 + sig), "bear": mid * (1 - sig)}
+    except Exception as e:
+        log.warning("computed cloud failed for %s: %s", tk, e)
+        return None
+
+
 def build():
     import pandas as pd
     syms = [r[1] for _, rows in BOARD for r in rows]
@@ -183,6 +207,13 @@ def build():
             prior = prior[prior.index < today]
             if len(prior):
                 m["price"] = float(prior.iloc[-1])
+    # Not in MFR (e.g. 2561.T, the clean JGB ETF; MFR only has the unhedged EUR XJSE listing):
+    # compute the MFR Trend cloud from Yahoo OHLC with the solved formula (memory mfr-trend-formula).
+    # No Trade line or rp for these.
+    for tk in [t for t in COMPUTED_CLOUD if t in mfr_syms and ctx.get(t, {}).get("bull") is None]:
+        cl = _computed_cloud(tk, today)
+        if cl:
+            ctx.setdefault(tk, {}).update(cl)
     data = []
     for sec, rows in BOARD:
         for label, ysym, msym, kind in rows:
@@ -245,7 +276,7 @@ def render(data, sector, mfr_date):
         f"US futs: ES {mv('S&P 500 fut')}, NQ {mv('Nasdaq 100 fut')}, RTY {mv('Russell 2000 fut')}; VIX {mv('VIX')}",
         f"UST: 10y {mv('UST 10y')}, 30y {mv('UST 30y')}, 3m {mv('UST 3m')}",
         f"Global bonds: {b_down} of {len(bonds)} bond ETFs down (= yields up). "
-        f"Bund {mv('Germany govt', 2)}, Gilts {mv('UK gilts', 2)}, Canada {mv('Canada govt', 2)}",
+        f"Bund {mv('Germany govt', 2)}, Gilts {mv('UK gilts', 2)}, JGB {mv('Japan govt (JGB)', 2)}, Canada {mv('Canada govt', 2)}",
         f"FX: DXY {mv('Dollar DXY', 2)}, EUR {mv('EUR/USD', 2)}, USD/JPY {mv('USD/JPY (up=yen weak)', 2)}, "
         f"CNY {mv('USD/CNY', 2)}",
         f"Commods: WTI {mv('WTI crude')}, Gold {mv('Gold')}, Copper {mv('Copper')}, Wheat {mv('Wheat')}, "
@@ -260,7 +291,8 @@ def render(data, sector, mfr_date):
     lines = ["# " + head[0], "", *head[1:], "",
              f"Move = Yahoo (today's bar where open or closed, else last close; * = today's bar). "
              f"Context = MFR at the {mfr_date} close for the ETF in [ ]: cloud = vs MFR Trend cloud, "
-             "trade = vs Vola2vola Trade, rp = range position. Bond ETF down = yields up.", ""]
+             "trade = vs Vola2vola Trade, rp = range position. Bond ETF down = yields up. "
+             "JGB (2561.T) is not in MFR: its cloud is computed with the MFR Trend formula.", ""]
     for sec, _ in BOARD:
         lines.append(f"## {sec}")
         lines.append("```")
