@@ -328,6 +328,16 @@ if __name__ == "__main__":
                         st = _mfr_ind_run(groups=(grp,), bars=5)
                         log.info("mfr_indicators %s: %s tickers, %s rows, %s errors, %s min", grp,
                                  st.get("tickers"), st.get("rows"), len(st.get("errors", [])), st.get("minutes"))
+                    # Correlations (Kris 11/15): sector corr, Today pairs, book vs benchmarks, top-15 pairs.
+                    # Own try so a failure here never blocks tomorrow's indicator pull. ~10 requests.
+                    try:
+                        from tools.mfr_correlations import run as _mfr_corr_run
+                        cst = _mfr_corr_run(bars=5)
+                        log.info("mfr_correlations: sector %s, book %s names, %s pairs, missing %s",
+                                 cst.get("sector_last"), cst.get("book_names"), cst.get("book_pairs"),
+                                 cst.get("missing"))
+                    except Exception as ce:
+                        log.error("mfr_correlations failed: %s", ce)
                 except Exception as e:
                     tb = traceback.format_exc()
                     log.error("mfr_indicators loop crashed: %s\n%s", e, tb)
