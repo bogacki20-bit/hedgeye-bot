@@ -305,6 +305,42 @@ if __name__ == "__main__":
     else:
         log.info("MFR watchlist sync disabled (MFR_WATCHLIST_SYNC=false).")
 
+    # MFR platform indicators (Kris 2026-11-15): Trade/Trend lines, MFR Trend cloud, M/Q/Y
+    # targets (core) and the tracking set (signals, momentum, VIX Fix, Matrix) for every active
+    # MFR ticker, via the MCP endpoint (needs MFR_MCP_TOKEN). ~1.8 h per group at the 150/15-min
+    # rate limit, so it starts at 06:00 UTC (~1 AM ET) and is done before the 7:15 desk run.
+    if os.getenv("MFR_INDICATORS_SYNC", "true").lower() in ("true", "1", "yes") and os.getenv("MFR_MCP_TOKEN"):
+        def _mfr_indicators_loop():
+            import time, traceback
+            from datetime import datetime, timezone, timedelta
+            while True:
+                try:
+                    now = datetime.now(timezone.utc)
+                    nxt = now.replace(hour=6, minute=0, second=0, microsecond=0)
+                    if nxt <= now:
+                        nxt += timedelta(days=1)
+                    time.sleep((nxt - now).total_seconds())
+                    if datetime.now(timezone.utc).weekday() in (6, 0) and os.getenv("MFR_INDICATORS_WEEKEND") != "true":
+                        # Sun/Mon 06:00 UTC follow non-trading days: nothing new to read.
+                        continue
+                    from tools.mfr_indicators import run as _mfr_ind_run
+                    for grp in ("core", "track"):
+                        st = _mfr_ind_run(groups=(grp,), bars=5)
+                        log.info("mfr_indicators %s: %s tickers, %s rows, %s errors, %s min", grp,
+                                 st.get("tickers"), st.get("rows"), len(st.get("errors", [])), st.get("minutes"))
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    log.error("mfr_indicators loop crashed: %s\n%s", e, tb)
+                    try:
+                        import notifier
+                        notifier.send_telegram("MFR indicators", f"Nightly pull failed: {e}. Retrying tomorrow.")
+                    except Exception:
+                        pass
+                    time.sleep(3600)
+
+        threading.Thread(target=_mfr_indicators_loop, daemon=True, name="mfr_indicators_sync").start()
+        log.info("MFR indicators sync thread started.")
+
     # Friday SS-roster anchor prompt + stale re-ping (PROMPT ONLY â€” writes no roster).
     # Toggle off via SS_ANCHOR_PROMPT=false.
     if os.getenv("SS_ANCHOR_PROMPT", "true").lower() in ("true", "1", "yes"):
