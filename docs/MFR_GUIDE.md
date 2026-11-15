@@ -337,3 +337,26 @@ From the platform's signals feed (ticker page, Elite) and MFR's own API docs (`?
 - Futures (`_F`) return no indicators (MFR documents this). Their ranges still come from the REST sync.
 - MCP gives London names the current bar (11/13 for COCO.L); the one-day lag is only on the website chart legend.
 - Scorecard: `py -m tools.mfr_signal_scorecard [--since 2024-11-01]` writes data/reviews/mfr_signals_<date>.md: hit%, average and edge vs base rate at 5/10/21 days, split by trend state. Tracking only until Kris rules.
+
+## Correlation tools (found 11/15, no ticker cost)
+
+Every ticker must be active in the account. Each call counts as 1 request against the 150 per 15 min limit.
+
+- `mfr_get_correlation_to_benchmarks`: up to 25 tickers against up to 5 benchmarks, up to 4 windows (5–252 trading days), `as_of_days_ago` for history. Pearson on daily returns, with the two series aligned by date.
+- `mfr_get_correlation_matrix`: 2–15 tickers, every pair (upper triangle) plus a summary (mean, highest, lowest). One window per call.
+- `AVG_SECTOR_CORR` (via `mfr_get_indicator` on SPY): the average correlation of the 11 sectors to SPY. High = the market moves as one block; low = the sectors go their own way. 250 bars per call.
+- `CORR_MATRIX` indicator: one ticker against 18 fixed ETFs (DIA, GLD, IWM, QQQ, SPY, TLT, UUP, the 11 sector SPDRs).
+- `mfr_get_today`: the major pair correlations (GLD/SPY, SPY/UUP, GLD/UUP, SPY/TLT) over 10 and 21 days with a trend word, plus 21-day sector-correlation history.
+
+First read, book of 11/14 (84 names; ILS, ORCS and SKYDWS not covered). Book correlation-weighted by market value:
+
+- SPY: +0.05 (30 days) / +0.03 (90 days).
+- TLT: +0.36 / +0.28. The book trades the rates story.
+- UUP: −0.23 / −0.04.
+- USO: −0.15 / −0.18.
+
+Top-15 pairwise mean is 0.21. The most redundant pairs are XLP–YUM 0.74 and BNDD–TLT 0.74.
+
+Average sector correlation was 0.68 (10-day) on 11/13, the 98th percentile of the past year. It had been about 0.0 on 11/3 and rose sharply from 11/4.
+
+Script for the pull: scratchpad `corr_test.py`. It is not yet in the nightly job.
