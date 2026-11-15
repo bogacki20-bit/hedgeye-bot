@@ -151,9 +151,7 @@ def main():
                 f"{len(ev)} events. Tracking only (Kris 11/15): nothing here is on the card.\n\n")
         f.write("hit% = moved the signal's way; avg = mean move the signal's way; edge = avg minus the same "
                 "tickers' all-day base rate. Horizons in trading days. trend = vs the MFR Trend band on the event day.\n\n")
-        f.write("```
-" + s.to_string(index=False) + "
-```")
+        f.write("~~~\n" + s.to_string(index=False) + "\n~~~")
         f.write("\n")
     print(s.to_string(index=False))
     print("wrote", out)
