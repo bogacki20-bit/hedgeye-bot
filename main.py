@@ -351,6 +351,42 @@ if __name__ == "__main__":
         threading.Thread(target=_mfr_indicators_loop, daemon=True, name="mfr_indicators_sync").start()
         log.info("MFR indicators sync thread started.")
 
+    # Global macro morning read (Kris 2026-11-15): world bonds, indexes, FX, commodities with MFR
+    # cloud/Trade context. Weekdays at GLOBAL_MACRO_HOUR:GLOBAL_MACRO_MINUTE ET (default 6:30) to
+    # Telegram (headline + full .txt) and the global_macro_morning table. Toggle GLOBAL_MACRO_MORNING=false.
+    if os.getenv("GLOBAL_MACRO_MORNING", "true").lower() in ("true", "1", "yes"):
+        def _global_macro_loop():
+            import time, traceback
+            from datetime import datetime, timedelta
+            from zoneinfo import ZoneInfo
+            et = ZoneInfo("America/New_York")
+            hh = int(os.getenv("GLOBAL_MACRO_HOUR", "6"))
+            mm = int(os.getenv("GLOBAL_MACRO_MINUTE", "30"))
+            while True:
+                try:
+                    now = datetime.now(et)
+                    nxt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+                    if nxt <= now:
+                        nxt += timedelta(days=1)
+                    while nxt.weekday() >= 5:
+                        nxt += timedelta(days=1)
+                    time.sleep((nxt - now).total_seconds())
+                    from tools.global_macro_morning import run as _gm_run
+                    st = _gm_run(send=True)
+                    log.info("global_macro_morning: %s/%s rows with data, sent=%s",
+                             st.get("with_data"), st.get("rows"), st.get("sent"))
+                except Exception as e:
+                    log.error("global_macro_morning failed: %s\n%s", e, traceback.format_exc())
+                    try:
+                        import notifier
+                        notifier.send_telegram("Global macro", f"Morning report failed: {e}")
+                    except Exception:
+                        pass
+                    time.sleep(600)
+
+        threading.Thread(target=_global_macro_loop, daemon=True, name="global_macro_morning").start()
+        log.info("Global macro morning thread started.")
+
     # Friday SS-roster anchor prompt + stale re-ping (PROMPT ONLY â€” writes no roster).
     # Toggle off via SS_ANCHOR_PROMPT=false.
     if os.getenv("SS_ANCHOR_PROMPT", "true").lower() in ("true", "1", "yes"):
