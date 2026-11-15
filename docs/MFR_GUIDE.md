@@ -359,4 +359,4 @@ Top-15 pairwise mean is 0.21. The most redundant pairs are XLP–YUM 0.74 and BN
 
 Average sector correlation was 0.68 (10-day) on 11/13, the 98th percentile of the past year. It had been about 0.0 on 11/3 and rose sharply from 11/4.
 
-Script for the pull: scratchpad `corr_test.py`. It is not yet in the nightly job.
+Nightly since 11/15 (Kris yes): `tools/mfr_correlations.py` runs after the indicator pull, writes mfr_sector_corr, mfr_pair_corr, mfr_book_corr, mfr_book_pairs (migration 138), summary view v_mfr_book_corr_summary. About 10 requests. Sector series backfilled one year.
