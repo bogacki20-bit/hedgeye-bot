@@ -276,7 +276,7 @@ def db():
         tvx = {r[0]: r[1:] for r in cur.fetchall()}
         tv = {k: v[:6] for k, v in tvx.items()}
         cur.execute("""SELECT b.symbol, sum(b.market_value), v.price, v.range_low, v.range_high,
-                              v.tv_trade, v.tv_trend, v.tv_trend, v.trend_dir
+                              v.tv_trade, v.tv_trend_long, v.tv_trend_short, v.trend_dir
                        FROM book_positions b LEFT JOIN v_screener v ON v.ticker = b.symbol
                        WHERE b.snapshot_date = (SELECT max(snapshot_date) FROM book_positions)
                          AND b.asset_class <> 'cash' AND b.symbol NOT IN ('BUXX','CLOX','SKYDWS')
@@ -287,7 +287,7 @@ def db():
                               support_strike, spx_last
                        FROM t1a_snapshots ORDER BY report_date DESC LIMIT 1""")
         t1a = cur.fetchone()
-        cur.execute("SELECT ticker, trend_dir, range_pos, price, range_low, range_high, tv_trade, tv_trade, tv_trend, tv_trend FROM v_screener WHERE ticker = ANY(%s)",
+        cur.execute("SELECT ticker, trend_dir, range_pos, price, range_low, range_high, tv_trade, tv_trade, tv_trend_long, tv_trend_short FROM v_screener WHERE ticker = ANY(%s)",
                     (list(COUNTRY_ETF.values()) + list(FX_ETF.values()) + [EM_FX_PROXY],))
         f = lambda x: float(x) if x is not None else None
         scr, scr_lines = {}, {}
@@ -304,7 +304,7 @@ def db():
                                         ELSE b.account_name END, '/') AS accts,
                    sum(b.market_value), sum(b.total_gl_dollar), sum(b.cost_basis),
                    v.price, v.range_low, v.range_high, v.tv_trade, v.tv_trade AS tv_trade2,
-                   v.tv_trend, v.tv_trend AS tv_trend2, v.trend_dir,
+                   v.tv_trend_long AS tv_trend, v.tv_trend_short AS tv_trend2, v.trend_dir,
                    coalesce(t.hedgeye_group, v.hedgeye_group), coalesce(t.hedgeye_bucket_0629, v.hedgeye_bucket_0629),
                    (SELECT side FROM ss_roster_history s WHERE s.ticker = b.symbol AND s.removed_on IS NULL LIMIT 1)
             FROM book_positions b
@@ -316,7 +316,7 @@ def db():
                      v.tv_trend, v.trend_dir, 14, 15""")
         book_full = cur.fetchall()
         cur.execute("""SELECT v.ticker, v.price, v.range_low, v.range_high, v.tv_trade, v.tv_trade AS tv_trade2,
-                              v.tv_trend, v.tv_trend AS tv_trend2, v.trend_dir,
+                              v.tv_trend_long AS tv_trend, v.tv_trend_short AS tv_trend2, v.trend_dir,
                               coalesce(t.hedgeye_group, v.hedgeye_group), coalesce(t.hedgeye_bucket_0629, v.hedgeye_bucket_0629),
                               (SELECT side FROM ss_roster_history s WHERE s.ticker = v.ticker AND s.removed_on IS NULL LIMIT 1)
                        FROM v_screener v LEFT JOIN ticker_tags t ON t.ticker = v.ticker

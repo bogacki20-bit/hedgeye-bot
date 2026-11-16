@@ -225,11 +225,13 @@ def _level_rows() -> list:
     if not held:
         return []
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT ticker, price, tv_trade, tv_trend, tv_basis, tv_bar_date "
+        # card (11/15): a long's Trend is the cloud bottom, a short's the cloud top (89 EMA only without a cloud)
+        cur.execute("SELECT ticker, price, tv_trade, tv_trend_long, tv_trend_short, tv_basis, tv_bar_date "
                     "FROM v_screener WHERE ticker = ANY(%s)", (list(held),))
         got = cur.fetchall()
     rows = []
-    for t, price, trade, trend, basis, bd in got:
+    for t, price, trade, tlong, tshort, basis, bd in got:
+        trend = tshort if held[t] == "short" else tlong
         if trend is None or price is None:
             continue
         rows.append({"ticker": t, "side": held[t], "price": float(price),

@@ -7,7 +7,7 @@ with db_pg.get_conn() as c, c.cursor() as cur:
     cur.execute("""select b.symbol, string_agg(distinct left(b.account_name,4),'/'), sum(b.market_value), sum(b.quantity)
                    from book_positions b where b.snapshot_date=(select max(snapshot_date) from book_positions) and abs(b.market_value)>1 group by 1""")
     book={r[0]:r[1:] for r in cur.fetchall() if r[0] and r[0].isalpha() and len(r[0])<=5}
-    cur.execute("select ticker from ai_short_watch"); AI=[r[0] for r in cur.fetchall()]
+    cur.execute("select ticker from ai_short_watch where active"); AI=[r[0] for r in cur.fetchall()]
     # live Signal Strength roster: latest record per ticker+side decides active vs removed
     cur.execute("""select distinct on (ticker, side) ticker, side, added_on, removed_on from ss_roster_history
                    order by ticker, side, added_on desc""")
@@ -21,7 +21,7 @@ with db_pg.get_conn() as c, c.cursor() as cur:
     STALK_L=[t for t in STALK_L if (t,'long') not in SS_OFF]+sorted(t for t,s in SS_ON if s=='long' and t not in STALK_L)
     STALK_S=[t for t in STALK_S if (t,'short') not in SS_OFF]+sorted(t for t,s in SS_ON if s=='short' and t not in STALK_S)
     allt=sorted(set(SECT+STALK_L+STALK_S+list(book)+AI))
-    cur.execute("select ticker, range_low, range_high, tv_trade, tv_trend, tv_trend, trend_dir, gics_sector from v_screener where ticker = any(%s)",(allt,))
+    cur.execute("select ticker, range_low, range_high, tv_trade, tv_trend_short, tv_trend_long, trend_dir, gics_sector from v_screener where ticker = any(%s)",(allt,))
     lv={r[0]:r[1:] for r in cur.fetchall()}
 from tools.range_structure import structure
 RS=structure(allt)
@@ -41,7 +41,7 @@ for t in allt:
         v20=vo[-21:-1].mean()
         dec= n>=2 and sv[-1]<sv[0] and sv[-1]<v20
         lo,hi,tr,mu,ml,td,sec=(lv.get(t) or (None,)*7); lo,hi,tr,mu,ml=map(f,(lo,hi,tr,mu,ml))
-        p=float(cl[-1]); tn=(mu+ml)/2 if mu and ml else None
+        p=float(cl[-1]); tn=(ml if p>=(mu+ml)/2 else mu) if mu and ml else (ml or mu)   # card: cloud bottom for longs, top for shorts (11/15)
         rp=(p-lo)/(hi-lo) if lo and hi and hi>lo else None
         out[t]=dict(p=p,chg=100*(cl[-1]/cl[-2]-1),streak=dirn*n,vol=[round(x/v20,2) for x in sv],dec=dec,rp=rp,tr=tr,tn=tn,td=td,sec=sec,
                     r5=100*(cl[-1]/cl[-6]-1),r20=100*(cl[-1]/cl[-21]-1))

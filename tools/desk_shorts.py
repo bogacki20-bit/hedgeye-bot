@@ -12,7 +12,7 @@ with db_pg.get_conn() as c, c.cursor() as cur:
     cur.execute("""select symbol, sum(quantity), sum(cost_basis), sum(market_value) from book_positions
                    where snapshot_date=(select max(snapshot_date) from book_positions) and quantity<0 group by 1""")
     shorts={r[0]:tuple(float(x or 0) for x in r[1:]) for r in cur.fetchall()}
-    cur.execute("select ticker, range_low, range_high, tv_trade, tv_trend, tv_trend from v_screener where ticker=any(%s)",(list(shorts),))
+    cur.execute("select ticker, range_low, range_high, tv_trade, tv_trend_short, tv_trend_long from v_screener where ticker=any(%s)",(list(shorts),))
     lv={r[0]:[float(x) if x is not None else None for x in r[1:]] for r in cur.fetchall()}
     cur.execute("""select distinct on (ticker, side) ticker, side, removed_on from ss_roster_history
                    where ticker=any(%s) order by ticker, side, added_on desc""",(list(shorts),))
@@ -40,7 +40,7 @@ for t,(q,cb,mv) in shorts.items():
     q=abs(q); avg=cb/q if q else 0
     p,prev=px.get(t,(abs(mv)/q if q else 0, None))
     lo,hi,tr,mu,ml=(lv.get(t) or [None]*5)
-    tn=(mu+ml)/2 if mu and ml else None
+    tn=mu or ml   # card: a short's Trend is the cloud TOP (11/15)
     rp=(p-lo)/(hi-lo) if lo and hi and hi>lo else None
     pnl=100*(avg/p-1) if p else 0
     c3=avg*0.97
