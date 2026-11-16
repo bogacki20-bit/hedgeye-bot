@@ -83,8 +83,24 @@ def parse_update_email(body: str) -> list[dict]:
     """The all-sector 'Position Monitors Update': walk the text, tracking
     the current sector heading; each TKR: move emits one event."""
     rows = []
-    # bound the region: changes run from 'Changes from' to the disclaimer
-    m = re.search(r"Changes\s+from[^:]*:?(.*)$", body, re.I | re.S)
+    # 11/16/2026: Hedgeye switched to "TKR : moving from <old tier> to <new tier>"; _MOVE_RE reads the
+    # first tier after the verb, so it stored the OLD tier (e.g. BTI Top Idea instead of Active Long).
+    # Rewrite to the older "moving to <new> from <old>" order before matching.
+    _tier = r"(?:Top\s+Idea|Best\s+Idea|Active)\s+(?:Long|Short)|(?:Long|Short)\s+Bench"
+    body = re.sub(rf"moving\s+from\s+({_tier})\s+to\s+({_tier})", r"moving to \2 from \1", body, flags=re.I)
+    # "moving from <tier> to Neutral" = off the monitor -> treat as removed from <tier>
+    body = re.sub(rf"moving\s+from\s+({_tier})\s+to\s+Neutral", r"removing from \1", body, flags=re.I)
+    # older wordings for going off the monitor: "moving to Neutral from <tier>", "adding to Neutral"
+    body = re.sub(rf"moving\s+to\s+Neutral\s+from\s+({_tier})", r"removing from \1", body, flags=re.I)
+    body = re.sub(r"adding\s+to\s+Neutral\b", "removing from", body, flags=re.I)
+    # "moving from Neutral to <tier>" = new to the monitor (Oct emails: PK, WYNN, FLUT ... stored 'unknown')
+    body = re.sub(rf"moving\s+from\s+Neutral\s+to\s+({_tier})", r"adding to \1", body, flags=re.I)
+    # Sept emails: "TKR : elevating to Active Long from Long Bench" (same order as "moving to X from Y")
+    body = re.sub(r"\belevating\s+to\b", "moving to", body, flags=re.I)
+    # bound the region: changes run from 'Changes from <date>' to the disclaimer. The old pattern
+    # ("Changes from[^:]*") swallowed the first sector header (11/16: Communications -> 'unknown').
+    m = (re.search(r"Changes\s+from\s+[\d./-]+\s*:?(.*)$", body, re.I | re.S)
+         or re.search(r"Changes\s+from[^:]*:?(.*)$", body, re.I | re.S))
     seg = m.group(1) if m else body
     sector = "unknown"
     pos = 0
