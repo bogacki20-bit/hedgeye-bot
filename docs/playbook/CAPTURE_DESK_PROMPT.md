@@ -171,7 +171,7 @@ After each capture block, post one line in this chat:
 Otherwise message me only when a feed breaks, comes back, or needs me (for example, a sign-in).
 
 PACE LIKE A HUMAN
-Hedgeye and SpotGamma must never see bot-like traffic.
+Hedgeye must never see bot-like traffic. (SpotGamma: one page at a time, at the pace in section E.)
 - One page or download at a time; never run fetches in parallel.
 - Wait 20-40 seconds (randomized) between portal requests.
 - No more than 25 report fetches per 30 minutes, and no bulk search sweeps.
