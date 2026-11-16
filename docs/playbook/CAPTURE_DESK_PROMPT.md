@@ -53,9 +53,9 @@ D. Tier 1 Alpha Market Situation Report (all pages).
 E. SpotGamma: Founder's Note, index levels, equity hub, tilt, and anything else on the dashboard I subscribe to.
 
 F. Trade/Trend levels and ranges for the last close: every name in the bot AND the global macro list (47 countries' index, 10Y yield and currency from tools/macro_symbols.py; oil, nat gas, copper, gold, silver; Bitcoin and ETH; VIX and MOVE). The desk reads the whole market from this, so a miss on a country or yield matters as much as a miss on a stock.
-- MFR (section J) now carries the same Trade line (Vola2vola) and Trend cloud for ~1,000 names, matched to TradingView to the cent.
-- Until I rule on switching the line source, keep running the TradingView capture as today (docs/TV_LEVELS.md).
-- After I switch, TradingView covers only what MFR can't: futures, the foreign 10Y yields, and names not in MFR.
+- I switched the line source on 11/15: the bot reads Trade (Vola2vola) and the Trend cloud from MFR first (section J), TradingView second. The newest bar wins; a tie goes to MFR (view v_line_source).
+- Keep running the TradingView capture in full as today (docs/TV_LEVELS.md). It is the backup, it covers what MFR can't (futures, the foreign 10Y yields, index codes, FX, names not in MFR), and it still feeds the TradingView ranges and closes other tools read. Don't shrink it until the desk tells you every reader is off it.
+- If the nightly MFR indicators job misses, the lines fall back to TradingView on their own. Report it in feed_health either way.
 
 G. Sundays: the quad dashboard, the weekly quad forecast, the Big Theme update.
 

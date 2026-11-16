@@ -337,6 +337,8 @@ From the platform's signals feed (ticker page, Elite) and MFR's own API docs (`?
 - Futures (`_F`) return no indicators (MFR documents this). Their ranges still come from the REST sync.
 - MCP gives London names the current bar (11/13 for COCO.L); the one-day lag is only on the website chart legend.
 - Scorecard: `py -m tools.mfr_signal_scorecard [--since 2024-11-01]` writes data/reviews/mfr_signals_<date>.md: hit%, average and edge vs base rate at 5/10/21 days, split by trend state. Tracking only until Kris rules.
+- First scorecard (11/15, bars since 11/1/2025, ~140k events, data/reviews/mfr_signals_2026-11-16.md): only two reads beat the base rate at 21 days, both by trend state. BS buy below the band: n 10,370, 61.5% up, edge +1.4%. BS sell above the band: n 8,438, edge +1.1% (a trim-strength read, most still rose). BS buy inside/above the band lost (-3% to -14% edge). WVF hot, vola calm/stress, momentum extremes and monthly-pivot crosses are within ±1% of base: noise. BTFD fired 7 times, too few. Re-run monthly.
+- **Line source since 11/15 (Kris "Yes, switch it"):** the card's Trade and Trend cloud read MFR first, TradingView second, via view `v_line_source` (migration 140): newest bar wins, tie to MFR; MFR's `USD` row is the 2x semis ETF and is keyed USD_SEMI to match tv_levels. Readers: v_screener (adds `line_source`), level_lines lookup (labels "(MFR)"/"(TV)"), desk_snapshot reviewer pack. Before/after on 801 screener rows: 702 MFR, 92 TV; Trade within 0.1% on 781 of 787; it fixed USD's cloud, which had read the dollar index.
 
 ## Correlation tools (found 11/15, no ticker cost)
 

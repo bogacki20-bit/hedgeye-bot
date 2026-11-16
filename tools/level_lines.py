@@ -1,7 +1,11 @@
 """Trade / Trend lines.
 
-    TRADE = Vola2vola Trade line, from tv_levels.vola_b (Kris, 11/5/2026)
-    TREND = 89-day EMA of the daily close (Kris, 11/2/2026)
+    TRADE = Vola2vola Trade line (Kris, 11/5/2026)
+    TREND = the yellow MFR Trend cloud: bottom for longs, top for shorts (Kris, 11/9/2026)
+
+Line source (Kris, 11/15/2026): MFR first (mfr_indicators: vola_trade, trend_bear = cloud bottom,
+trend_bull = cloud top), TradingView (tv_levels) as the backup, via the v_line_source view (migration
+140): the newest bar wins, a tie goes to MFR.
 
 The 34-day EMA is stored too and is the Trade fallback when a name has no Vola
 bar from the last 5 days. EMAs are stored nightly in level_lines; v_screener
@@ -30,7 +34,8 @@ TRADE_SPAN = 34
 TREND_SPAN = 89
 MIN_BARS = 150           # enough for the 89-day EMA to settle
 ALPHA_MAX_AGE = 5        # days an Alpha Code stays current
-TT_MAX_AGE = 35          # the Trend & Tail email is monthly
+TT_MAX_AGE = 35          # the Trend & Tail email is monthly (Tail still read this long)
+KEITH_TREND_MAX_AGE = 7  # Kris 11/14: Keith's numbers win for one week, then the cloud does
 VOLA_MAX_AGE = 5         # days a Vola Trade bar stays current
 PROXY = {"SCHA": "IWM", "VTWO": "IWM"}
 SYMBOL_OVERRIDE = {"USD": "USD"}             # the 2x semis ETF we hold, not the dollar index
@@ -170,18 +175,28 @@ def load_trend_tail() -> int:
                          for r in parse_trend_tail(row[1])])
 
 
-def pick_level(kind: str, alpha, tt, ema, macro: bool, vola=None) -> tuple:
+def pick_level(kind: str, alpha, tt, ema, macro: bool, vola=None, vola_src=None) -> tuple:
     """Pure: (level, source, trust) for 'trade' or 'trend'."""
     if alpha is not None:
         return alpha, "Keith Alpha Code", "his number"
     if kind == "trend" and tt is not None:
         return tt, "Keith Trend & Tail email", "his number"
     if kind == "trade" and vola is not None:
-        return vola, "Vola2vola Trade", "Kris's line; use the 2% buffer"
+        return vola, f"Vola2vola Trade ({vola_src})" if vola_src else "Vola2vola Trade", "Kris's line; use the 2% buffer"
     if ema is None:
         return None, "no data", "none"
     trust = "good, usually within 1% of Keith" if macro else "rough, thin test on stocks; use the 2% buffer"
     return ema, f"{TRADE_SPAN if kind == 'trade' else TREND_SPAN}-day EMA", trust
+
+
+def side_trends(picked: tuple, cloud: tuple | None, src: str | None = None) -> tuple[tuple, tuple]:
+    """Pure: (long Trend, short Trend). Keith's number wins; otherwise the yellow MFR cloud
+    (Kris, 11/9/2026): bottom for longs, top for shorts. EMA 89 only if there's no cloud."""
+    if picked[1].startswith("Keith") or cloud is None:
+        return picked, picked
+    upper, lower = cloud
+    tag = f" ({src})" if src else ""
+    return (lower, f"Yellow cloud bottom{tag}", "Kris's line"), (upper, f"Yellow cloud top{tag}", "Kris's line")
 
 
 def lookup(tickers: list[str]) -> dict:
@@ -202,31 +217,76 @@ def lookup(tickers: list[str]) -> dict:
             cur.execute("SELECT trend, tail, as_of FROM keith_levels WHERE ticker=%s AND source='trend_tail' "
                         "AND as_of >= %s ORDER BY as_of DESC LIMIT 1", (src, today - dt.timedelta(days=TT_MAX_AGE)))
             tt = cur.fetchone()
-            cur.execute("SELECT ema34, ema89, bar_date FROM level_lines WHERE ticker=%s "
-                        "ORDER BY bar_date DESC LIMIT 1", (t,))
+            cur.execute("SELECT ema34, ema89, bar_date, bar_close FROM level_lines WHERE ticker=%s "
+                        "ORDER BY bar_date DESC LIMIT 1", (src,))
             ll = cur.fetchone()
             cur.execute("SELECT range_low, range_high, bias, week_of FROM hedgeye_etf_pro_ranges WHERE ticker=%s "
                         "ORDER BY week_of DESC LIMIT 1", (src,))
             ep = cur.fetchone()
-            cur.execute("SELECT vola_b FROM tv_levels WHERE ticker=%s AND bar_date >= %s AND vola_b IS NOT NULL "
-                        "ORDER BY bar_date DESC LIMIT 1",
-                        (TV_KEY.get(t, t), today - dt.timedelta(days=VOLA_MAX_AGE)))
-            vb = cur.fetchone()
+            cur.execute("SELECT trade, cloud_upper, cloud_lower, bar_date, src FROM v_line_source WHERE key=%s",
+                        (TV_KEY.get(src, src),))
+            ls = cur.fetchone()
+            vb = ls if ls and ls[0] is not None and ls[3] >= today - dt.timedelta(days=VOLA_MAX_AGE) else None
             cur.execute("SELECT buy_trade, sell_trade, trend, signal_date FROM hedgeye_risk_ranges "
                         "WHERE ticker=%s AND buy_trade IS NOT NULL ORDER BY signal_date DESC LIMIT 1", (src,))
             rr = cur.fetchone() if t != "USD" else None      # his USD range is the dollar index
             g = lambda x: float(x) if x is not None else None
-            cur.execute("SELECT 1 FROM tv_levels WHERE ticker=%s AND tv_symbol !~ '^(BATS|OTC|NYSE|NASDAQ|AMEX)' LIMIT 1", (t,))
+            cur.execute("SELECT 1 FROM tv_levels WHERE ticker=%s AND tv_symbol !~ '^(BATS|OTC|NYSE|NASDAQ|AMEX)' LIMIT 1", (src,))
             macro = bool(cur.fetchone()) or tt is not None or ep is not None
             trade = pick_level("trade", g(a_tr[0]) if a_tr else None, None, g(ll[0]) if ll else None, macro,
-                               vola=g(vb[0]) if vb else None)
-            trend = pick_level("trend", g(a_tn[0]) if a_tn else None, g(tt[0]) if tt else None,
+                               vola=g(vb[0]) if vb else None, vola_src=vb[4] if vb else None)
+            tt_fresh = tt is not None and tt[2] >= today - dt.timedelta(days=KEITH_TREND_MAX_AGE)
+            trend = pick_level("trend", g(a_tn[0]) if a_tn else None, g(tt[0]) if tt_fresh else None,
                                g(ll[1]) if ll else None, macro)
+            fresh_cloud = ls and ls[1] is not None and ls[2] is not None and ls[3] >= today - dt.timedelta(days=VOLA_MAX_AGE)
+            cloud = (g(ls[1]), g(ls[2])) if fresh_cloud else None
+            trend_long, trend_short = side_trends(trend, cloud, ls[4] if fresh_cloud else None)
+            cur.execute("SELECT price FROM mfr_snapshots WHERE ticker=%s AND price IS NOT NULL "
+                        "ORDER BY snapshot_date DESC LIMIT 1", (src,))
+            px = cur.fetchone()
+            close = g(px[0]) if px else (g(ll[3]) if ll else None)
+            if cloud and not trend[1].startswith("Keith"):
+                trend = trend_long if close is not None and close >= sum(cloud) / 2 else trend_short
             out[t] = {"proxy": src if src != t else None, "trade": trade, "trend": trend,
+                      "trend_long": trend_long, "trend_short": trend_short,
                       "tail": g(tt[1]) if tt else None, "bar": ll[2] if ll else None,
                       "etf_pro": (g(ep[0]), g(ep[1]), ep[2], ep[3]) if ep else None,
                       "risk_range": (g(rr[0]), g(rr[1]), rr[2], rr[3]) if rr else None}
+            if src != t:
+                # Kris 11/14: a proxied ETF is read on the proxy alone. Every proxy line is scaled into the
+                # ETF's price by the same-bar close ratio, which equals comparing the proxy's price to its own lines.
+                # Same-bar closes: TradingView first, then the Yahoo closes in level_lines (11/15: the TV run
+                # may stop covering names MFR has).
+                cur.execute("SELECT a.bar_close / b.bar_close, a.bar_date FROM tv_levels a JOIN tv_levels b "
+                            "ON b.bar_date = a.bar_date AND b.ticker = %s WHERE a.ticker = %s "
+                            "AND a.bar_close IS NOT NULL AND b.bar_close IS NOT NULL AND a.bar_date >= %s "
+                            "ORDER BY a.bar_date DESC LIMIT 1",
+                            (TV_KEY.get(src, src), TV_KEY.get(t, t), today - dt.timedelta(days=VOLA_MAX_AGE)))
+                rt = cur.fetchone()
+                if not rt:
+                    cur.execute("SELECT a.bar_close / b.bar_close, a.bar_date FROM level_lines a JOIN level_lines b "
+                                "ON b.bar_date = a.bar_date AND b.ticker = %s WHERE a.ticker = %s "
+                                "AND a.bar_close IS NOT NULL AND b.bar_close IS NOT NULL ORDER BY a.bar_date DESC LIMIT 1",
+                                (src, t))
+                    rt = cur.fetchone()
+                out[t] = _scale(out[t], float(rt[0]), rt[1]) if rt else out[t]
     return out
+
+
+def _scale(d: dict, r: float, on) -> dict:
+    """Scale a proxy's levels into the proxied ETF's price (ratio r = ETF close / proxy close on bar `on`)."""
+    sc = lambda x: x * r if isinstance(x, (int, float)) else x
+    lvl = lambda v: (sc(v[0]),) + tuple(v[1:]) if v else v
+    d = dict(d)
+    for k in ("trade", "trend", "trend_long", "trend_short"):
+        d[k] = lvl(d[k])
+    d["tail"] = sc(d["tail"])
+    if d["etf_pro"]:
+        d["etf_pro"] = (sc(d["etf_pro"][0]), sc(d["etf_pro"][1])) + tuple(d["etf_pro"][2:])
+    if d["risk_range"]:
+        d["risk_range"] = (sc(d["risk_range"][0]), sc(d["risk_range"][1]), d["risk_range"][2], d["risk_range"][3])
+    d["proxy_ratio"] = (round(r, 6), on)
+    return d
 
 
 def _cli() -> int:
@@ -246,7 +306,10 @@ def _cli() -> int:
     else:
         for t, r in lookup([x.upper() for x in a.lookup]).items():
             fmt = lambda x: f"{x[0]:,.2f} ({x[1]}; {x[2]})" if x[0] is not None else "none"
-            print(f"{t}{' via ' + r['proxy'] if r['proxy'] else ''}: TRADE {fmt(r['trade'])} · TREND {fmt(r['trend'])}"
+            # 11/14 trap (weekend dry run): one "TREND" printed the cloud TOP for longs. The card uses
+            # the BOTTOM edge for longs and the TOP edge for shorts, so print both, labelled by side.
+            print(f"{t}{' via ' + r['proxy'] if r['proxy'] else ''}: TRADE {fmt(r['trade'])} · "
+                  f"TREND for LONGS {fmt(r['trend_long'])} · TREND for SHORTS {fmt(r['trend_short'])}"
                   + (f" · TAIL {r['tail']:,.2f}" if r["tail"] else "")
                   + (f" · ETF Pro {r['etf_pro'][0] or 0:g}-{r['etf_pro'][1] or 0:g} {r['etf_pro'][2]} ({r['etf_pro'][3]})" if r["etf_pro"] else "")
                   + (f" · Risk Range {r['risk_range'][0]:g}-{r['risk_range'][1]:g} {r['risk_range'][2]} ({r['risk_range'][3]})" if r["risk_range"] else "")

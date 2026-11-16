@@ -16,6 +16,16 @@ Brent 97/91 matched neither. **Bearish is an untested mirror**: cards show
 Neither value is in MFR's API (the API has only the short/long-term ranges = the
 blue/pink "Ranges" lines). Both are read from TradingView in **Kris's Chrome**.
 
+## Line source: MFR first since 11/15/2026
+
+Kris switched the Trade / Trend-cloud source to MFR (`mfr_indicators`), with TradingView as the backup.
+View `v_line_source` (migration 140) picks per ticker the newest bar of either; a tie goes to MFR.
+`v_screener` (tv_trade, tv_mfr_upper/lower, tv_vola_b, new `line_source`), `tools/level_lines.py lookup`
+and the reviewer pack read it. Checked 11/15: Trade within 0.1% on 691 of 697 names, cloud 729 of 732.
+The TradingView run stays full: it's the backup, the only source for futures / foreign yields / FX /
+index codes and ~38 stocks MFR lacks, and it still feeds tv_levels ranges and closes
+(morning_brief, country_quads, macro_sunday, weekly_scorecard read tv_levels directly).
+
 ## Where it shows up
 `v_screener.tv_trade / tv_trend / tv_basis` (migration 117), so every screen gets it:
 MARKET / MARKET FULL / MARKET <ETF> (`TRD x TND y` on every line), SCREEN rows,
@@ -53,3 +63,19 @@ Yahoo quote and MFR's snapshot, and range_pos is recomputed from it. MARKET also
 pulls fresh quotes for every name it prints (corpus-first), prints `@HH:MM` ET,
 and flags `⚠stale-px` (failed quote / unchanged vs last run while the sector ETF
 moved ≥0.10% / dead feed 3+ sessions). Stale names never enter ZONES.
+
+## Ranges second pass (11/11/2026)
+MFR Range stopped landing on 11/9 (bar 11/9: 60 of 935 rows had ranges; bar 11/10: 93 of 904).
+Cause: in the long-lived capture tab the study sat in status 1 (computing, 0 rows) on every
+symbol. In a **freshly loaded** chart tab it computed normally (ABNB: 400 rows, 4 lines,
+status 2), so it is not an access problem. tv_levels.js now waits only ~3 s for ranges in
+the main pass, so every night needs a second pass:
+1. After the main pass is ingested, reload the chart tab (or open the layout in a new tab;
+   never save the layout). Re-inject tools/tv_levels.js.
+2. `py -m tools.tv_levels --range-pairs` -> names with band_source 'tv'/null and no range
+   on the latest bar, book names first.
+3. `__tvStart(pairs, {rangesOnly: true, waitK: 75})` (30 s range wait per symbol;
+   about 20-30 s each, so ~120 names = ~50 min). Collect with `__tvPeek` as usual.
+4. `py -m tools.tv_levels --ingest-ranges <file>.jsonl` fills range_* only and never
+   touches TRADE/TREND (plain `--ingest` would null them on ranges-only rows).
+`py -m tools.feed_health` now has a "TradingView MFR ranges" line (STALE under 80%).
