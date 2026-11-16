@@ -56,6 +56,7 @@ E. SpotGamma: everything my plan (Essential) shows. There is no API; capture it 
   2. Paste tools/sg_tape_capture.js into the javascript tool and click its green "SG TAPE SAVE" button. It downloads Downloads\sg_tape_<date>_<time>.json.
   3. Run: railway run py -m tools.sg_tape --ingest-downloads
   In market hours, time your sleeps to the next quarter hour. feed_health must show "SpotGamma tape" ok, and the newest read must be under 30 minutes old.
+- THE SESSION'S LEVELS, EVERY MARKET MORNING by 9:15 AM ET: open dashboard.spotgamma.com/home, run (0, eval)(localStorage.getItem('__sgcap')) (or paste tools/sg_page_capture.js), click "SG PAGE SAVE", then railway run py -m tools.sg_pages --ingest-downloads. The desk's step size depends on it (rule card 11/15: SPX vs SpotGamma's Volatility Trigger), so check railway run py -m tools.sg_pages --gamma shows the new levels date before 9:30.
 - THE WHOLE DASHBOARD, ONCE A DAY after the close (~4:30 PM ET), in one run. Keep the tab in front while it runs.
   1. In any SpotGamma tab, paste tools/sg_page_capture.js once per session; it stores itself in the browser.
   2. Run railway run py -m tools.sg_pages --book-syms and paste the line it prints (window.__sgDailySyms = [...]) into the javascript tool.

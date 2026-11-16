@@ -350,6 +350,49 @@ def book_syms() -> list[str]:
         return [r[0] for r in cur.fetchall() if r[0].isalpha() and len(r[0]) <= 5]
 
 
+GAMMA_YF = {"SPX": "^GSPC", "SPY": "SPY", "NDX": "^NDX", "QQQ": "QQQ", "RUT": "^RUT", "IWM": "IWM"}
+
+
+def gamma() -> str:
+    """Rule card (Kris 11/15): SPX vs SpotGamma's Volatility Trigger sets the step size; put wall is not a floor;
+    call wall = index-ETF trim zone; all levels join the backboard. Live price vs the latest sg_index_daily row."""
+    import db_pg
+    import yfinance as yf
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT ON (sym) sym, trade_date, vol_trigger, zero_gamma, call_wall, put_wall, "
+                    "l1, l2, l3, l4, c1, c2, c3, c4, upx FROM sg_index_daily ORDER BY sym, trade_date DESC")
+        rows = {r[0]: r[1:] for r in cur.fetchall()}
+    if "SPX" not in rows:
+        return "no SpotGamma index levels yet (capture desk: daily run)"
+    live = {}
+    for sym, t in GAMMA_YF.items():
+        try:
+            live[sym] = float(yf.Ticker(t).fast_info["last_price"])
+        except Exception:  # noqa: BLE001 - fall back to SpotGamma's own reference price
+            live[sym] = float(rows[sym][-1]) if sym in rows and rows[sym][-1] else None
+    f = lambda x: f"{float(x):,.0f}" if x is not None and abs(float(x)) >= 1000 else (f"{float(x):,.2f}" if x is not None else "-")
+    out = []
+    for sym in ("SPX", "SPY", "NDX", "QQQ", "RUT", "IWM"):
+        if sym not in rows:
+            continue
+        td, vt, zg, cw, pw, l1, l2, l3, l4, c1, c2, c3, c4, upx = rows[sym]
+        px = live.get(sym)
+        reg = "NEG" if px is not None and vt is not None and px < float(vt) else "POS"
+        flags = []
+        if px is not None and pw is not None and px <= float(pw):
+            flags.append("AT/BELOW PUT WALL: reload waits until back above")
+        if px is not None and cw is not None and 0 <= float(cw) / px - 1 <= 0.01:
+            flags.append("within 1% under CALL WALL: index-ETF trims 50 bp")
+        out.append(f"{sym} {f(px)} | gamma {reg} (VT {f(vt)}, zero {f(zg)}) | call wall {f(cw)} | put wall {f(pw)} | "
+                   f"LG {f(l1)}/{f(l2)}/{f(l3)}/{f(l4)} | combo {f(c1)}/{f(c2)}/{f(c3)}/{f(c4)} | levels from {td}"
+                   + ("".join(" | " + x for x in flags)))
+    spx = rows["SPX"]
+    reg = "neg" if live.get("SPX") is not None and live["SPX"] < float(spx[1]) else "pos"
+    out.insert(0, f"Gamma: {reg} (SPX {f(live.get('SPX'))} vs VT {f(spx[1])})" +
+               ("  -> half-size steps on new positions and adds" if reg == "neg" else "  -> normal steps; RANGE setup"))
+    return "\n".join(out)
+
+
 def status() -> str:
     import db_pg
     with db_pg.get_conn() as conn, conn.cursor() as cur:
@@ -372,12 +415,15 @@ def _cli() -> int:
     g.add_argument("--ingest-downloads", action="store_true")
     g.add_argument("--status", action="store_true")
     g.add_argument("--book-syms", action="store_true")
+    g.add_argument("--gamma", action="store_true")
     a = ap.parse_args()
     if a.ingest:
         print(ingest(a.ingest))
     elif a.ingest_downloads:
         for r in ingest_downloads():
             print(r)
+    elif a.gamma:
+        print(gamma())
     elif a.book_syms:
         print("window.__sgDailySyms = " + json.dumps(book_syms()) + ";")
     else:
