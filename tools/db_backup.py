@@ -11,8 +11,9 @@ What a backup is (one folder per run, G:\\My Drive\\Hedgeye Backups\\db_<YYYYMMD
   schema.json      sequences, tables (columns, types, defaults, NOT NULL), constraints, indexes, views (in order)
   data\\<table>.csv.gz   every table, CSV with header, taken in ONE read-only repeatable-read snapshot
   manifest.json    row count per table, sizes, server version, finished_at
-No pg_dump needed (it isn't installed and would have to match server 18). Retention: the last 7 backups, plus the
-newest backup of each of the last 4 weeks. The folder holds everything in the bot (book, account names, research):
+No pg_dump needed (it isn't installed and would have to match server 18). Retention (only with --prune; off by
+default because deleting files needs Kris's yes): the last 7 backups, plus the newest of each of the last 4 weeks.
+Each backup is ~0.6 GB; Drive had 271 GB free on 11/15. The folder holds everything in the bot (book, account names, research):
 keep "Hedgeye Backups" private and unshared, and never point an outside model at it.
 """
 from __future__ import annotations
@@ -257,6 +258,8 @@ def _cli() -> int:
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--restore")
     ap.add_argument("--dsn")
+    ap.add_argument("--prune", action="store_true",
+                    help="delete backups beyond 7 nightly + 4 weekly (off by default: deleting files needs Kris's yes)")
     ap.add_argument("--test-restore", nargs="?", const="latest",
                     help="prove a backup restores: rebuild it in a throwaway schema on the live server, then roll back")
     a = ap.parse_args()
@@ -284,7 +287,7 @@ def _cli() -> int:
         return 0 if ok else 1
     folder = backup(a.dest)
     ok, bad = verify(folder)
-    gone = prune(a.dest)
+    gone = prune(a.dest) if a.prune else []
     with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
         m = json.load(fh)
     print(f"backup {os.path.basename(folder)}: {m['tables']} tables, {sum(m['rows'].values()):,} rows, {m['total_mb']:,} MB, "
