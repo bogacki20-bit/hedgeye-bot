@@ -13,6 +13,7 @@ No LLM calls, read-only.
 from __future__ import annotations
 
 import argparse
+import os
 import datetime as dt
 import pathlib
 import re
@@ -180,6 +181,22 @@ def check(now: dt.datetime | None = None) -> list[dict]:
     except Exception as e:
         out.append({"label": "Full-report capture backlog", "src": "Hedgeye", "last": None,
                     "lag": None, "ok": False, "err": str(e)[:80]})
+    # 11/15 (Kris "everything ... recoverable"): nightly full database backup to the private Drive folder
+    # (tools/db_backup.py, capture desk evening block). Older than ~36 h = missed a night.
+    try:
+        from tools.db_backup import backups, DEFAULT_DIR
+        bl = backups(DEFAULT_DIR)
+        if bl:
+            stamp = dt.datetime.strptime(os.path.basename(bl[-1])[3:16], "%Y%m%d_%H%M")
+            age_h = (now.replace(tzinfo=None) - stamp).total_seconds() / 3600
+            out.append({"label": "Database backup (Drive)", "src": "Railway DB", "last": f"{stamp:%m/%d %H:%M}, {age_h:.0f} h old",
+                        "lag": round(age_h / 24, 1), "ok": age_h <= 36})
+        else:
+            out.append({"label": "Database backup (Drive)", "src": "Railway DB", "last": None, "lag": None, "ok": False,
+                        "err": "no backup in " + DEFAULT_DIR})
+    except Exception as e:  # noqa: BLE001
+        out.append({"label": "Database backup (Drive)", "src": "Railway DB", "last": None, "lag": None, "ok": False,
+                    "err": str(e)[:80]})
     out.extend(_capture_desk_checks(now))
     out.extend(_content_checks())
     return out
