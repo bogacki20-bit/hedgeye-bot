@@ -15,6 +15,14 @@ Events (flag = 1 on the bar, flips = state change vs the prior bar):
   mx_wvf_hot  : Matrix volatility spike                        buy-type (capitulation read)
   mom1_low / mom1_high : short momentum p1 <= -2 / >= +2       buy-type / sell-type (stretched)
   cross_up_tm / cross_dn_tm : close crosses the monthly pivot  buy-type / sell-type
+Momentum (Kris 11/15 "score them"; MOMENTUM p1/p2/p3 = 10/30/90-day stretch scores), entry days only:
+  momK_lo / momK_hi : pK crosses below its 5th / above its 95th percentile (all tickers, all bars)
+                      buy-type / sell-type (stretched, mean-reversion read)
+  momK_up0 / momK_dn0 : pK crosses above / below zero         buy-type / sell-type (momentum turns)
+  mom_all_up / mom_all_dn : first day all three are > 0 / < 0  buy-type / sell-type
+  sig_bull / sig_bear / sig_danger : the daily MFR snapshot momentum signal flips to momentumBullish /
+                      momentumBearish / momentumNeutralDanger (mfr_snapshots, history from 5/2026 only)
+                      buy-type / sell-type / sell-type
 
 Usage: py -m tools.mfr_signal_scorecard [--since 2024-11-01] [--out data/reviews/mfr_signals_<date>.md]
 Read-only on the database. Futures (_F) have no indicators and are skipped.
@@ -29,8 +37,11 @@ from datetime import date
 import pandas as pd
 
 HORIZONS = (5, 10, 21)
-BUY = {"bs_buy", "bs_mega_buy", "btfd_buy", "vola_calm", "mx_wvf_hot", "mom1_low", "cross_up_tm"}
-SELL = {"bs_sell", "bs_mega_sell", "vola_stress", "mom1_high", "cross_dn_tm"}
+MOM = ("mom_p1", "mom_p2", "mom_p3")
+BUY = {"bs_buy", "bs_mega_buy", "btfd_buy", "vola_calm", "mx_wvf_hot", "mom1_low", "cross_up_tm",
+       "mom1_lo", "mom2_lo", "mom3_lo", "mom1_up0", "mom2_up0", "mom3_up0", "mom_all_up", "sig_bull"}
+SELL = {"bs_sell", "bs_mega_sell", "vola_stress", "mom1_high", "cross_dn_tm",
+        "mom1_hi", "mom2_hi", "mom3_hi", "mom1_dn0", "mom2_dn0", "mom3_dn0", "mom_all_dn", "sig_bear", "sig_danger"}
 
 
 def load_indicators(since: str) -> pd.DataFrame:
@@ -40,10 +51,15 @@ def load_indicators(since: str) -> pd.DataFrame:
     conn = psycopg2.connect(os.environ.get("DATABASE_PUBLIC_URL") or db_pg._resolve_dsn())
     df = pd.read_sql(
         "SELECT ticker, bar_date, vola_bear, trend_bull, trend_bear, tm_open, bs_buy, bs_mega_buy, "
-        "bs_sell, bs_mega_sell, btfd_buy, mx_wvf_hot, mom_p1 FROM mfr_indicators "
+        "bs_sell, bs_mega_sell, btfd_buy, mx_wvf_hot, mom_p1, mom_p2, mom_p3 FROM mfr_indicators "
         "WHERE bar_date >= %s AND ticker NOT LIKE '%%\\_F' ORDER BY ticker, bar_date", conn, params=[since])
+    sig = pd.read_sql("SELECT ticker, snapshot_date AS bar_date, momentum_signal FROM mfr_snapshots "
+                      "WHERE snapshot_date >= %s AND momentum_signal IS NOT NULL", conn, params=[since])
     conn.close()
     df["bar_date"] = pd.to_datetime(df["bar_date"])
+    sig["bar_date"] = pd.to_datetime(sig["bar_date"])
+    df = df.merge(sig, on=["ticker", "bar_date"], how="left")
+    df.attrs["mom_q"] = {c: (float(df[c].quantile(0.05)), float(df[c].quantile(0.95))) for c in MOM}
     return df
 
 
@@ -66,8 +82,17 @@ def load_closes(tickers: list[str], since: str) -> pd.DataFrame:
     return out
 
 
+def _cross_below(x: pd.Series, lvl: float) -> pd.Series:
+    return (x.shift(1) >= lvl) & (x < lvl)
+
+
+def _cross_above(x: pd.Series, lvl: float) -> pd.Series:
+    return (x.shift(1) <= lvl) & (x > lvl)
+
+
 def build(df: pd.DataFrame, closes: pd.DataFrame) -> pd.DataFrame:
     rows = []
+    q = df.attrs.get("mom_q", {})
     for tk, g in df.groupby("ticker"):
         if tk not in closes.columns:
             continue
@@ -96,6 +121,24 @@ def build(df: pd.DataFrame, closes: pd.DataFrame) -> pd.DataFrame:
             "cross_up_tm": (prev_close <= prev_tm) & (g["close"] > g["tm_open"]),
             "cross_dn_tm": (prev_close >= prev_tm) & (g["close"] < g["tm_open"]),
         }
+        for k, col in enumerate(MOM, 1):
+            lo, hi = q.get(col, (None, None))
+            if lo is not None:
+                ev[f"mom{k}_lo"] = _cross_below(g[col], lo)
+                ev[f"mom{k}_hi"] = _cross_above(g[col], hi)
+            ev[f"mom{k}_up0"] = _cross_above(g[col], 0)
+            ev[f"mom{k}_dn0"] = _cross_below(g[col], 0)
+        all_up = (g[list(MOM)] > 0).all(axis=1) & g[list(MOM)].notna().all(axis=1)
+        all_dn = (g[list(MOM)] < 0).all(axis=1) & g[list(MOM)].notna().all(axis=1)
+        ev["mom_all_up"] = all_up & ~all_up.shift(1, fill_value=True)
+        ev["mom_all_dn"] = all_dn & ~all_dn.shift(1, fill_value=True)
+        if "momentum_signal" in g:
+            ms = g["momentum_signal"]
+            prev_ms = ms.ffill().shift(1)
+            new = ms.notna() & prev_ms.notna() & (ms != prev_ms)
+            ev["sig_bull"] = new & (ms == "momentumBullish")
+            ev["sig_bear"] = new & (ms == "momentumBearish")
+            ev["sig_danger"] = new & (ms == "momentumNeutralDanger")
         base = g[[f"f{h}" for h in HORIZONS]].mean()
         for name, mask in ev.items():
             sub = g[mask.fillna(False)]
@@ -151,6 +194,10 @@ def main():
                 f"{len(ev)} events. Tracking only (Kris 11/15): nothing here is on the card.\n\n")
         f.write("hit% = moved the signal's way; avg = mean move the signal's way; edge = avg minus the same "
                 "tickers' all-day base rate. Horizons in trading days. trend = vs the MFR Trend band on the event day.\n\n")
+        qs = df.attrs.get("mom_q", {})
+        if qs:
+            f.write("Momentum 5th/95th percentile cut-offs: " + ", ".join(
+                f"{c} {lo:.2f}/{hi:.2f}" for c, (lo, hi) in qs.items()) + ".\n\n")
         f.write("~~~\n" + s.to_string(index=False) + "\n~~~")
         f.write("\n")
     print(s.to_string(index=False))
