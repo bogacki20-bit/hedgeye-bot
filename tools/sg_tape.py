@@ -147,14 +147,21 @@ def summarize(cur_r: dict, prev: dict | None, prints: list[dict], book: set[str]
     return "\n".join(lines)
 
 
-def read_latest() -> str:
+def read_latest(window: int | None = None) -> str:
+    """The latest read vs the one before it, or vs the read about `window` minutes earlier (desk glances: 30)."""
     import db_pg
     with db_pg.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM sg_tape_reads ORDER BY read_at DESC LIMIT 2")
+        cur.execute("SELECT * FROM sg_tape_reads ORDER BY read_at DESC LIMIT 1")
         cols = [c[0] for c in cur.description]
         rs = [dict(zip(cols, r)) for r in cur.fetchall()]
         if not rs:
             return "no tape reads yet"
+        if window:
+            cur.execute("SELECT * FROM sg_tape_reads WHERE read_at <= %s - make_interval(mins => %s) + interval '3 minutes' "
+                        "ORDER BY read_at DESC LIMIT 1", (rs[0]["read_at"], window))
+        else:
+            cur.execute("SELECT * FROM sg_tape_reads WHERE read_at < %s ORDER BY read_at DESC LIMIT 1", (rs[0]["read_at"],))
+        rs += [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("SELECT sym, aggressor, premium, is_sweep, is_block FROM sg_tape_prints WHERE read_at = %s",
                     (rs[0]["read_at"],))
         prints = [dict(zip(["sym", "aggressor", "premium", "is_sweep", "is_block"], r)) for r in cur.fetchall()]
@@ -170,6 +177,7 @@ def _cli() -> int:
     g.add_argument("--ingest")
     g.add_argument("--ingest-downloads", action="store_true")
     g.add_argument("--read", action="store_true")
+    ap.add_argument("--window", type=int, help="with --read: compare with the read about N minutes earlier")
     a = ap.parse_args()
     if a.ingest:
         print(ingest(a.ingest))
@@ -177,7 +185,7 @@ def _cli() -> int:
         for r in ingest_downloads():
             print(r)
     else:
-        print(read_latest())
+        print(read_latest(a.window))
     return 0
 
 
