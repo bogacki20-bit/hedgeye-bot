@@ -1,0 +1,15 @@
+-- 142: SpotGamma written reports (capture desk, Kris 2026-11-15): FlowPatrol and Opening Setup every
+-- trading day, the Sunday Note weekly (dashboard.spotgamma.com/reports). Loaded by tools/sg_reports.py
+-- from the in-page bundle (PDF via the page's signed S3 link + the rendered text).
+CREATE TABLE IF NOT EXISTS sg_reports (
+    report_date  DATE NOT NULL,
+    report_type  TEXT NOT NULL,          -- flowpatrol / opening_setup / sunday_note
+    title        TEXT,                   -- first headline on page 1
+    body_text    TEXT,
+    word_count   INTEGER,
+    pdf_path     TEXT,
+    txt_path     TEXT,
+    loaded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (report_date, report_type)
+);
+CREATE INDEX IF NOT EXISTS idx_sg_reports_date ON sg_reports(report_date DESC);

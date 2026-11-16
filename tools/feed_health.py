@@ -41,6 +41,11 @@ FEEDS = [
     ("SpotGamma tilt", "SpotGamma", "sg_tilt", "trade_date", 1),
     # 11/15: the Tape, read every 15 min in market hours from Kris's Chrome (tools/sg_tape.py)
     ("SpotGamma tape (15-min reads)", "SpotGamma", "sg_tape_reads", "read_at", 1),
+    # 11/15: the rest of the dashboard (tools/sg_daily_capture.js, sg_report_capture.js -> tools/sg_pages.py).
+    # sg_index_daily.trade_date is the session the levels were computed from (one session behind the page date).
+    ("SpotGamma dashboard pages (daily run)", "SpotGamma", "sg_page_captures", "captured_at", 1),
+    ("SpotGamma index levels (full list)", "SpotGamma", "sg_index_daily", "trade_date", 2),
+    ("SpotGamma reports (FlowPatrol, Opening Setup, notes)", "SpotGamma", "sg_reports", "report_date", 1),
     ("TradingView levels", "TradingView", "tv_levels", "bar_date", 0),   # last session's bar by morning
     ("Fidelity book", "Fidelity", "book_positions", "snapshot_date", 5),
     # 11/14: Capital Allocation Pro daily dashboard (tools/cap_alloc_dashboard.py); as_of = the prior

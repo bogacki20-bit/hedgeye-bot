@@ -56,13 +56,20 @@ E. SpotGamma: everything my plan (Essential) shows. There is no API; capture it 
   2. Paste tools/sg_tape_capture.js into the javascript tool and click its green "SG TAPE SAVE" button. It downloads Downloads\sg_tape_<date>_<time>.json.
   3. Run: railway run py -m tools.sg_tape --ingest-downloads
   In market hours, time your sleeps to the next quarter hour. feed_health must show "SpotGamma tape" ok, and the newest read must be under 30 minutes old.
-- Founder's Note: AM by 9:15 and PM after the close. Save the page text to data/snapshots/spotgamma/<date>/founders_note_am.md (or _pm.md), run py -m tools.sg_index_levels --date D, and log its call in data/sg_eval/founders_note_calls.md.
-- Index levels for SPX, SPY, NDX, QQQ, RUT and IWM, daily.
+- THE WHOLE DASHBOARD, ONCE A DAY after the close (~4:30 PM ET), in one run. Keep the tab in front while it runs.
+  1. In any SpotGamma tab, paste tools/sg_page_capture.js once per session; it stores itself in the browser.
+  2. Run railway run py -m tools.sg_pages --book-syms and paste the line it prints (window.__sgDailySyms = [...]) into the javascript tool.
+  3. Paste tools/sg_daily_capture.js. It walks Home (Squeeze + VRP), Indices (SPX, SPY, NDX, QQQ, RUT, IWM x Greeks, Volatility, Open Interest), the Tape's Contract Data tab, and Equity Hub for every book ticker (Composite View, plus History for the top 15). That's ~125 pages, ~15-20 minutes. Check progress with JSON.stringify(window.__sgDaily.status).
+  4. When it's done, click the purple "SG DAILY SAVE" button, then run: railway run py -m tools.sg_pages --ingest-downloads
+  The data lands in sg_index_daily (all levels: walls, zero gamma, vol trigger, Large Gamma 1-4, Combo 1-4, gamma curve), sg_series (greeks by strike and expiry, level history, intraday tilt, OI by expiry, 0DTE share, risk reversal, tape contracts, skew, equity history), sg_events, sg_scanner_rows and sg_equity.
+- REPORTS, full text. Open dashboard /reports and paste tools/sg_report_capture.js. It steps through FlowPatrol, Opening Setup and Sunday Notes on its own. When it's done, click the orange "SG REPORTS SAVE" button and run --ingest-downloads. Do the same on /foundersNotes for the AM and PM notes. Opening Setup lands before the open, FlowPatrol and the PM note after the close, the Sunday Note on Sunday.
+  - Run it after each one lands (set window.__sgRepDays = 2 for a daily run).
+  - Write a brief for each report and put it in the pack.
+  - Keep logging the Founder's Note call in data/sg_eval/founders_note_calls.md. If a Founder's Note page capture lands, also run py -m tools.sg_index_levels --date D.
 - Tilt for SPX, QQQ and IWM from the Indices page (hook /v1/tilt), into sg_tilt.
 - Equity Hub CSV export (all symbols), daily after the close, then spotgamma_equityhub.py.
-- Reports (dashboard /reports): FlowPatrol and Opening Setup every trading day, the Sunday Note weekly. Save the PDF and text to data/snapshots/spotgamma/<date>/, write a brief, put them in the pack, and store them in a table (add it to DATA_INVENTORY). Backfill everything missed since 10/23, newest first.
-- Home page, daily: Squeeze Candidates, the VRP scanner and the events calendar, stored in a table.
-- HIRO and TRACE need SpotGamma Alpha (my plan shows HIRO for NVDA only and locks TRACE). Skip them.
+- Check: railway run py -m tools.sg_pages --status. feed_health must show ok on "SpotGamma dashboard pages", "SpotGamma index levels (full list)" and "SpotGamma reports".
+- HIRO, TRACE, the vol dashboard, Synthetic OI and Compass need SpotGamma Alpha (my plan shows HIRO for NVDA only and the vol dashboard for AAPL only). Skip them.
 
 F. Trade/Trend levels and ranges for the last close: every name in the bot AND the global macro list (47 countries' index, 10Y yield and currency from tools/macro_symbols.py; oil, nat gas, copper, gold, silver; Bitcoin and ETH; VIX and MOVE). The desk reads the whole market from this, so a miss on a country or yield matters as much as a miss on a stock.
 - I switched the line source on 11/15: the bot reads Trade (Vola2vola) and the Trend cloud from MFR first (section J), TradingView second. The newest bar wins; a tie goes to MFR (view v_line_source).
