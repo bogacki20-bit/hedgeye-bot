@@ -110,6 +110,12 @@ def parse_update_email(body: str) -> list[dict]:
 
 def parse_finpm_email(body: str) -> list[dict]:
     """Financials Pro 'Weekly Position Monitor': 'Moved to <Tier>: A, B'."""
+    # 11/15/2026: "Moved to Best Idea Long: FOUR, XYZ, COMP, RKT (from Long Bench), FAF (from Short Bench)"
+    # stopped the list at the first "(", so 6 of 11 moves were lost. Drop the "(from ...)" notes first.
+    body = re.sub(r"\s*\(from [^)]*\)", "", body, flags=re.I)
+    # _MOVED_RE is case-insensitive, so its ticker list would swallow the next "Moved to ..." line
+    # when the email body is one run of text; break before every "Moved to".
+    body = re.sub(r"\s*(Moved\s+to\s)", r"\n\1", body, flags=re.I)
     rows = []
     for mm in _MOVED_RE.finditer(body):
         tier, side = _norm_tier(mm.group("tier"), mm.group("side"), "moved")
