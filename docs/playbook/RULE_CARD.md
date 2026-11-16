@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -120,7 +120,7 @@ The picture changes two things: **which side gets added first** and **the step s
 - VXN rising faster than VIX = stress in tech/AI: press AI-sleeve shorts. RVX rising faster than VIX = stress in small caps: press small-cap shorts.
 - MOVE: 110+ = risk-off; 90 or lower = risk-on.
 - **Vol sets the size (Keith's buckets, audit 11/14):** 9–19 investable (normal steps); **20–29 chop: half-size steps on new longs; 30+: no new longs**, just cash and the stops.
-  - **Each market's own vol index (Keith, 3/6 lesson; Kris 11/14, tentative, recheck at the 11/28 review):** VXN for Nasdaq and tech, RVX for small caps, VIX for everything else. Use the higher of the name's own index and VIX. At 30+, that market's long exposure is also sold, even at MIN.
+  - **Each market's own vol index (Keith, 3/6 lesson; Kris 11/14, tentative, recheck at the 11/28 review):** VXN for tech and AI names only (Kris 11/16: "tech only"; a Nasdaq listing alone doesn't count, so staples, healthcare and consumer names like COST, KDP, ISRG and SBUX go on VIX), RVX for small caps, VIX for everything else. Use the higher of the name's own index and VIX. At 30+, that market's long exposure is also sold, even at MIN.
 - **Implied vs realized: are puts cheap or expensive? (Kris 11/14)** Use Keith's implied-vol premium table (tms_decks.ivol `ivol_prem` = implied vs realized, per ETF; SPY, QQQ, IWM first) with SpotGamma's IV/RV, skew rank and 25-delta risk reversal (rr25).
   - Premium 0% or below (implied at or under realized) = **protection is cheap; complacency** → risk-off lean: inverse-ETF protection is cheap, press shorts, trim longs into strength.
   - Premium +30% or more = **protection is expensive; fear is priced** → risk-on lean: cover shorts on red days, buy dips.
