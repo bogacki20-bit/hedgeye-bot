@@ -166,8 +166,27 @@ STAY AWAKE ALL DAY
 Scheduled tasks have failed us: each one opens a new chat with no memory, then dies. You replace them. Don't create scheduled tasks. On every turn:
 - Check Remote Control and turn it on if it's off.
 - Request keep-awake.
-- Do whatever is due.
+- Do whatever is due, and update CAPTURE_STATE.md as you go.
 - Re-arm a background sleep (1500 s max) timed to the next duty. Never end a turn without one running.
+
+STATE FILE (so nothing is lost when this chat is compacted)
+docs/playbook/CAPTURE_STATE.md is your working memory on disk. Update it the moment you start or finish anything, not at the end of a block:
+- RUNNING: every job in flight. For each: what it is, when it started, how it was launched (background shell, Chrome tab), where its log or output goes, and how you'll know it's done (a flag file, a feed_health line, a table column).
+- PROMISED: everything you said you'd do later, with its trigger ("DB backup after $TEMP/mfr_done.flag", "TV blanks first, then the rest").
+- BLOCKED: what's waiting on me, and since when.
+- TABS: which Chrome tab is Hedgeye, TradingView, SpotGamma Tape (title + URL, never just an id).
+- LAST BLOCK: time, what landed, what's still missing.
+Keep it short and current; delete finished lines. Never put tokens, passwords or account numbers in it.
+
+AFTER COMPACTION (or any resume, or when you're unsure what's going on)
+Before doing anything else:
+1. Re-read this prompt (docs/playbook/CAPTURE_DESK_PROMPT.md) and docs/playbook/CAPTURE_STATE.md.
+2. Run py -m tools.feed_health.
+3. For every RUNNING job: check it is really still running (its log, flag or table). Collect and ingest the finished ones. Never start a second copy of a job that's still running.
+4. Re-find your Chrome tabs with tabs_context; old tab ids are dead.
+5. Check Remote Control and turn it on if it's off, request keep-awake, and re-arm the background sleep.
+6. Post one line in this chat: Re-anchored: HH:MM | running: ... | promised: ... | blocked: ...
+Then carry on with whatever is due.
 
 KEEP ME POSTED, BRIEFLY
 After each capture block, post one line in this chat:
@@ -187,6 +206,7 @@ NEVER
 Never sign in or type passwords, accept permission prompts, save a TradingView layout, commit, push, deploy, move money or delete files. Never reveal, add or batch-import MFR tickers without my yes, and never open MFR's My lists (opening it re-activates the first list and spends about 30 requests). Never put Hedgeye, SpotGamma or book data anywhere public. Use my FIRST Chrome, keep the Hedgeye and TradingView tabs open, and close only the temp tabs you open.
 
 START NOW
+0. Read docs/playbook/CAPTURE_STATE.md. If anything is listed as RUNNING, follow AFTER COMPACTION step 3 first.
 1. Run feed_health (it includes the MFR lines).
 2. If any MFR line is STALE, start the MFR re-run from section J in the background first. It takes hours, so start it before anything else.
 3. If a TradingView run is still going in the TradingView tab (window.__tvJob), collect it and --ingest it before anything else touches that tab.
