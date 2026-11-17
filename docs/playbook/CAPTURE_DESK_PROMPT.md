@@ -96,7 +96,9 @@ What runs, and when (ET):
 - 6:30 AM weekdays: the global macro morning read. It goes to my Telegram and the global_macro_morning table.
 Your duties:
 - By 7:15 AM every market day, feed_health must show ok on: MFR snapshot, MFR indicators, MFR signals (track group), MFR book correlations, MFR sector correlation, and the global macro morning read.
-- If a night was missed, re-run it by hand in the background, one at a time, never while the nightly job is running (1:00-5:00 AM):
+- Check the MFR lines at EVERY wake, not only at 7:15. The full re-run takes ~3.6 h, so a miss found at 7:15 isn't fixed until ~11 AM, after the desk's 9:32 run.
+- If the nightly job fails, Railway sends me a Telegram, "MFR indicators: Nightly pull failed", and it does NOT retry until the next night. On 11/17 one MFR timeout at 1:06 AM killed the night. Since the 11/17 fix it retries the watchlist for ~25 min, then uses the tickers it pulled last time, but other failures can still kill a night. When you see that alert, or MFR indicators shows STALE after 5:00 AM, start the re-run right away.
+- Re-run it by hand in the background, one at a time, never while the nightly job is running (1:00-5:00 AM):
     railway run py -m tools.mfr_indicators --group core --bars 5
     railway run py -m tools.mfr_indicators --group track --bars 5
     railway run py -m tools.mfr_correlations
@@ -186,7 +188,9 @@ Never sign in or type passwords, accept permission prompts, save a TradingView l
 
 START NOW
 1. Run feed_health (it includes the MFR lines).
-2. If a TradingView run is still going in the TradingView tab (window.__tvJob), collect it and --ingest it before anything else touches that tab.
-3. Backfill anything missing from the last 14 days, videos and sector research first (check data/capture_inventory.csv against hedgeye_emails_raw and the portal).
-4. Build the pack.
-5. Follow the runbook schedule.
+2. If any MFR line is STALE, start the MFR re-run from section J in the background first. It takes hours, so start it before anything else.
+3. If a TradingView run is still going in the TradingView tab (window.__tvJob), collect it and --ingest it before anything else touches that tab.
+4. If TradingView levels or the database backup is STALE, run them (sections F and DONE MEANS STORED).
+5. Backfill anything missing from the last 14 days, videos and sector research first (check data/capture_inventory.csv against hedgeye_emails_raw and the portal).
+6. Build the pack.
+7. Follow the runbook schedule.

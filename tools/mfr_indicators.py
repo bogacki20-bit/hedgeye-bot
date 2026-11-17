@@ -186,9 +186,30 @@ def upsert(conn, ticker: str, rows: dict, group: str) -> int:
     return n
 
 
-def active_tickers() -> list[str]:
+def active_tickers(tries: int = 6, wait_s: int = 300) -> list[str]:
+    """MFR watchlist, retried over ~25 min. 11/17 06:06 UTC: one watchlist timeout killed the
+    whole nightly pull (it waits a day to retry). If MFR still won't list, fall back to the
+    tickers stored on the newest bar, so the night still runs."""
+    import time
     import mfr_client
-    return mfr_client.list_watchlist()
+    for i in range(tries):
+        t = mfr_client.list_watchlist()
+        if t:
+            return t
+        if i < tries - 1:
+            log.warning("MFR watchlist empty (try %d/%d); retrying in %ds", i + 1, tries, wait_s)
+            time.sleep(wait_s)
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT ticker FROM mfr_indicators "
+                        "WHERE bar_date = (SELECT max(bar_date) FROM mfr_indicators) ORDER BY 1")
+            t = [r[0] for r in cur.fetchall()]
+        log.warning("MFR watchlist unreachable; using %d tickers from the last stored bar", len(t))
+        return t
+    except Exception as e:
+        log.error("MFR watchlist fallback failed: %s", e)
+        return []
 
 
 def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start_after=None) -> dict:
