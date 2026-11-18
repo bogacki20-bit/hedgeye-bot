@@ -174,6 +174,7 @@ This small folder is what Gemini reads: Ask Gemini can't search the full Hedgeye
 here as .txt every time the pack refreshes.
 - QUAD_STATUS.txt: where we are and where we're going (now-quads plus the next-quad forecast)
 - PORTFOLIO_DIRECTION.txt: the plan, the two sleeves, open items
+- DESK_HANDOFF.txt: the desk's end-of-day handoff (fills, open items with triggers, stalk), reconciled each evening
 - RULE_CARD.txt: the rules (lines, sizing, recycling, market picture, conviction score)
 - BUXX_STATUS.txt: the monthly $5,000 BUXX buy window
 - MACRO_CALENDAR.txt: CPI, PPI, jobs, GDP/PCE release dates + Hedgeye's inflation nowcast
@@ -189,7 +190,7 @@ def gemini_start(out: pathlib.Path) -> int:
     g = out / "00_GEMINI_START"
     g.mkdir(parents=True, exist_ok=True)
     pb = ROOT / "docs" / "playbook"
-    pairs = [(pb / f"{k}.md", g / f"{k}.txt") for k in ("QUAD_STATUS", "PORTFOLIO_DIRECTION", "RULE_CARD", "BUXX_STATUS", "MACRO_CALENDAR")]
+    pairs = [(pb / f"{k}.md", g / f"{k}.txt") for k in ("QUAD_STATUS", "PORTFOLIO_DIRECTION", "DESK_HANDOFF", "RULE_CARD", "BUXX_STATUS", "MACRO_CALENDAR")]   # DESK_HANDOFF: Kris 11/18
     pairs.append((ROOT / "outputs" / "desk_snapshot" / "desk_snapshot_raw.md", g / "DESK_SNAPSHOT.txt"))
     packs = sorted(p for p in (ROOT / "outputs" / "daily_pack").glob("20??-??-??") if p.is_dir()) \
         if (ROOT / "outputs" / "daily_pack").exists() else []
