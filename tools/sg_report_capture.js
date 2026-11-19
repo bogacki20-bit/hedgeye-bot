@@ -33,8 +33,24 @@
   const cutoff = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })
     .format(new Date(Date.now() - days * 864e5));
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const leafs = () => [...document.querySelectorAll('main *')]
-    .filter(e => e.children.length === 0 && parse((e.innerText || '').trim()));
+  // 11/19 SpotGamma layout change: /reports opens straight into the newest report and the list sits behind a
+  // "View all documents" button, in a MUI drawer OUTSIDE <main> (<p> inside a role=button ListItemButton). So search
+  // the whole body, open the drawer when needed, and prefer clickable list entries over the open report's heading.
+  const leafs = () => [...document.querySelectorAll('body *')]
+    .filter(e => e.children.length === 0 && !e.closest('#__sgRepSave') && parse((e.innerText || '').trim()));
+  const clickable = e => e.closest('[role=button], button, a, .MuiListItemButton-root');
+  const openList = async () => {
+    const b = [...document.querySelectorAll('button, [role=button], a')]
+      .find(e => /^\s*view all documents\s*$/i.test(e.innerText || ''));
+    if (!b) return false;
+    b.click();
+    await sleep(2500);
+    return true;
+  };
+  const findTitle = title => {
+    const hits = leafs().filter(e => e.innerText.trim() === title);
+    return hits.find(clickable) || null;
+  };
   const isPdf = () => document.querySelectorAll('.react-pdf__Page').length > 0;
   const bodyText = title => {
     const layers = [...document.querySelectorAll('.react-pdf__Page__textContent, .textLayer')];
@@ -49,11 +65,14 @@
   window.__sgRep = { status: st, reports: [] };
 
   (async () => {
+    if (!leafs().some(clickable)) await openList();     // /reports: the list lives in the drawer
     const titles = [...new Set(leafs().map(e => e.innerText.trim()))]
       .filter(t => (want ? want.includes(t) : parse(t).date >= cutoff));
     st.total = titles.length;
     const grab = async title => {
-      const el = leafs().find(e => e.innerText.trim() === title);
+      let el = findTitle(title);
+      if (!el && await openList()) el = findTitle(title);            // the drawer closed after the last click
+      if (!el) el = leafs().find(e => e.innerText.trim() === title) || null;   // /foundersNotes: plain in-page list
       if (!el) return null;
       const before = bodyText(title);
       el.click();
