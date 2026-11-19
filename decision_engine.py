@@ -234,8 +234,7 @@ def _get_etf_pro_range(ticker: str) -> Optional[dict]:
                     SELECT ticker, week_of, range_low, range_high, description, bias
                       FROM hedgeye_etf_pro_ranges
                      WHERE ticker = %s
-                     ORDER BY week_of DESC
-                     LIMIT 1
+                       AND week_of = (SELECT max(week_of) FROM hedgeye_etf_pro_ranges)  -- 11/19: no stale rows
                     """,
                     (ticker.upper(),),
                 )

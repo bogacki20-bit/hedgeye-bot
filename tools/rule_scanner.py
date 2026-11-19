@@ -75,7 +75,7 @@ def load_universe():
         cur.execute("select ticker, hedgeye_bucket_0629 from ticker_tags where hedgeye_bucket_0629 is not null")
         pm = dict(cur.fetchall())
         cur.execute("""select distinct on (ticker) ticker, bias from hedgeye_etf_pro_ranges
-                       where week_of >= current_date - 14 order by ticker, week_of desc""")
+                       where week_of = (select max(week_of) from hedgeye_etf_pro_ranges) order by ticker, week_of desc""")
         etf = dict(cur.fetchall())
     watch = {}
     if os.path.exists(WATCH):

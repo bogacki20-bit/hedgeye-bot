@@ -91,7 +91,7 @@ def build(scan: bool = True) -> dict:
                        from sg_index_levels where note_date=(select max(note_date) from sg_index_levels)""")
         sg = cur.fetchall()
         cur.execute("""select distinct on (ticker) ticker, range_low, range_high, bias, week_of
-                       from hedgeye_etf_pro_ranges where week_of >= current_date - 10
+                       from hedgeye_etf_pro_ranges where week_of = (select max(week_of) from hedgeye_etf_pro_ranges)
                        order by ticker, week_of desc""")
         etf = cur.fetchall()
         cur.execute("select ticker, side from ss_roster_history where removed_on is null")
@@ -291,7 +291,7 @@ def _inventory(s: dict) -> dict:
         cur.execute("select ticker, hedgeye_bucket_0629 from ticker_tags where hedgeye_bucket_0629 is not null order by 1")
         pm = cur.fetchall()
         cur.execute("""select distinct on (ticker) ticker, bias, range_low, range_high from hedgeye_etf_pro_ranges
-                       where week_of >= current_date - 10 order by ticker, week_of desc""")
+                       where week_of = (select max(week_of) from hedgeye_etf_pro_ranges) order by ticker, week_of desc""")
         etf = [r for r in cur.fetchall() if r[2] and r[3]]
     try:
         px = yf.download([e[0] for e in etf], period="5d", progress=False)["Close"].ffill().iloc[-1]

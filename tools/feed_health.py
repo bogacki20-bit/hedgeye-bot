@@ -37,6 +37,9 @@ FEEDS = [
     ("Quad (dashboard)", "Hedgeye", "hedgeye_quad", "as_of", 5),
     ("Hedgeye emails", "Hedgeye", "hedgeye_emails_raw", "received_at", 1),
     ("Research digest", "Hedgeye", "research_digest", "signal_date", 1),
+    # 11/19: filled by tools/fill_empty_tables.py after each capture block (went 2 days stale unnoticed)
+    ("Early Look (table)", "Hedgeye", "hedgeye_early_look", "publish_date", 1),
+    ("Macro Show summary notes (table)", "Hedgeye", "hedgeye_macro_show_notes", "publish_date", 1),
     ("SpotGamma index levels", "SpotGamma", "sg_index_levels", "note_date", 1),
     ("SpotGamma equity hub", "SpotGamma", "spotgamma_snapshots", "snapshot_date", 1),
     ("SpotGamma tilt", "SpotGamma", "sg_tilt", "trade_date", 1),
@@ -268,6 +271,34 @@ def _capture_desk_checks(now: dt.datetime) -> list[dict]:
                     "lag": None, "ok": bool(doc and dash and doc >= dash)})
     except Exception as e:
         out.append({"label": "QUAD_STATUS.md current", "src": "Hedgeye", "last": None, "lag": None,
+                    "ok": False, "err": str(e)[:80]})
+    # ETF Pro bias the readers show vs the capture desk's daily ETF Pro Plus dashboard export (11/19: QAT,
+    # dropped 11/2, kept showing "short" to the desk from a stale week). Mismatch counts only when no change
+    # email was parsed after the export (a mid-day change is fine until the 4:31 PM export).
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH d AS (SELECT ticker, lower(position) AS bias, loaded_at FROM hedgeye_dashboard_positions
+                            WHERE product='etf_pro_plus' AND as_of=(SELECT max(as_of) FROM hedgeye_dashboard_positions
+                                                                     WHERE product='etf_pro_plus')),
+                     e AS (SELECT ticker, bias, parsed_at FROM hedgeye_etf_pro_ranges
+                            WHERE week_of=(SELECT max(week_of) FROM hedgeye_etf_pro_ranges))
+                SELECT (SELECT string_agg(e.ticker||':'||coalesce(e.bias,'?'), ',' ORDER BY e.ticker) FROM e
+                         WHERE NOT EXISTS (SELECT 1 FROM d WHERE d.ticker=e.ticker AND d.bias=e.bias)),
+                       (SELECT string_agg(d.ticker||':'||d.bias, ',' ORDER BY d.ticker) FROM d
+                         WHERE NOT EXISTS (SELECT 1 FROM e WHERE e.ticker=d.ticker AND e.bias=d.bias)),
+                       (SELECT max(as_of) FROM hedgeye_dashboard_positions WHERE product='etf_pro_plus'),
+                       (SELECT max(parsed_at) FROM e) > (SELECT max(loaded_at) FROM d)""")
+            extra, missing, as_of, newer = cur.fetchone()
+        bad = bool(extra or missing)
+        txt = f"vs dashboard {as_of}: " + ("match" if not bad else
+               "; ".join(x for x in (f"bot only {extra}" if extra else "", f"dashboard only {missing}" if missing else "") if x))
+        out.append({"label": "ETF Pro bias = dashboard", "src": "Hedgeye",
+                    "last": txt[:120] + (" (change email after export)" if bad and newer else ""),
+                    "lag": None, "ok": (not bad) or bool(newer)})
+    except Exception as e:
+        out.append({"label": "ETF Pro bias = dashboard", "src": "Hedgeye", "last": None, "lag": None,
                     "ok": False, "err": str(e)[:80]})
     # BUXX_STATUS.md: from the 20th, checked (rewritten) every day until the month's ex-date is past (Kris 11/14)
     if now.day >= 20:

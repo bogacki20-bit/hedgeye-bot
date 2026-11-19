@@ -44,6 +44,8 @@ NO_YAHOO = {"UST2Y", "CAD/USD", "USD_SEMI"}  # Yahoo's series is a different ins
 MAX_GAP = 0.40                               # vs TradingView's close: wrong instrument or a split
 
 
+_ETF_LATEST = "(SELECT max(week_of) FROM hedgeye_etf_pro_ranges)"
+
 def ema_lines(closes) -> tuple[float, float] | None:
     """Pure: (trade, trend) from a list of daily closes, oldest first."""
     if len(closes) < MIN_BARS:
@@ -220,9 +222,13 @@ def lookup(tickers: list[str]) -> dict:
             cur.execute("SELECT ema34, ema89, bar_date, bar_close FROM level_lines WHERE ticker=%s "
                         "ORDER BY bar_date DESC LIMIT 1", (src,))
             ll = cur.fetchone()
+            # 11/19: latest week only. A name dropped from ETF Pro kept its last bias forever (QAT, removed
+            # 11/2, still showed "short 14.76-15.89" from week 10/26 and the desk acted on it).
             cur.execute("SELECT range_low, range_high, bias, week_of FROM hedgeye_etf_pro_ranges WHERE ticker=%s "
-                        "ORDER BY week_of DESC LIMIT 1", (src,))
+                        f"AND week_of = {_ETF_LATEST}", (src,))
             ep = cur.fetchone()
+            cur.execute("SELECT 1 FROM hedgeye_etf_pro_ranges WHERE ticker=%s LIMIT 1", (src,))
+            ep_ever = cur.fetchone() is not None       # "is a macro ETF" flag: any week, as before
             cur.execute("SELECT trade, cloud_upper, cloud_lower, bar_date, src FROM v_line_source WHERE key=%s",
                         (TV_KEY.get(src, src),))
             ls = cur.fetchone()
@@ -232,7 +238,8 @@ def lookup(tickers: list[str]) -> dict:
             rr = cur.fetchone() if t != "USD" else None      # his USD range is the dollar index
             g = lambda x: float(x) if x is not None else None
             cur.execute("SELECT 1 FROM tv_levels WHERE ticker=%s AND tv_symbol !~ '^(BATS|OTC|NYSE|NASDAQ|AMEX)' LIMIT 1", (src,))
-            macro = bool(cur.fetchone()) or tt is not None or ep is not None
+            macro_row = cur.fetchone()
+            macro = bool(macro_row) or tt is not None or ep_ever
             trade = pick_level("trade", g(a_tr[0]) if a_tr else None, None, g(ll[0]) if ll else None, macro,
                                vola=g(vb[0]) if vb else None, vola_src=vb[4] if vb else None)
             tt_fresh = tt is not None and tt[2] >= today - dt.timedelta(days=KEITH_TREND_MAX_AGE)

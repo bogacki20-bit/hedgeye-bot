@@ -58,7 +58,8 @@ def load(week_start: dt.date, week_end: dt.date) -> dict:
         cur.execute("select ticker, hedgeye_bucket_0629 from ticker_tags where hedgeye_bucket_0629 is not null")
         pm = dict(cur.fetchall())
         cur.execute("""select distinct on (ticker) ticker, bias from hedgeye_etf_pro_ranges
-                        where week_of <= %s order by ticker, week_of desc""", (week_end,))
+                        where week_of = (select max(week_of) from hedgeye_etf_pro_ranges where week_of <= %s)
+                        order by ticker, week_of desc""", (week_end,))
         etf = dict(cur.fetchall())
         cur.execute("""select ticker, bar_date, vola_b, range_high, range_low from tv_levels
                         where bar_date >= %s order by ticker, bar_date""",
