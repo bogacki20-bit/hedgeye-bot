@@ -10,23 +10,28 @@
 // Downloads/sg_reports_<YYYYMMDD>_<HHMM>.json; load with:  railway run py -m tools.sg_pages --ingest-downloads
 //
 // Options (set before pasting): window.__sgRepWant = ['FlowPatrol 2026-11-13', ...] to fetch only those titles;
-// window.__sgRepDays = N to take reports dated within N days (default 30). Read-only.
+// window.__sgRepDays = N to take reports dated within N days (default 30; 0 = today only). Read-only.
 (() => {
   const REP = /^(FlowPatrol|Opening Setup|Sunday Note) (\d{4}-\d{2}-\d{2})$/;
-  const FN = /^(AM Note|PM Note): \w{3}, (\w+ \d{1,2}, \d{4})/;
+  // 11/16: the morning note is titled "Founder's Note: Mon, November 16, 2026 at 7:00 AM ET" (not "AM Note:"),
+  // so it was never matched; store it as kind 'AM Note'.
+  const FN = /^(AM Note|PM Note|Founder's Note): \w{3}, (\w+ \d{1,2}, \d{4})/;
   const parse = t => {
     let m = t.match(REP);
     if (m) return { kind: m[1], date: m[2] };
     m = t.match(FN);
     if (m) {
       const d = new Date(m[2] + ' 12:00');
-      if (!isNaN(d)) return { kind: m[1], date: d.toISOString().slice(0, 10) };
+      if (!isNaN(d)) return { kind: m[1] === "Founder's Note" ? 'AM Note' : m[1], date: d.toISOString().slice(0, 10) };
     }
     return null;
   };
   const want = window.__sgRepWant || null;
-  const days = window.__sgRepDays || 30;
-  const cutoff = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+  // 11/19: 0 means today only (|| turned 0 into the 30-day default). Cutoff is an ET date, like the report dates.
+  const days = Number.isFinite(Number(window.__sgRepDays)) && window.__sgRepDays !== null && window.__sgRepDays !== ''
+    ? Math.max(0, Number(window.__sgRepDays)) : 30;
+  const cutoff = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })
+    .format(new Date(Date.now() - days * 864e5));
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const leafs = () => [...document.querySelectorAll('main *')]
     .filter(e => e.children.length === 0 && parse((e.innerText || '').trim()));
