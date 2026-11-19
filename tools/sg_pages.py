@@ -274,6 +274,7 @@ def _store(conn, d: dict, fname: str) -> dict:
 def _store_reports(conn, d: dict, fname: str) -> dict:
     cur = conn.cursor()
     n = 0
+    notes: set = set()
     for r in d.get("reports") or []:
         if not r.get("text") or len(r["text"]) < 200:
             continue
@@ -287,8 +288,20 @@ def _store_reports(conn, d: dict, fname: str) -> dict:
                     "ELSE sg_reports.text END, captured_at=EXCLUDED.captured_at",
                     (r["report_date"], r["kind"], r["title"], r.get("url"), r.get("pages"), r["text"], d["captured_at"]))
         n += 1
+        if r["kind"] in ("AM Note", "PM Note"):
+            notes.add(r["report_date"])
     conn.commit()
-    return {"file": fname, "reports": n}
+    out = {"file": fname, "reports": n}
+    if notes:
+        # 11/19: sg_index_levels straight from the note text (it sat at 11/13 until the capture desk hand-wrote
+        # founders_note_*.md files). Own try: a parse problem never loses the stored report.
+        try:
+            from tools import sg_index_levels
+            out["index_levels"] = sg_index_levels.ingest_from_reports(sorted(notes), conn)
+        except Exception as e:  # noqa: BLE001
+            conn.rollback()
+            out["index_levels_error"] = str(e)[:120]
+    return out
 
 
 def ingest(path: str) -> dict:
