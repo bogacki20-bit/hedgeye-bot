@@ -249,9 +249,17 @@ def _capture_desk_checks(now: dt.datetime) -> list[dict]:
             cur.execute("SELECT DISTINCT ticker FROM tv_levels WHERE bar_date BETWEEN %s::date - 2 AND %s::date + 3 "
                         "AND ticker = ANY(%s)", (bar, bar, list(keys)))
             have = {r[0] for r in cur.fetchall()}
-        missing = sorted(keys - have - known)
+            # 11/19: a foreign index / yield / currency one trading day behind is a local holiday (11/16: Mexico's
+            # Revolution Day left IPC, MX10Y and COLCAP on 11/13), not a capture miss. Shown as late, still ok.
+            foreign = {v[0] for d in (ms.INDEX_TV, ms.YIELD_TV, ms.FX_TV) for k, v in d.items() if k != "US"}
+            prev = bar - dt.timedelta(days=3 if bar.weekday() == 0 else 1)
+            cur.execute("SELECT DISTINCT ticker FROM tv_levels WHERE bar_date >= %s "
+                        "AND ticker = ANY(%s)", (prev, sorted((keys & foreign) - have)))
+            late = {r[0] for r in cur.fetchall()}
+        missing = sorted(keys - have - known - late)
         out.append({"label": "TradingView macro list", "src": "TradingView",
-                    "last": f"{len(have)}/{len(keys)} on {bar}" + (f"; missing {','.join(missing[:8])}" if missing else ""),
+                    "last": f"{len(have)}/{len(keys)} on {bar}" + (f"; missing {','.join(missing[:8])}" if missing else "")
+                            + (f"; 1 day late (holiday?) {','.join(sorted(late)[:8])}" if late else ""),
                     "lag": len(missing), "ok": not missing})
     except Exception as e:
         out.append({"label": "TradingView macro list", "src": "TradingView", "last": None, "lag": None,

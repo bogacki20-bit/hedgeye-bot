@@ -19,7 +19,16 @@ SPECIAL = {
     "UST10Y": "TVC:US10Y", "UST2Y": "TVC:US02Y", "UST30Y": "TVC:US30Y",
     "VIX": "CBOE:VIX", "BITCOIN": "BITSTAMP:BTCUSD",
     "EUR/USD": "FX:EURUSD", "GBP/USD": "FX:GBPUSD", "CAD/USD": "FX_IDC:CADUSD",
-    "USD/YEN": "FX:USDJPY", "SPCX": "AMEX:SPCX",
+    "USD/YEN": "FX:USDJPY",
+    # 11/10 blind-spot fixes (each verified loading in TradingView on 11/10/2026):
+    # SPCX lives on BATS, not AMEX (AMEX override broke it after 10/30); renamed
+    # tickers keep the bot key (FI->FISV, ATUS->OPTU, ZI->GTM); JD Sports needs the
+    # trailing dot; the bot's EUR/GBP are the FXE/FXB ETFs (prices match), not spot;
+    # BTC/ETH are spot crypto, not the BATS mini-trust ETFs.
+    "SPCX": "BATS:SPCX", "FI": "BATS:FISV", "ATUS": "BATS:OPTU", "ZI": "BATS:GTM",
+    "JD.L": "LSE:JD.", "EUR": "AMEX:FXE", "GBP": "AMEX:FXB",
+    "BTC": "BITSTAMP:BTCUSD", "ETH": "BITSTAMP:ETHUSD",
+    "GLASF": "NEO:GLAS.A.U", "PANDY": "OMXCOP:PNDORA",
     # Yahoo-style indices
     "^VIX": "CBOE:VIX", "^VVIX": "CBOE:VVIX", "^VXN": "CBOE:VXN", "^RVX": "CBOE:RVX",
     "^GVZ": "CBOE:GVZ", "^OVX": "CBOE:OVX", "^MOVE": "TVC:MOVE",

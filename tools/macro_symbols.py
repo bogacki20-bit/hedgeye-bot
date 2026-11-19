@@ -55,7 +55,7 @@ FX_TV = {
     "Denmark": ("USD/DKK", "FX:USDDKK", True), "Poland": ("USD/PLN", "FX:USDPLN", True),
     "Czech Rep.": ("USD/CZK", "FX_IDC:USDCZK", True), "Turkey": ("USD/TRY", "FX:USDTRY", True),
     "Israel": ("USD/ILS", "FX_IDC:USDILS", True), "South Africa": ("USD/ZAR", "FX:USDZAR", True),
-    "Singapore": ("USD/SGD", "FX:USDSGD", True), "Malaysia": ("USD/MYR", "FX_IDC:USDMYR", True),
+    "Singapore": ("USD/SGD", "FX_IDC:USDSGD", True), "Malaysia": ("USD/MYR", "FX_IDC:USDMYR", True),
     "Indonesia": ("USD/IDR", "FX_IDC:USDIDR", True), "Thailand": ("USD/THB", "FX_IDC:USDTHB", True),
     "Philippines": ("USD/PHP", "FX_IDC:USDPHP", True), "New Zealand": ("NZD/USD", "FX:NZDUSD", False),
     "Chile": ("USD/CLP", "FX_IDC:USDCLP", True), "Colombia": ("USD/COP", "FX_IDC:USDCOP", True),

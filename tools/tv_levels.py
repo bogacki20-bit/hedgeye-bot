@@ -50,10 +50,19 @@ def pairs() -> list[list[str]]:
     out += [p for p in MACRO_EXTRAS if p[0] not in have]
     # Bond-proxy stalk names (11/6) the screener doesn't carry yet.
     out += [[t, f"BATS:{t}"] for t in "XEL KMB DUK PG CL JNJ ABBV MRK CB PGR TRV CHD".split() if t not in have]
-    out.append(["USD_SEMI", "BATS:USD"])          # the book's USD is the 2x semis ETF; key USD stays the dollar index
+    out.append(["USD_SEMI", "BATS:USD"])          # the book's USD is the 2x semis ETF
+    # 11/10: key USD mismatched every night (v_screener's USD price is the semis ETF),
+    # so the dollar index was never stored. Store it under DXY instead; EXPN's bot
+    # price isn't Experian's London line, so the London chart goes in under EXPN.L.
+    out += [["DXY", "TVC:DXY"], ["EXPN.L", "LSE:EXPN"]]
+    # no chart / gone: cash fund, delisted, liquidated ETFs
+    # 11/19: PSKY renamed to SKYD (book: PSKY 10/6 -> SKYD 10/14 -> SKYDWS), SKYD is pulled under its own key;
+    # PSKY's 9.775 "bot price" is a frozen 10/28 MFR snapshot, so it failed as a mismatch every night.
+    DEAD = {"FDRXX", "NKLA", "CYB", "PGAL", "USD", "PSKY"}
+    out = [p for p in out if p[0] not in DEAD]
     have = {k for k, _ in out}
     from tools.macro_symbols import tv_pairs      # every country's index, 10y, FX
-    return out + [p for p in tv_pairs() if p[0] not in have]
+    return out + [p for p in tv_pairs() if p[0] not in have and p[0] not in DEAD]
 
 
 def _parse_line(ln: str) -> dict:
@@ -119,6 +128,59 @@ def ingest(path: str) -> dict:
             "missed": [r["t"] for r in miss][:40]}
 
 
+def range_pairs(bar_date: str | None = None) -> list[list[str]]:
+    """11/11: [ticker, tv_symbol] for screener names that lean on TradingView ranges
+    (band_source 'tv' or null) and have no range on the latest bar — book names first.
+    Feed to __tvStart(pairs, {rangesOnly: true}) in a freshly loaded chart tab."""
+    import db_pg
+    from tools.tv_symbols import tv_symbol
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        if not bar_date:
+            cur.execute("SELECT max(bar_date) FROM tv_levels WHERE bar_date <= CURRENT_DATE - 1")
+            bar_date = str(cur.fetchone()[0])
+        cur.execute(
+            "SELECT s.ticker FROM v_screener s LEFT JOIN tv_levels t "
+            "  ON t.ticker = s.ticker AND t.bar_date = %s "
+            "WHERE (s.band_source IS NULL OR s.band_source = 'tv') "
+            "  AND (t.range_high IS NULL OR t.range_low IS NULL) "
+            "ORDER BY s.held DESC NULLS LAST, s.ticker", (bar_date,))
+        tickers = [t for (t,) in cur.fetchall()]
+    return [[t, tv_symbol(t)] for t in tickers if tv_symbol(t)]
+
+
+def ingest_ranges(path: str) -> dict:
+    """Ranges-only rows (ro:1) -> fill range_* on tv_levels; never touches TRADE/TREND.
+    A row with no tv_levels row yet for that bar is inserted with ranges only."""
+    import db_pg
+    rows = [_parse_line(ln) for ln in pathlib.Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    today = dt.date.today()
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT ticker, COALESCE(mfr_price, price) FROM v_screener WHERE ticker = ANY(%s)",
+                    ([r["t"] for r in rows],))
+        ref = {t: float(p) for t, p in cur.fetchall() if p}
+        for r in rows:
+            p, c = ref.get(r["t"]), r.get("close")
+            if not r.get("miss") and p and c and abs(float(c) / p - 1) > MISMATCH_PCT:
+                r["miss"] = f"symbol mismatch: {r.get('s')} closed {c} vs bot price {p:g}"
+            if not r.get("miss") and r.get("rh") is None and r.get("rl") is None:
+                r["miss"] = "no range values"
+        ok = [r for r in rows if not r.get("miss")]
+        miss = [r for r in rows if r.get("miss")]
+        for r in ok:
+            cur.execute(
+                "INSERT INTO tv_levels (ticker, bar_date, tv_symbol, bar_close, range_high, range_low, "
+                "lt_range_high, lt_range_low) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (ticker, bar_date) DO UPDATE SET "
+                "range_high=EXCLUDED.range_high, range_low=EXCLUDED.range_low, "
+                "lt_range_high=EXCLUDED.lt_range_high, lt_range_low=EXCLUDED.lt_range_low, "
+                "bar_close=COALESCE(tv_levels.bar_close, EXCLUDED.bar_close), captured_at=now()",
+                (r["t"], r["bar"], r.get("s"), r.get("close"), r.get("rh"), r.get("rl"),
+                 r.get("lh"), r.get("ll")))
+        conn.commit()
+    return {"rows": len(rows), "stored": len(ok), "misses": len(miss),
+            "missed": [f"{r['t']}: {r['miss']}" for r in miss][:40]}
+
+
 def derive(mu, ml, va, vb, trend_dir: str | None) -> dict:
     """Pure: raw indicator values + trend direction -> {trend, trade, basis}."""
     bear = (trend_dir or "").upper().startswith("BEAR")
@@ -154,11 +216,18 @@ def _cli() -> int:
     g.add_argument("--pairs", action="store_true")
     g.add_argument("--ingest")
     g.add_argument("--show", nargs="+")
+    g.add_argument("--range-pairs", action="store_true",
+                   help="names missing an MFR Range on the latest bar (tv/null band_source)")
+    g.add_argument("--ingest-ranges", help="ranges-only jsonl (from __tvStart(pairs,{rangesOnly:true}))")
     a = ap.parse_args()
     import db_pg
     db_pg._load_dotenv_fallback()
     if a.pairs:
         print(json.dumps(pairs(), separators=(",", ":")))
+    elif a.range_pairs:
+        print(json.dumps(range_pairs(), separators=(",", ":")))
+    elif a.ingest_ranges:
+        print(json.dumps(ingest_ranges(a.ingest_ranges)))
     elif a.ingest:
         print(json.dumps(ingest(a.ingest)))
     else:
