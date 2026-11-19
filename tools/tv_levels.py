@@ -136,14 +136,21 @@ def range_pairs(bar_date: str | None = None) -> list[list[str]]:
     from tools.tv_symbols import tv_symbol
     with db_pg.get_conn() as conn, conn.cursor() as cur:
         if not bar_date:
-            cur.execute("SELECT max(bar_date) FROM tv_levels WHERE bar_date <= CURRENT_DATE - 1")
+            # 11/19 (capture desk): was max(bar_date) <= yesterday, so after the close (the main run had written
+            # today's bar) the pass targeted yesterday's and gave 9 names while feed_health checked today's (19/51
+            # STALE). Same bar as feed_health "TradingView MFR ranges": the newest bar with a full run's rows.
+            from tools.feed_health import MIN_ROWS
+            cur.execute("SELECT max(bar_date) FROM (SELECT bar_date FROM tv_levels GROUP BY 1 "
+                        "HAVING count(*) >= %s) x", (MIN_ROWS["tv_levels"],))
             bar_date = str(cur.fetchone()[0])
+        # covered = a range on the bar or bar+1 (Asian listings carry the next session's date), as feed_health counts
         cur.execute(
-            "SELECT s.ticker FROM v_screener s LEFT JOIN tv_levels t "
-            "  ON t.ticker = s.ticker AND t.bar_date = %s "
+            "SELECT s.ticker FROM v_screener s "
             "WHERE (s.band_source IS NULL OR s.band_source = 'tv') "
-            "  AND (t.range_high IS NULL OR t.range_low IS NULL) "
-            "ORDER BY s.held DESC NULLS LAST, s.ticker", (bar_date,))
+            "  AND NOT EXISTS (SELECT 1 FROM tv_levels t WHERE t.ticker = s.ticker "
+            "    AND t.range_high IS NOT NULL AND t.range_low IS NOT NULL "
+            "    AND t.bar_date BETWEEN %s AND %s::date + 1) "
+            "ORDER BY s.held DESC NULLS LAST, s.ticker", (bar_date, bar_date))
         tickers = [t for (t,) in cur.fetchall()]
     return [[t, tv_symbol(t)] for t in tickers if tv_symbol(t)]
 
@@ -218,6 +225,7 @@ def _cli() -> int:
     g.add_argument("--show", nargs="+")
     g.add_argument("--range-pairs", action="store_true",
                    help="names missing an MFR Range on the latest bar (tv/null band_source)")
+    ap.add_argument("--bar", help="with --range-pairs: bar date YYYY-MM-DD (default: the bar feed_health checks)")
     g.add_argument("--ingest-ranges", help="ranges-only jsonl (from __tvStart(pairs,{rangesOnly:true}))")
     a = ap.parse_args()
     import db_pg
@@ -225,7 +233,7 @@ def _cli() -> int:
     if a.pairs:
         print(json.dumps(pairs(), separators=(",", ":")))
     elif a.range_pairs:
-        print(json.dumps(range_pairs(), separators=(",", ":")))
+        print(json.dumps(range_pairs(a.bar), separators=(",", ":")))
     elif a.ingest_ranges:
         print(json.dumps(ingest_ranges(a.ingest_ranges)))
     elif a.ingest:
