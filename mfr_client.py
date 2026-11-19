@@ -237,6 +237,30 @@ def list_watchlist() -> list[str]:
     return sorted(out)
 
 
+def guard_partial(watchlist: list[str], stored: list[str] | set[str], label: str,
+                  min_frac: float = 0.8, retry_wait_s: int = 60) -> list[str]:
+    """11/19: MFR answered the watchlist read with 200 OK and only 197 of ~1,040 rows, and the track
+    pull ran on those 197 alone. If the list is under min_frac of the tickers stored last time, read it
+    once more; if it is still short, use the union (only tickers already pulled before, so nothing new
+    is enrolled at MFR). An empty list is left to the caller's own retry / fallback."""
+    import time
+    stored = set(stored or ())
+    if not watchlist or not stored or len(watchlist) >= min_frac * len(stored):
+        return watchlist
+    log.warning("%s: MFR watchlist partial (%d vs %d stored); re-reading in %ds",
+                label, len(watchlist), len(stored), retry_wait_s)
+    time.sleep(retry_wait_s)
+    again = list_watchlist()
+    if len(again) >= min_frac * len(stored):
+        return again
+    best = again if len(again) > len(watchlist) else watchlist
+    out = sorted(set(best) | stored)
+    log.warning("%s: watchlist still partial (%d); using %d = watchlist + last stored set",
+                label, len(best), len(out))
+    _record_watchlist_read(len(best), f"partial: {len(best)} of {len(stored)} stored; used union {len(out)}", 200)
+    return out
+
+
 def _report_fanout_completeness(ok: int, total: int, missing: list) -> None:
     """Persist coverage % to bot_state and squawk if a run is materially incomplete —
     kills the silent ~20% drop. Best-effort; never raises into the fan-out."""
@@ -274,6 +298,16 @@ def refresh_watchlist() -> dict:
     `reswept`/`recovered`, and persists coverage % to bot_state (squawks if < 95%)."""
     watchlist = list_watchlist()
     log.info("mfr_fanout: pulled %d tickers from MFR watchlist", len(watchlist))
+    if watchlist:
+        try:
+            import db_pg
+            with db_pg.get_conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT DISTINCT ticker FROM mfr_snapshots "
+                            "WHERE snapshot_date = (SELECT max(snapshot_date) FROM mfr_snapshots)")
+                stored = {r[0] for r in cur.fetchall()}
+            watchlist = guard_partial(watchlist, stored, "mfr_fanout")
+        except Exception as e:  # noqa: BLE001 - the guard must never stop the fan-out
+            log.warning("mfr_fanout: partial-list guard skipped: %s", e)
     if not watchlist:
         # Report 0% BEFORE returning. This used to bail without touching
         # mfr_fanout_last_pct, so a failed fan-out left yesterday's 1.000 in

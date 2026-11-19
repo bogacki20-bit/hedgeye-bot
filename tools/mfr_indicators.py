@@ -208,24 +208,33 @@ def active_tickers(tries: int = 6, wait_s: int = 300) -> list[str]:
     tickers stored on the newest bar, so the night still runs."""
     import time
     import mfr_client
+    stored = _stored_bar_tickers()
     for i in range(tries):
         t = mfr_client.list_watchlist()
         if t:
-            return t
+            return mfr_client.guard_partial(t, stored, "mfr_indicators")   # 11/19: 197-row partial reads
         if i < tries - 1:
             log.warning("MFR watchlist empty (try %d/%d); retrying in %ds", i + 1, tries, wait_s)
             time.sleep(wait_s)
+    log.warning("MFR watchlist unreachable; using %d tickers from the last stored bar", len(stored))
+    return sorted(stored)
+
+
+def _stored_bar_tickers() -> set[str]:
+    """Tickers on the newest bar that has a near-full set. Not just max(bar_date): a partial night
+    (11/18: 197 track rows) or a one-off --tickers run must not shrink the reference."""
     try:
         import db_pg
         with db_pg.get_conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT ticker FROM mfr_indicators "
-                        "WHERE bar_date = (SELECT max(bar_date) FROM mfr_indicators) ORDER BY 1")
-            t = [r[0] for r in cur.fetchall()]
-        log.warning("MFR watchlist unreachable; using %d tickers from the last stored bar", len(t))
-        return t
+            cur.execute("""
+                WITH b AS (SELECT bar_date, count(DISTINCT ticker) n FROM mfr_indicators
+                            WHERE bar_date >= CURRENT_DATE - 14 GROUP BY 1),
+                     best AS (SELECT max(bar_date) d FROM b WHERE n >= 0.9 * (SELECT max(n) FROM b))
+                SELECT DISTINCT ticker FROM mfr_indicators WHERE bar_date = (SELECT d FROM best)""")
+            return {r[0] for r in cur.fetchall()}
     except Exception as e:
-        log.error("MFR watchlist fallback failed: %s", e)
-        return []
+        log.error("MFR stored-bar tickers read failed: %s", e)
+        return set()
 
 
 def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start_after=None,
