@@ -67,6 +67,16 @@ class RateLimited(Exception):
         self.wait = wait
 
 
+class ServerError(ConnectionError):
+    """MFR answered with something that isn't JSON (an HTTP 500 page, an empty body). 11/19 06:43 UTC:
+    json.loads on a 500 page raised JSONDecodeError, which the retry loop didn't catch, so one bad
+    reply killed the whole night. A ConnectionError subclass, so run() retries it like a network error."""
+
+
+# Progress of the current run(), so the nightly loop can resume a crashed run instead of starting over.
+PROGRESS: dict = {}
+
+
 class McpClient:
     def __init__(self, token: str):
         self.token = token.strip()
@@ -87,9 +97,15 @@ class McpClient:
             self.sid = r.headers.get("Mcp-Session-Id") or self.sid
             text = r.read().decode()
         except urllib.error.HTTPError as e:
-            text = e.read().decode()
+            status = e.code
+            text = e.read().decode(errors="replace")
+        else:
+            status = 200
         found = re.findall(r"^data: (.*)$", text, re.M)
-        return json.loads(found[-1] if found else text)
+        try:
+            return json.loads(found[-1] if found else text)
+        except ValueError:
+            raise ServerError(f"MFR non-JSON reply (http {status}): {text[:80]!r}") from None
 
     def init(self):
         j = self._post("initialize", {"protocolVersion": "2025-03-26", "capabilities": {},
@@ -212,7 +228,10 @@ def active_tickers(tries: int = 6, wait_s: int = 300) -> list[str]:
         return []
 
 
-def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start_after=None) -> dict:
+def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start_after=None,
+        deadline: float | None = None) -> dict:
+    """deadline: epoch seconds; past it, stop and raise (the nightly loop must be done by 5 AM ET,
+    when the capture desk takes over re-runs)."""
     token = os.environ.get("MFR_MCP_TOKEN", "")
     if not token.strip():
         raise RuntimeError("MFR_MCP_TOKEN not set")
@@ -220,6 +239,7 @@ def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start
         tickers = active_tickers()
         if not tickers:
             raise RuntimeError("MFR watchlist read returned 0 tickers; not running")
+    tickers = sorted(set(tickers))           # sorted, so start_after resumes cleanly
     if start_after:
         tickers = [t for t in tickers if t > start_after]
     if limit:
@@ -234,7 +254,14 @@ def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start
         conn = psycopg2.connect(db_pg._resolve_dsn())
     stats = {"tickers": len(tickers), "rows": 0, "ok": 0, "empty": [], "errors": [], "notes": {}}
     t0 = time.time()
+    PROGRESS.clear()
+    PROGRESS.update({"groups": tuple(groups), "last": None, "done": 0, "total": len(tickers)})
+    outage = 0          # consecutive tickers that gave up on every attempt
+    trips = 0
     for i, tk in enumerate(tickers, 1):
+        if deadline and time.time() > deadline:
+            raise RuntimeError(f"stopped at the deadline after {i - 1}/{len(tickers)} tickers (last {PROGRESS['last']})")
+        gave_up_all = True
         for g in groups:
             args = {"ticker": tk, "indicators": GROUPS[g], "timeframe": "D", "bars": bars}
             for attempt in range(4):
@@ -246,10 +273,11 @@ def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start
                     time.sleep(e.wait + 2)
                 except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                     log.warning("%s %s: network %s (attempt %d)", tk, g, e, attempt + 1)
-                    time.sleep(10 * (attempt + 1))
+                    time.sleep(15 * 2 ** attempt)          # 15, 30, 60, 120 s
             else:
                 stats["errors"].append(f"{tk}:{g}:gave_up")
                 continue
+            gave_up_all = False
             err = resp.get("_error") or (resp.get("error") if isinstance(resp.get("error"), dict) else None)
             if err:
                 stats["errors"].append(f"{tk}:{g}:{str(err.get('message'))[:100]}")
@@ -266,6 +294,25 @@ def run(tickers=None, groups=("core",), bars=5, dry_run=False, limit=None, start
             else:
                 stats["rows"] += upsert(conn, tk, rows, g)
             stats["ok"] += 1
+        if gave_up_all:
+            outage += 1
+            if outage >= 5:
+                # MFR looks down, not just one bad ticker. Pause 10 min and reconnect; after ~1 h of
+                # outage raise, so the nightly loop resumes from here later instead of burning the list.
+                trips += 1
+                if trips > 2:
+                    raise RuntimeError(f"MFR server down ~1 h; stopped after {i}/{len(tickers)} (last {PROGRESS['last']})")
+                log.warning("MFR outage: %d tickers in a row failed; pausing 10 min (trip %d/2)", outage, trips)
+                time.sleep(600)
+                cli = McpClient(token)
+                try:
+                    cli.init()
+                except Exception as e:
+                    log.warning("MFR re-init failed: %s", e)
+                outage = 0
+            continue                                   # not done: don't advance the resume point
+        outage = 0
+        PROGRESS.update({"last": tk, "done": i})
         if i % 50 == 0:
             log.info("%d/%d tickers, %d rows, %.0f min", i, len(tickers), stats["rows"], (time.time() - t0) / 60)
             print(f"progress {i}/{len(tickers)} last={tk} rows={stats['rows']}", flush=True)

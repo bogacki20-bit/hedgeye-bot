@@ -323,11 +323,40 @@ if __name__ == "__main__":
                     if datetime.now(timezone.utc).weekday() in (6, 0) and os.getenv("MFR_INDICATORS_WEEKEND") != "true":
                         # Sun/Mon 06:00 UTC follow non-trading days: nothing new to read.
                         continue
-                    from tools.mfr_indicators import run as _mfr_ind_run
-                    for grp in ("core", "track"):
-                        st = _mfr_ind_run(groups=(grp,), bars=5)
+                    from tools import mfr_indicators as _mi
+                    from zoneinfo import ZoneInfo
+                    # Done by 5 AM ET: after that the capture desk owns re-runs (CAPTURE_DESK_PROMPT section J),
+                    # so the nightly never overlaps a hand re-run.
+                    _et = datetime.now(ZoneInfo("America/New_York"))
+                    deadline = _et.replace(hour=5, minute=0, second=0, microsecond=0).timestamp()
+                    groups_left, resume, tries = ["core", "track"], None, 0
+                    while groups_left:
+                        grp = groups_left[0]
+                        try:
+                            st = _mi.run(groups=(grp,), bars=5, start_after=resume, deadline=deadline)
+                        except Exception as e:
+                            # 11/19: one non-JSON reply at 06:43 UTC killed the night and the loop waited a day.
+                            # Now: resume from the last finished ticker every 15 min until the deadline.
+                            last = _mi.PROGRESS.get("last") if _mi.PROGRESS.get("groups") == (grp,) else None
+                            resume = last or resume
+                            tries += 1
+                            log.error("mfr_indicators %s crashed (try %d, resume after %s): %s\n%s",
+                                      grp, tries, resume, e, traceback.format_exc())
+                            if time.time() + 900 > deadline or tries >= 8:
+                                raise
+                            if tries == 1:
+                                try:
+                                    import notifier
+                                    notifier.send_telegram("MFR indicators",
+                                        f"{grp} pull hit an error ({e}); retrying from {resume or 'the start'} every 15 min until 5 AM ET.")
+                                except Exception:
+                                    pass
+                            time.sleep(900)
+                            continue
                         log.info("mfr_indicators %s: %s tickers, %s rows, %s errors, %s min", grp,
                                  st.get("tickers"), st.get("rows"), len(st.get("errors", [])), st.get("minutes"))
+                        groups_left.pop(0)
+                        resume = None
                     # Correlations (Kris 11/15): sector corr, Today pairs, book vs benchmarks, top-15 pairs.
                     # Own try so a failure here never blocks tomorrow's indicator pull. ~10 requests.
                     try:
@@ -343,7 +372,8 @@ if __name__ == "__main__":
                     log.error("mfr_indicators loop crashed: %s\n%s", e, tb)
                     try:
                         import notifier
-                        notifier.send_telegram("MFR indicators", f"Nightly pull failed: {e}. Retrying tomorrow.")
+                        notifier.send_telegram("MFR indicators",
+                            f"Nightly pull failed: {e}. Capture desk: run it by hand (section J).")
                     except Exception:
                         pass
                     time.sleep(3600)
