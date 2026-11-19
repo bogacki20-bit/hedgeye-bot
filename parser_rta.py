@@ -268,6 +268,95 @@ def upsert_row(rec: dict, signal_date: date, message_id: str | None) -> dict:
                 return {"written": 0, "failed": 1}
 
 
+# ─────────────────── Intraday Risk Range refreshes (11/19) ───────────────────
+# Keith refreshes ranges inside RTAs; seen so far (all SPX):
+#   "SPX Refreshed Risk Range (RR) = 7254-7592"
+#   "SPX Refreshed Risk Range = 7319-7651 (nasty with the VIX ...)"
+#   "SPX Refreshed Risk Range is getting smoked on this Vol Regime Transition = 7501-7698"
+REFRESH_RE = re.compile(
+    r"\b(?P<ticker>[A-Z]{1,6}(?:\.[A-Z]{1,3})?)\s+Refreshed\s+Risk\s+Range\b(?P<mid>[^=\n]{0,100}?)=\s*"
+    r"\$?(?P<low>[0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:-|–|—|to)\s*\$?(?P<high>[0-9][0-9,]*(?:\.[0-9]+)?)"
+)
+
+
+def parse_refreshes(body_text_or_html: str) -> list[dict]:
+    """Every '<TICKER> Refreshed Risk Range ... = <low>-<high>' in an alert body (low < high, deduped by ticker)."""
+    body = _strip_html(body_text_or_html) if "<" in (body_text_or_html or "") \
+        else (body_text_or_html or "")
+    body = re.sub(r"\s+", " ", body)
+    out: dict[str, dict] = {}
+    for m in REFRESH_RE.finditer(body):
+        try:
+            lo, hi = (float(m.group(k).replace(",", "")) for k in ("low", "high"))
+        except ValueError:
+            continue
+        if not (0 < lo < hi) or hi > lo * 1.5:      # a range, not two unrelated numbers
+            continue
+        out[m.group("ticker").upper()] = {
+            "ticker": m.group("ticker").upper(), "low": lo, "high": hi,
+            "snippet": m.group(0).rstrip(",. ")[:240],
+        }
+    return list(out.values())
+
+
+def store_refreshes(refs: list[dict], received_at: datetime | None, message_id: str) -> dict:
+    """Write refreshes to hedgeye_risk_range_refresh. A refresh more than 15% away from that name's newest morning
+    range is held back (logged) as a likely misread."""
+    if not refs:
+        return {"written": 0}
+    import db_pg
+    from zoneinfo import ZoneInfo
+    from datetime import timezone
+    at = received_at or datetime.now(timezone.utc)
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    et_day = at.astimezone(ZoneInfo("America/New_York")).date()
+    written, held = 0, []
+    with db_pg.get_conn() as conn:
+        with conn.cursor() as cur:
+            for r in refs:
+                cur.execute("SELECT buy_trade, sell_trade FROM hedgeye_risk_ranges WHERE ticker=%s "
+                            "AND buy_trade IS NOT NULL ORDER BY signal_date DESC LIMIT 1", (r["ticker"],))
+                am = cur.fetchone()
+                if am and am[0] and am[1]:
+                    mid_am = (float(am[0]) + float(am[1])) / 2
+                    if abs((r["low"] + r["high"]) / 2 - mid_am) > 0.15 * mid_am:
+                        held.append(f"{r['ticker']} {r['low']:g}-{r['high']:g} vs AM {float(am[0]):g}-{float(am[1]):g}")
+                        continue
+                cur.execute(
+                    """INSERT INTO hedgeye_risk_range_refresh
+                           (ticker, signal_date, refreshed_at, range_low, range_high, snippet, source_email_id)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (ticker, source_email_id) DO UPDATE
+                           SET range_low=EXCLUDED.range_low, range_high=EXCLUDED.range_high,
+                               snippet=EXCLUDED.snippet, refreshed_at=EXCLUDED.refreshed_at,
+                               signal_date=EXCLUDED.signal_date, parsed_at=NOW()""",
+                    (r["ticker"], et_day, at, r["low"], r["high"], r["snippet"], message_id))
+                written += 1
+        conn.commit()
+    if held:
+        log.warning("RTA refreshed range held back (>15%% from AM range): %s", "; ".join(held))
+    return {"written": written, "held": held}
+
+
+def backfill_refreshes(days: int = 30) -> dict:
+    """Scan recent RTA emails for refreshed ranges (safe to re-run)."""
+    import db_pg
+    with db_pg.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT message_id, received_at, coalesce(text_body, html_body, '') FROM hedgeye_emails_raw "
+                        "WHERE received_at > now() - make_interval(days => %s) "
+                        "AND coalesce(text_body, html_body, '') ILIKE '%%Refreshed Risk Range%%' "
+                        "ORDER BY received_at", (days,))
+            rows = cur.fetchall()
+    tot = {"emails": len(rows), "written": 0, "held": []}
+    for mid, rec_at, body in rows:
+        r = store_refreshes(parse_refreshes(body), rec_at, mid)
+        tot["written"] += r["written"]
+        tot["held"] += r.get("held", [])
+    return tot
+
+
 def stamp_email_parsed(message_id: str, classified: str = "rta") -> None:
     import db_pg
     try:
@@ -315,6 +404,15 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
     if not is_rta_subject(subject):
         return {"error": "subject not RTA", "subject": subject}
 
+    refreshed = None
+    if not dry_run:
+        # 11/19: an intraday Risk Range refresh is stored even when the signal line itself doesn't parse.
+        try:
+            refreshed = store_refreshes(parse_refreshes(text_body or html_body or ""), received_at, message_id)
+        except Exception as e:
+            log.warning("RTA refreshed-range store failed for %s: %s", message_id, e)
+            refreshed = {"error": str(e)}
+
     rec = parse_rta(subject, text_body or html_body or "")
     snapshot_date = received_at.date() if received_at else date.today()
 
@@ -330,6 +428,7 @@ def process_email(message_id: str, *, dry_run: bool = False, fan_out: bool = Tru
         "ticker": rec["ticker"], "analyst": rec["analyst"],
         "signal_type": rec["signal_type"], "action": rec["action"],
         "price": rec["price"], "dry_run": dry_run, "parsed": rec,
+        "refreshed_range": refreshed,
     }
     if dry_run:
         return summary
@@ -430,6 +529,8 @@ def _cli() -> int:
     ap.add_argument("--latest", action="store_true")
     ap.add_argument("--backfill", action="store_true")
     ap.add_argument("--probe")
+    ap.add_argument("--backfill-refreshes", type=int, metavar="DAYS",
+                    help="scan the last DAYS of emails for 'Refreshed Risk Range' lines")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s — %(message)s")
@@ -437,6 +538,7 @@ def _cli() -> int:
     elif args.message_id: r = process_email(args.message_id)
     elif args.latest: r = process_latest()
     elif args.backfill: r = backfill_all_unparsed()
+    elif args.backfill_refreshes: r = backfill_refreshes(args.backfill_refreshes)
     else: ap.print_help(); return 1
     print(json.dumps(r, indent=2, default=str), flush=True)
     sys.stdout.flush()

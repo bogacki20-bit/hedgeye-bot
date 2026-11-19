@@ -241,6 +241,25 @@ def lookup(tickers: list[str]) -> dict:
                         "ORDER BY signal_date DESC LIMIT 1", (src,))
             rr = cur.fetchone() if t != "USD" else None      # his USD range is the dollar index
             g = lambda x: float(x) if x is not None else None
+            # 11/19: Keith refreshes ranges intraday inside Real-Time Alerts ("SPX Refreshed Risk Range = 7152-7509").
+            # The newest refresh dated on/after the morning row (or on the current list day) wins until the next
+            # morning list lands.
+            rr_ref = None
+            if t != "USD":
+                try:
+                    cur.execute("SELECT range_low, range_high, signal_date, refreshed_at FROM hedgeye_risk_range_refresh "
+                                "WHERE ticker=%s AND signal_date >= COALESCE(%s, (SELECT max(signal_date) "
+                                "FROM hedgeye_risk_ranges)) ORDER BY refreshed_at DESC LIMIT 1",
+                                (src, rr[3] if rr else None))
+                    rr_ref = cur.fetchone()
+                except Exception:                              # table not migrated yet
+                    cur.connection.rollback()
+                    rr_ref = None
+            rr_am = (g(rr[0]), g(rr[1]), rr[2], rr[3]) if rr else None
+            if rr_ref:
+                from zoneinfo import ZoneInfo
+                rr = (rr_ref[0], rr_ref[1], rr[2] if rr else None, rr_ref[2])
+                rr_ref_at = rr_ref[3].astimezone(ZoneInfo("America/New_York")).strftime("%I:%M %p ET").lstrip("0")
             cur.execute("SELECT 1 FROM tv_levels WHERE ticker=%s AND tv_symbol !~ '^(BATS|OTC|NYSE|NASDAQ|AMEX)' LIMIT 1", (src,))
             macro_row = cur.fetchone()
             macro = bool(macro_row) or tt is not None or ep_ever
@@ -267,7 +286,9 @@ def lookup(tickers: list[str]) -> dict:
                       "bar": max([d for d in ((ls[3] if ls else None), (ll[2] if ll else None)) if d], default=None),
                       "line_bar": ls[3] if ls else None, "ema_bar": ll[2] if ll else None,
                       "etf_pro": (g(ep[0]), g(ep[1]), ep[2], ep[3]) if ep else None,
-                      "risk_range": (g(rr[0]), g(rr[1]), rr[2], rr[3]) if rr else None}
+                      "risk_range": (g(rr[0]), g(rr[1]), rr[2], rr[3]) if rr else None,
+                      "risk_range_refreshed": rr_ref_at if rr_ref else None,
+                      "risk_range_am": rr_am if rr_ref else None}
             if src != t:
                 # Kris 11/14: a proxied ETF is read on the proxy alone. Every proxy line is scaled into the
                 # ETF's price by the same-bar close ratio, which equals comparing the proxy's price to its own lines.
@@ -301,6 +322,8 @@ def _scale(d: dict, r: float, on) -> dict:
         d["etf_pro"] = (sc(d["etf_pro"][0]), sc(d["etf_pro"][1])) + tuple(d["etf_pro"][2:])
     if d["risk_range"]:
         d["risk_range"] = (sc(d["risk_range"][0]), sc(d["risk_range"][1]), d["risk_range"][2], d["risk_range"][3])
+    if d.get("risk_range_am"):
+        d["risk_range_am"] = (sc(d["risk_range_am"][0]), sc(d["risk_range_am"][1])) + tuple(d["risk_range_am"][2:])
     d["proxy_ratio"] = (round(r, 6), on)
     return d
 
@@ -329,6 +352,9 @@ def _cli() -> int:
                   + (f" · TAIL {r['tail']:,.2f}" if r["tail"] else "")
                   + (f" · ETF Pro {r['etf_pro'][0] or 0:g}-{r['etf_pro'][1] or 0:g} {r['etf_pro'][2]} ({r['etf_pro'][3]})" if r["etf_pro"] else "")
                   + (f" · Risk Range {r['risk_range'][0]:g}-{r['risk_range'][1]:g} {r['risk_range'][2]} ({r['risk_range'][3]})" if r["risk_range"] else "")
+                  + (f" [refreshed {r['risk_range_refreshed']} in a Real-Time Alert; AM list {r['risk_range_am'][0]:g}-{r['risk_range_am'][1]:g}]"
+                     if r.get("risk_range_refreshed") and r.get("risk_range_am") else
+                     f" [refreshed {r['risk_range_refreshed']} in a Real-Time Alert]" if r.get("risk_range_refreshed") else "")
                   + (f" · lines through {r['line_bar']}" if r.get("line_bar") else "")
                   + (f" · EMA closes through {r['ema_bar']}" if r.get("ema_bar") and r.get("ema_bar") != r.get("line_bar") else ""))
     return 0
