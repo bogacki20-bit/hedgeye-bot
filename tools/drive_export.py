@@ -82,13 +82,17 @@ Written by the bot (tools/drive_export.py). Raw subscription data, no desk rules
 - tables/: CSV exports (book, Hedgeye risk ranges, ETF Pro, Signal Strength, Position Monitor,
   Keith's signals, Real-Time Alerts, quads, research digest, Tier 1 Alpha, Macro Show decks,
   SpotGamma index levels, TradingView MFR/Vola2vola values)
-- transcripts/: The Call and The Macro Show, one file per day
+- transcripts/<show>/: every video transcript, one file per video: {shows}.
+  The Call and The Macro Show are daily; the rest are sector videos, webcasts and calls.
 - process_notes/: show notes written from the transcripts
 - reports/<date>/: full Hedgeye reports (text, PDFs, chart pages) behind each email
 - spotgamma/: Founder's Note call log
 
 Updated {stamp}.
 """
+
+
+DAILY_SHOWS = ("the_call", "macro_show")   # date-windowed; every other transcript folder: all dates
 
 
 def _copy(src: pathlib.Path, dst: pathlib.Path) -> bool:
@@ -136,16 +140,19 @@ def export(dest: pathlib.Path, days: int) -> dict:
         if src.exists():
             n["files"] += _copy(src, dst)
 
-    # transcripts
-    for show in ("the_call", "macro_show"):
-        for f in (ROOT / "data" / "transcripts" / show).glob("*.txt"):
-            d = _dated(f.name)
-            if d and d >= since:
-                n["files"] += _copy(f, out / "transcripts" / show / f.name)
-    # 11/14 process audit: Keith's monthly Q&As and coaching lessons, all dates (small, rarely change)
-    for show in ("macro_qa", "coaching_lesson"):
-        for f in (ROOT / "data" / "transcripts" / show).glob("*.txt"):
+    # transcripts: EVERY data/transcripts/<show>/ folder (11/19: sector videos, MSR webcasts, housing,
+    # Big Theme, Capital Allocation never reached Drive). The two daily shows keep the date window;
+    # every other folder is small and rarely changes, so all dates. Changed files only (_copy).
+    tdir = ROOT / "data" / "transcripts"
+    shows = sorted(d.name for d in tdir.iterdir() if d.is_dir() and not d.name.startswith("_")) if tdir.exists() else []
+    for show in shows:
+        for f in (tdir / show).glob("*.txt"):
+            if show in DAILY_SHOWS:
+                d = _dated(f.name)
+                if not (d and d >= since):
+                    continue
             n["files"] += _copy(f, out / "transcripts" / show / f.name)
+    n["transcript_folders"] = shows
 
     # process notes
     for f in (ROOT / "outputs").glob("macro_show_process_notes_*.md"):
@@ -162,7 +169,8 @@ def export(dest: pathlib.Path, days: int) -> dict:
                 if f.is_file():
                     n["files"] += _copy(f, out / "reports" / f.relative_to(research))
 
-    (out / "README.md").write_text(README.format(stamp=dt.datetime.now().strftime("%Y-%m-%d %H:%M")), encoding="utf-8")
+    (out / "README.md").write_text(README.format(stamp=dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                                     shows=", ".join(shows) or "none"), encoding="utf-8")
     n["files"] += gemini_start(out)
     n["dest"] = str(out)
     return n
