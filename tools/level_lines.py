@@ -233,8 +233,12 @@ def lookup(tickers: list[str]) -> dict:
                         (TV_KEY.get(src, src),))
             ls = cur.fetchone()
             vb = ls if ls and ls[0] is not None and ls[3] >= today - dt.timedelta(days=VOLA_MAX_AGE) else None
+            # 11/19: current list only. Risk Range Signals carries the same ~35 names daily; a name that dropped
+            # off kept its old range forever (XLP showed 79.95-83.25 from 2025-05-22).
             cur.execute("SELECT buy_trade, sell_trade, trend, signal_date FROM hedgeye_risk_ranges "
-                        "WHERE ticker=%s AND buy_trade IS NOT NULL ORDER BY signal_date DESC LIMIT 1", (src,))
+                        "WHERE ticker=%s AND buy_trade IS NOT NULL "
+                        "AND signal_date >= (SELECT max(signal_date) FROM hedgeye_risk_ranges) - 4 "
+                        "ORDER BY signal_date DESC LIMIT 1", (src,))
             rr = cur.fetchone() if t != "USD" else None      # his USD range is the dollar index
             g = lambda x: float(x) if x is not None else None
             cur.execute("SELECT 1 FROM tv_levels WHERE ticker=%s AND tv_symbol !~ '^(BATS|OTC|NYSE|NASDAQ|AMEX)' LIMIT 1", (src,))
@@ -256,7 +260,12 @@ def lookup(tickers: list[str]) -> dict:
                 trend = trend_long if close is not None and close >= sum(cloud) / 2 else trend_short
             out[t] = {"proxy": src if src != t else None, "trade": trade, "trend": trend,
                       "trend_long": trend_long, "trend_short": trend_short,
-                      "tail": g(tt[1]) if tt else None, "bar": ll[2] if ll else None,
+                      "tail": g(tt[1]) if tt else None,
+                      # 11/19: "bar" was the EMA table's date only (refreshed inside morning_brief), so at 07:35
+                      # every name read 11/17 while its Trade/cloud were already MFR 11/18. Now the newest of the
+                      # line source (MFR/TV) bar and the EMA bar; both kept for checks.
+                      "bar": max([d for d in ((ls[3] if ls else None), (ll[2] if ll else None)) if d], default=None),
+                      "line_bar": ls[3] if ls else None, "ema_bar": ll[2] if ll else None,
                       "etf_pro": (g(ep[0]), g(ep[1]), ep[2], ep[3]) if ep else None,
                       "risk_range": (g(rr[0]), g(rr[1]), rr[2], rr[3]) if rr else None}
             if src != t:
@@ -320,7 +329,8 @@ def _cli() -> int:
                   + (f" · TAIL {r['tail']:,.2f}" if r["tail"] else "")
                   + (f" · ETF Pro {r['etf_pro'][0] or 0:g}-{r['etf_pro'][1] or 0:g} {r['etf_pro'][2]} ({r['etf_pro'][3]})" if r["etf_pro"] else "")
                   + (f" · Risk Range {r['risk_range'][0]:g}-{r['risk_range'][1]:g} {r['risk_range'][2]} ({r['risk_range'][3]})" if r["risk_range"] else "")
-                  + (f" · closes through {r['bar']}" if r["bar"] else ""))
+                  + (f" · lines through {r['line_bar']}" if r.get("line_bar") else "")
+                  + (f" · EMA closes through {r['ema_bar']}" if r.get("ema_bar") and r.get("ema_bar") != r.get("line_bar") else ""))
     return 0
 
 
