@@ -32,7 +32,20 @@
     ? Math.max(0, Number(window.__sgRepDays)) : 30;
   const cutoff = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' })
     .format(new Date(Date.now() - days * 864e5));
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // 11/19 (capture desk, tested live): Chrome throttles setTimeout in a hidden tab to ~1/min after 5 min, so the
+  // run crawled at ~2.7 min/page. Waits go through a Web Worker timer (same trick as tools/tv_levels.js); ~15 s/page.
+  // Falls back to setTimeout if the page blocks blob workers.
+  const sleep = (() => {
+    try {
+      const wk = window.__sgWk || (window.__sgWk = (() => {
+        const w = new Worker(URL.createObjectURL(new Blob(['onmessage=e=>setTimeout(()=>postMessage(e.data.id),e.data.ms)'])));
+        const cb = {}; let n = 0;
+        w.onmessage = e => { const f = cb[e.data]; delete cb[e.data]; f && f(); };
+        return ms => new Promise(r => { const id = ++n; cb[id] = r; w.postMessage({ id, ms }); });
+      })());
+      return ms => wk(ms);
+    } catch (e) { return ms => new Promise(r => setTimeout(r, ms)); }
+  })();
   // 11/19 SpotGamma layout change: /reports opens straight into the newest report and the list sits behind a
   // "View all documents" button, in a MUI drawer OUTSIDE <main> (<p> inside a role=button ListItemButton). So search
   // the whole body, open the drawer when needed, and prefer clickable list entries over the open report's heading.

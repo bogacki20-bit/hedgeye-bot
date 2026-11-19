@@ -29,7 +29,20 @@
   const capSrc = localStorage.getItem('__sgcapfn');
   if (!capSrc) return 'paste tools/sg_page_capture.js once first (it stores itself in localStorage)';
   const cap = (0, eval)('(' + capSrc + ')');
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // 11/19 (capture desk, tested live): Chrome throttles setTimeout in a hidden tab to ~1/min after 5 min, so the
+  // run crawled at ~2.7 min/page. Waits go through a Web Worker timer (same trick as tools/tv_levels.js); ~15 s/page.
+  // Falls back to setTimeout if the page blocks blob workers.
+  const sleep = (() => {
+    try {
+      const wk = window.__sgWk || (window.__sgWk = (() => {
+        const w = new Worker(URL.createObjectURL(new Blob(['onmessage=e=>setTimeout(()=>postMessage(e.data.id),e.data.ms)'])));
+        const cb = {}; let n = 0;
+        w.onmessage = e => { const f = cb[e.data]; delete cb[e.data]; f && f(); };
+        return ms => new Promise(r => { const id = ++n; cb[id] = r; w.postMessage({ id, ms }); });
+      })());
+      return ms => wk(ms);
+    } catch (e) { return ms => new Promise(r => setTimeout(r, ms)); }
+  })();
   const go = path => { history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')); };
   const clickTab = name => {
     const t = [...document.querySelectorAll('[role=tab], button')].find(e => (e.innerText || '').trim() === name);
