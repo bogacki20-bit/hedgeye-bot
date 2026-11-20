@@ -235,6 +235,26 @@ def _capture_desk_checks(now: dt.datetime) -> list[dict]:
     last = have[-1] if have else None
     out.append({"label": "Weekly quad forecast", "src": "Hedgeye", "last": last, "lag": None,
                 "ok": bool(last) and last >= fri.isoformat()})
+    # 11/19: the weekly Position Monitor (Monday "Week of M/D/YYYY: Position Monitors Update" email -> PDF ->
+    # _pm_ingest.py --commit -> bucket_history) had no check; the 11/16 week never went in and nothing flagged it.
+    # Stale when a newer update email than the last ingested week has been in for more than a day.
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT max(effective_date) FROM bucket_history")
+            pm_last = cur.fetchone()[0]
+            cur.execute("SELECT max(received_at) FROM hedgeye_emails_raw "
+                        "WHERE subject ILIKE '%%Position Monitors Update%%'")
+            pm_mail = cur.fetchone()[0]
+        mail_day = pm_mail.astimezone(ZoneInfo("America/New_York")).date() if pm_mail else None
+        behind = bool(mail_day and pm_last and mail_day > pm_last + dt.timedelta(days=1))
+        late = behind and (now - pm_mail.astimezone(now.tzinfo)).total_seconds() > 86400
+        out.append({"label": "Position Monitor (weekly buckets)", "src": "Hedgeye",
+                    "last": f"week of {pm_last}" + (f"; update email {mail_day} not ingested" if behind else ""),
+                    "lag": (mail_day - pm_last).days if behind else 0, "ok": not late})
+    except Exception as e:
+        out.append({"label": "Position Monitor (weekly buckets)", "src": "Hedgeye", "last": None, "lag": None,
+                    "ok": False, "err": str(e)[:80]})
     # TradingView global macro list (Kris 11/14): 47 countries' index/10Y/FX + commodities, crypto, vol.
     # A miss here matters as much as a stock miss. Known TradingView gaps are listed, not hidden.
     try:
