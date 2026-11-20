@@ -65,22 +65,22 @@ def ev(**kw):
 
 
 # ── 1. thresholds ───────────────────────────────────────────────────────────
-print("1. thresholds 8%% warn / 12%% reject:")
-check("threshold constants", (WARN_PCT, REJECT_PCT), (8.0, 12.0))
-r = ev(current_sector_value=7_900.0)
-check("7.9%% -> no warn", r["decision"], ALLOW)
-check("7.9%% binding", r["binding"], None)
-r = ev(current_sector_value=8_100.0)
-check("8.1%% -> WARN", r["decision"], WARN)
-check("8.1%% binding", r["binding"], "sector_concentration")
-r = ev(current_sector_value=12_100.0)
-check("12.1%% -> REJECT", r["decision"], REJECT)
-check("12.1%% binding", r["binding"], "sector_concentration")
-check("exactly 8.0%% does NOT warn", ev(current_sector_value=8_000.0)["decision"], ALLOW)
-check("exactly 12.0%% does NOT reject", ev(current_sector_value=12_000.0)["decision"], WARN)
+print("1. thresholds 15%% warn / 25%% reject (operator 9/20, ba002db; were 8/12):")
+check("threshold constants", (WARN_PCT, REJECT_PCT), (15.0, 25.0))
+r = ev(current_sector_value=14_900.0)
+check("14.9%% -> no warn", r["decision"], ALLOW)
+check("14.9%% binding", r["binding"], None)
+r = ev(current_sector_value=15_100.0)
+check("15.1%% -> WARN", r["decision"], WARN)
+check("15.1%% binding", r["binding"], "sector_concentration")
+r = ev(current_sector_value=25_100.0)
+check("25.1%% -> REJECT", r["decision"], REJECT)
+check("25.1%% binding", r["binding"], "sector_concentration")
+check("exactly 15.0%% does NOT warn", ev(current_sector_value=15_000.0)["decision"], ALLOW)
+check("exactly 25.0%% does NOT reject", ev(current_sector_value=25_000.0)["decision"], WARN)
 # the add is what tips it
-r = ev(current_sector_value=7_900.0, add_dollars=200.0)
-check("7.9%% + 200 add -> WARN", r["decision"], WARN)
+r = ev(current_sector_value=14_900.0, add_dollars=200.0)
+check("14.9%% + 200 add -> WARN", r["decision"], WARN)
 
 # ── 2. equity with NO sector is REFUSED ─────────────────────────────────────
 print("\n2. equity with NULL sector is REFUSED (assert on the refusal):")
@@ -133,12 +133,12 @@ r = ev(current_position_value=7_000.0, current_sector_value=7_000.0)
 check("7% one name -> REJECT", r["decision"], REJECT)
 check("bound by POSITION SIZE", r["binding"], "position_size")
 check("reason says so", "POSITION SIZE" in r["reason"], True)
-# many small names, none over 6%, sector over 12% -> sector binds
-r = ev(current_position_value=1_000.0, current_sector_value=12_500.0)
+# many small names, none over 6%, sector over 25% -> sector binds
+r = ev(current_position_value=1_000.0, current_sector_value=25_500.0)
 check("small name, fat sector -> REJECT", r["decision"], REJECT)
 check("bound by SECTOR", r["binding"], "sector_concentration")
 check("shorts concentrate too (abs exposure)",
-      ev(side="short", current_sector_value=-12_500.0)["decision"], REJECT)
+      ev(side="short", current_sector_value=-25_500.0)["decision"], REJECT)
 
 # ── 6. THE ENERGY TEST ──────────────────────────────────────────────────────
 print("\n6. THE ENERGY TEST — USO UGA XOP OIH HAL, and WHICH rule catches each:")
@@ -158,8 +158,8 @@ try:
     for t in ("USO", "UGA"):
         check(f"{t} asset_class", cls[t]["asset_class"], "commodity")
 
-    # equity leg: XOP+OIH+HAL = 13,000 = 13% -> ENERGY sector cap rejects
-    eq_total = sum(ENERGY_BOOK[t] for t in ("XOP", "OIH", "HAL"))
+    # equity leg: XOP+OIH+HAL = 13,000 plus 13,000 of other energy names = 26% -> ENERGY sector cap (25%) rejects
+    eq_total = sum(ENERGY_BOOK[t] for t in ("XOP", "OIH", "HAL")) + 13_000.0
     for t in ("XOP", "OIH", "HAL"):
         r = ev(ticker=t, asset_class="equity", sector="ENERGY",
                current_position_value=ENERGY_BOOK[t],
@@ -206,13 +206,13 @@ try:
     check("XLU bucket_kind is sector", x["bucket_kind"], "sector")
     check("XLU is NOT broad-market", "XLU" in BROAD_MARKET, False)
     r = ev(ticker="XLU", sector="UTILITIES", bucket_kind="sector",
-           bucket="UTILITIES", current_sector_value=12_500.0)
-    check("XLU over 12% -> REJECT", r["decision"], REJECT)
+           bucket="UTILITIES", current_sector_value=25_500.0)
+    check("XLU over 25% -> REJECT", r["decision"], REJECT)
     check("XLU binds on sector_concentration", r["binding"], "sector_concentration")
     check("XLU not exempted", r["decision"] == ALLOW, False)
     r = ev(ticker="XLU", sector="UTILITIES", bucket_kind="sector",
-           bucket="UTILITIES", current_sector_value=9_000.0)
-    check("XLU at 9% -> WARN", r["decision"], WARN)
+           bucket="UTILITIES", current_sector_value=16_000.0)
+    check("XLU at 16% -> WARN", r["decision"], WARN)
 except Exception as e:
     print(f"  !! could not run ({e})")
     FAIL += 1
@@ -252,8 +252,8 @@ try:
     check("EPHE bucket_kind", c["bucket_kind"], "country")
     check("EPHE bucket", c["bucket"], "PHILIPPINES")
     r = ev(ticker="EPHE", sector=None, bucket_kind="country",
-           bucket="PHILIPPINES", current_sector_value=12_500.0)
-    check("country over 12% -> REJECT", r["decision"], REJECT)
+           bucket="PHILIPPINES", current_sector_value=25_500.0)
+    check("country over 25% -> REJECT", r["decision"], REJECT)
     check("binds on country_concentration", r["binding"], "country_concentration")
     check("NOT counted as a sector", r["binding"] == "sector_concentration", False)
     r = ev(ticker="EPHE", sector=None, bucket_kind="country",
@@ -309,19 +309,19 @@ from tools.sector_cap import clamp_size, handle_cap_command
 # NOTE: the first version of this case used pos=7000/sector=13000, which is a
 # degenerate TIE (both -1000 of room) -- "tighter" is undefined there, so that
 # was a bad test case. These two are unambiguous in opposite directions.
-r = ev(current_position_value=9_000.0, current_sector_value=13_000.0)
+r = ev(current_position_value=9_000.0, current_sector_value=26_000.0)
 check("breaches both -> REJECT", r["decision"], REJECT)
 check("position room -3000 vs sector -1000 -> position_size is tighter",
       r["binding"], "position_size")
 check("reason names BOTH ceilings", "BOTH ceilings breached" in r["reason"], True)
 check("reason warns that fixing one is not enough",
       "will not unblock" in r["reason"], True)
-r = ev(current_position_value=6_500.0, current_sector_value=20_000.0)
+r = ev(current_position_value=6_500.0, current_sector_value=33_000.0)
 check("sector room -8000 vs position -500 -> sector is tighter",
       r["binding"], "sector_concentration")
-check("verdict still reports the sector figure", round(r["sector_pct"], 1), 20.0)
+check("verdict still reports the sector figure", round(r["sector_pct"], 1), 33.0)
 # 2. sector only
-r = ev(current_position_value=1_000.0, current_sector_value=12_500.0)
+r = ev(current_position_value=1_000.0, current_sector_value=25_500.0)
 check("sector only -> REJECT", r["decision"], REJECT)
 check("binding is sector_concentration", r["binding"], "sector_concentration")
 # 3. per-position only
@@ -397,8 +397,14 @@ try:
     # cap must reject it. (Which bucket and by how much is data; that it is
     # rejected is logic. If a future FIXTURE has no such bucket, capture a
     # new one that does or synthesize the case — do not delete the check.)
+    # 11/19: at the 9/20 thresholds (25%% reject) the 8/24 book's biggest bucket is FINANCIALS ~21%%, so the
+    # over-cap case is synthesized from it (the note above allows that): the same bucket at 26%% must reject.
     over = [b for b, v in buckets_fx.items() if v / av_fx * 100 > REJECT_PCT]
-    check("fixture contains at least one over-cap bucket", len(over) > 0, True)
+    big = over[0] if over else max(buckets_fx, key=lambda b: abs(buckets_fx[b]))
+    r = ev(ticker="FXTR", sector=big, account_value=av_fx,
+           current_sector_value=buckets_fx[big] if over else av_fx * 0.26)
+    check(f"over-cap bucket ({big}{'' if over else ' synthesized at 26%%'}) -> REJECT", r["decision"], REJECT)
+    check("over-cap bucket binds on concentration", r["binding"], "sector_concentration")
 
     # an UNCLASSIFIED name is refused by the cap, never silently allowed
     if routed["unclassified"]:

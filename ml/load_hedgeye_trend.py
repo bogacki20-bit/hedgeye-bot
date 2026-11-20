@@ -32,6 +32,13 @@ def main() -> int:
         cur.execute("SELECT bar_date FROM px_daily WHERE ticker='SPY' "
                     "ORDER BY bar_date")
         days = [r[0] for r in cur.fetchall()]
+        # 11/14 capture desk: px_daily (one-off TradingView CSV load) stops 9/4, which froze this
+        # table. Extend the calendar with Risk Range signal days (one email per trading day,
+        # >= 20 rows) after the last SPY bar so the daily trend tags keep flowing.
+        cur.execute("SELECT signal_date FROM hedgeye_risk_ranges WHERE signal_date > %s "
+                    "AND extract(isodow FROM signal_date) < 6 GROUP BY 1 HAVING count(*) >= 20 ORDER BY 1",
+                    (days[-1],))
+        days += [r[0] for r in cur.fetchall()]
         day_ix = {d: i for i, d in enumerate(days)}
         cur.execute("SELECT ticker, signal_date, trend FROM "
                     "hedgeye_risk_ranges WHERE trend IS NOT NULL "

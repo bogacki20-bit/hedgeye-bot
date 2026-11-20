@@ -74,7 +74,7 @@ def run() -> int:
         held = {r[0] for r in cur.fetchall()}
         cur.execute("SELECT ticker, 'SS' FROM ss_roster_current WHERE side='short' UNION "
                     "SELECT ticker, 'ETF' FROM hedgeye_etf_pro_ranges WHERE bias='short' AND week_of=(SELECT max(week_of) FROM hedgeye_etf_pro_ranges) UNION "
-                    "SELECT ticker, 'AI' FROM ai_short_watch")
+                    "SELECT ticker, 'AI' FROM ai_short_watch WHERE active")
         tags: dict[str, list] = {}
         for t, k in cur.fetchall():
             tags.setdefault(t, []).append(k)

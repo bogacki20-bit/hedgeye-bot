@@ -1,5 +1,7 @@
 // tools/sg_tape_capture.js - one SpotGamma Tape read (Kris 11/15/2026: "the tape needs to be read every 15 min").
 //
+// 11/16: click the "Flow Data" tab first if "Contract Data" is selected (the daily runner leaves it there and the
+// grid then holds contract rows, so every print was dropped).
 // Run in Kris's signed-in Chrome on https://dashboard.spotgamma.com/tape (reload the tab first so the
 // day's flow totals are fresh, wait ~8 s). Paste this whole file into the javascript tool, then click
 // the green "SG TAPE SAVE" button it adds (top-left). That downloads sg_tape_<YYYYMMDD>_<HHMM>.json to
@@ -39,14 +41,17 @@
   }
 
   // grid rows from the MUI DataGrid props
+  // 11/16: the page can hold more than one DataGrid (a contract/OI grid with uuid ids and no ts/premium came
+  // first on 11/16 and every print was dropped); use the grid whose rows carry a trade timestamp + premium.
   let prints = [];
-  const grid = document.querySelector('.MuiDataGrid-root');
-  if (grid) {
+  const isFlow = rows => rows.length && rows.slice(0, 5).some(r => r && r.ts != null && r.premium != null);
+  for (const grid of document.querySelectorAll('.MuiDataGrid-root')) {
+    if (prints.length) break;
     const gk = Object.keys(grid).find(k => k.startsWith('__reactFiber$'));
     let g = grid[gk], d = 0;
     while (g && d < 60) {
       const p = g.memoizedProps;
-      if (p && Array.isArray(p.rows)) {
+      if (p && Array.isArray(p.rows) && isFlow(p.rows)) {
         prints = p.rows.map(r => ({
           tns: String(r.tnsIndex ?? r.id), ts: Number(r.ts), sym: r.underlying, aggressor: r.aggressor,
           side: r.trade_side, put: !!r.is_put, strike: r.strike, expiry: Number(r.expiry), size: r.size,

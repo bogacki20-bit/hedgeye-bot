@@ -49,3 +49,15 @@ browser permission prompts, or retry more than once (Cloudflare politeness).
   in that profile.
 - SG levels: written by the canary's `founders_note.py` after each capture;
   backfill with `py -m tools.sg_index_levels --backfill`.
+
+## 11/11/2026 working route (data desk)
+The S3 hop in steps 2-3 is dead (since 10/2 the `/ms/` link serves the PDF itself and
+curl gets 403). In a signed-in `app.hedgeye.com` tab of Kris's Chrome:
+`fetch('/ms/msr_2-0?encoded_data=<value>', {credentials:'include'})` → check the blob
+starts with `%PDF` → save it with one `<a download>` click (downloads from app.hedgeye.com
+are allowed). For several dates, put all PDFs in ONE blob (`##FILE <date> <size>\n` + bytes
+per file) so Chrome's multiple-download prompt never fires, then split it in Python.
+Old `/ms/` links still work, so missed days can be back-filled. The `/mu/` Macro Show deck
+links work the same way (`fetch('/mu/tms_<m-d-yyyy>?encoded_data=…')`).
+Why the scheduled task stored nothing 10/27-11/10: each unattended run stopped at its first
+tool-permission prompt and the app still marked it "succeeded".

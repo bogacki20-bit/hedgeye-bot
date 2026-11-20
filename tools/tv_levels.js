@@ -31,6 +31,33 @@
   // session date: futures/FX/bond sessions open the prior evening (22:00 UTC)
   const sessionDate = (t) => new Date((t + 6 * 3600) * 1000).toISOString().slice(0, 10);
 
+  // 11/11 ranges-only pass: only MFR Range, with a long wait (k < waitK x 400 ms).
+  // Rows carry ro:1 and go in with `--ingest-ranges`, which never touches TRADE/TREND.
+  // A long-lived tab can leave MFR Range stuck in status 1 on every symbol (11/9-11/11);
+  // a fresh page load cleared it, so run this pass in a freshly loaded chart tab.
+  async function readRange(ticker, sym, waitK) {
+    await Promise.race([new Promise(r => CH.setSymbol(sym, r)), sleep(12000)]);
+    for (let k = 0; k < waitK; k++) {
+      const bars = rows(inner().mainSeries());
+      const R = src('MFR Range');
+      if (!R) return {t: ticker, s: sym, miss: 'MFR Range not on chart'};
+      const rg = rows(R);
+      const lastT = bars.length ? bars[bars.length - 1][0] : null;
+      if (bars.length > 0 && rg.length > 0 && rg[rg.length - 1][0] === lastT) {
+        const type = (CH.symbolExt && CH.symbolExt().type) || '';
+        let i = bars.length - 1;
+        const roundTheClock = /futures|crypto|forex|cfd|spot|bond/i.test(type) || /!$/.test(sym);
+        if (roundTheClock && bars[i][0] > Date.now() / 1000 - 20 * 3600) i -= 1;
+        const b = bars[i], rr = rg.find(x => x[0] === b[0]);
+        if (!rr) return {t: ticker, s: sym, miss: 'range bar missing'};
+        return {t: ticker, s: CH.symbol(), type, bar: sessionDate(b[0]), close: r6(b[4]), ro: 1,
+                rh: r6(rr[1]), rl: r6(rr[2]), lh: r6(rr[3]), ll: r6(rr[4])};
+      }
+      await sleep(400);
+    }
+    return {t: ticker, s: sym, miss: 'MFR Range never computed'};
+  }
+
   async function readOne(ticker, sym) {
     await Promise.race([new Promise(r => CH.setSymbol(sym, r)), sleep(12000)]);
     // MFR Range (st/lt ranges, 9/29) computes slowly — up to ~25 s on a symbol
@@ -42,9 +69,18 @@
       const v = rows(src('Vola2vola volatility Trade & Trend'));
       const R = src('MFR Range'), rg = rows(R);
       const lastT = bars.length ? bars[bars.length - 1][0] : null;
+      // 11/11: MFR Range sat in status 1 (computing, 0 rows) on every symbol, so the
+      // old 24 s wait (k >= 60) made a full run ~6.5 h and the overnight task never
+      // finished. Ranges are the last-resort tier: wait ~3 s, then ship without them.
       const rangeReady = !R || (rg.length > 30 && rg[rg.length - 1][0] === lastT) ||
-                         k >= 60 || (R.status && R.status().type === 2 && rg.length === 0 && k >= 10);
-      if (bars.length > 30 && m.length > 30 && v.length > 30 && rangeReady &&
+                         k >= 8 || (R.status && R.status().type === 2 && rg.length === 0);
+      // 11/10: new listings (SKHY from 7/10/2026) have < 30 indicator rows — MFR Trend
+      // needs ~63 bars of warmup. Accept a short series once the study reports done
+      // (status type 2); Vola may still be null and ships as null.
+      const done = (s) => { try { return s && s.status().type === 2; } catch (e) { return false; } };
+      const okLen = (n, s) => n > 30 || (n > 0 && bars.length > 0 && bars.length < 160 && done(s));
+      if (bars.length > 0 && okLen(m.length, src('Myfractalrange Trend')) &&
+          okLen(v.length, src('Vola2vola volatility Trade & Trend')) && rangeReady &&
           m[m.length - 1][0] === lastT && v[v.length - 1][0] === lastT) {
         const type = (CH.symbolExt && CH.symbolExt().type) || '';
         const now = Date.now() / 1000;
@@ -64,14 +100,17 @@
     return {t: ticker, s: sym, miss: 'no study data (symbol unresolved or no access)'};
   }
 
-  window.__tvStart = (pairs) => {
+  // opts: {rangesOnly: true, waitK: 75}  (75 x 400 ms = 30 s range wait per symbol)
+  window.__tvStart = (pairs, opts) => {
     if (window.__tvJob && !window.__tvJob.done) return {error: 'a job is already running'};
-    const job = window.__tvJob = {done: false, stop: false, total: pairs.length, rows: [], started: Date.now()};
+    const o = opts || {};
+    const job = window.__tvJob = {done: false, stop: false, total: pairs.length, rows: [], started: Date.now(),
+                                  rangesOnly: !!o.rangesOnly};
     (async () => {
-      if (CH.resolution() !== '1D') await new Promise(r => CH.setResolution('1D', r));
+      if (!/^1?D$/.test(CH.resolution())) await new Promise(r => CH.setResolution('1D', r));
       for (const [t, s] of pairs) {
         if (job.stop) break;
-        try { job.rows.push(await readOne(t, s)); }
+        try { job.rows.push(o.rangesOnly ? await readRange(t, s, o.waitK || 75) : await readOne(t, s)); }
         catch (e) { job.rows.push({t, s, miss: String(e).slice(0, 80)}); }
       }
       job.done = true;

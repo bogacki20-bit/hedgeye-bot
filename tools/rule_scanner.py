@@ -124,7 +124,7 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
     for s, a, q, cb in book:
         held.setdefault(s, []).append((a, q, cb))
     inv = {t for t, _ in ss} | {t for t, b in pm.items() if b in LONG_PM + SHORT_PM} | set(etf) | set(watch)
-    T = sorted(inv | set(held))
+    T = sorted(t for t in inv | set(held) if t.isalpha() and len(t) <= 5)     # US listings; skips EL.PA, ETHUSD
     with db_pg.get_conn() as c, c.cursor() as cur:
         cur.execute("""select distinct on (ticker) ticker, range_high, range_low from tv_levels
                        where ticker=any(%s) and range_high is not null and bar_date >= current_date - 7
@@ -148,13 +148,16 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         p = float(cl[-1])
         day = (cl[-1] / cl[-2] - 1) * 100
         a20 = vo[-21:-1].mean()
-        vo[-1] /= fr
+        if h.index[-1].date() == now.date():    # before the first print, the last bar is still yesterday's
+            vo[-1] /= fr
         tr, tr_src = lv[t]["trade"][0], lv[t]["trade"][1]
-        tn, tn_src = lv[t]["trend"][0], lv[t]["trend"][1]
+        tn_l, tn_l_src = lv[t]["trend_long"][0], lv[t]["trend_long"][1]     # yellow cloud bottom
+        tn_s, tn_s_src = lv[t]["trend_short"][0], lv[t]["trend_short"][1]   # yellow cloud top
         rh, rl = rng.get(TV_KEY.get(t, t), (None, None))
         rp = (p - rl) / (rh - rl) if rh and rl and rh > rl else None
         tb = 0 if _keith(tr_src) else BUF
-        nb = 0 if _keith(tn_src) else BUF
+        nb_l = BUF if tn_l_src.endswith("EMA") else 0       # the buffer is only for the EMA fallback
+        nb_s = BUF if tn_s_src.endswith("EMA") else 0
         lower_high = rs.get(t, {}).get("lower_high", False)
         streak = 0
         for k in range(len(cl) - 1, 0, -1):
@@ -165,7 +168,7 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         # decreasing volume (Kris 11/6): the pullback/bounce days average under the 20-day and today is lighter than yesterday
         n = max(streak, 2)
         vol_falling = vo[-n:].mean() < a20 and vo[-1] < vo[-2]
-        base = dict(ticker=t, px=p, day=day, rp=rp, trade=tr, trend=tn, rl=rl, rh=rh,
+        base = dict(ticker=t, px=p, day=day, rp=rp, trade=tr, trend=tn_l, rl=rl, rh=rh,
                     vol3="/".join(_fv(x) for x in vo[-3:]), avg=_fv(a20), streak=streak)
         side = sides(t, ss, pm, etf, watch)
 
@@ -174,8 +177,8 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
             pct = abs(mv) / acct.get(a, 1) * 100
             tag = "" if closing else " (if it closes here)"
             if q > 0:
-                if tn and p < tn * (1 - nb):
-                    out.append(dict(base, acct=a, action="SELL ALL", why=f"below Trend {tn:.2f}{tag}", exit=True))
+                if tn_l and p < tn_l * (1 - nb_l):
+                    out.append(dict(base, acct=a, action="SELL ALL", why=f"below Trend {tn_l:.2f}{tag}", exit=True))
                 elif lower_high and tr and p < tr * (1 - tb):
                     floor = (2 if is_etf(t) else 1) / 100 * acct[a]      # class MIN; at MIN it's held to Trend
                     if mv > floor * 1.15:
@@ -188,23 +191,23 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                 avg = cb / qa if qa else p
                 pnl = (avg / p - 1) * 100
                 third = 1 if qa < 2 else max(1, math.floor(qa / 3))
-                if tn and p > tn * (1 + nb):
-                    out.append(dict(base, acct=a, action=f"COVER ALL {qa:g}", why=f"above Trend {tn:.2f}{tag}", exit=True))
+                if tn_s and p > tn_s * (1 + nb_s):
+                    out.append(dict(base, acct=a, action=f"COVER ALL {qa:g}", why=f"above Trend {tn_s:.2f}{tag}", exit=True))
                 elif tr and p > tr * (1 + tb):
                     out.append(dict(base, acct=a, action=f"COVER {max(1, math.ceil(qa / 2)):g}", why=f"above Trade {tr:.2f}{tag}", exit=True))
                 elif pnl >= 3 or (rp is not None and rp <= 0.25) or (rl and p <= rl):
                     n = qa if qa < 2 else third
                     out.append(dict(base, acct=a, action=f"COVER {n:g}", why=f"+{pnl:.0f}% / rp {rp if rp is None else round(rp, 2)}"))
 
-        if side in ("long",) and rp is not None and tr and tn:
-            if p > tn and p >= tr * (1 - tb) and 0 <= rp <= 0.35 and day < 0 and vol_falling:
+        if side in ("long",) and rp is not None and tr and tn_l:
+            if p > tn_l and p >= tr * (1 - tb) and 0 <= rp <= 0.35 and day < 0 and vol_falling:
                 longs = [x for x in held.get(t, []) if x[1] > 0]
                 a = longs[0][0] if longs else "Rollover IRA"
                 size = 0.005 * acct[a] if longs else 0.01 * acct[a]
                 out.append(dict(base, acct=a, action=f"{'ADD' if longs else 'BUY'} ~${size:.0f}",
-                                why=f"rp {rp:.2f}, red, vol falling; out under {tn:.2f}", entry=True))
-        if side in ("short",) and rp is not None and tr and tn and not any(x[1] < 0 for x in held.get(t, [])):
-            if p < tn and p < tr and streak >= 3 and day > 0 and rp >= 0.65 and vol_falling:
+                                why=f"rp {rp:.2f}, red, vol falling; out under {tn_l:.2f}", entry=True))
+        if side in ("short",) and rp is not None and tr and tn_s and not any(x[1] < 0 for x in held.get(t, [])):
+            if p < tn_s and p < tr and streak >= 3 and day > 0 and rp >= 0.65 and vol_falling:
                 a = "Individual"
                 out.append(dict(base, acct=a, action=f"SHORT ~${0.006 * acct[a]:.0f}",
                                 why=f"day {streak} bounce, rp {rp:.2f}, vol falling; stop {tr:.2f}", entry=True))
