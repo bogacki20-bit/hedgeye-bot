@@ -186,8 +186,9 @@ def build(scan: bool = True) -> dict:
         snap["watch_list"] = []
 
     try:
-        from tools.factor_board import build as fb_build, hud as fb_hud
-        snap["factor_board"] = fb_hud(fb_build())
+        from tools.factor_board import build as fb_build, hud as fb_hud, render as fb_render
+        fb = fb_build()
+        snap["factor_board"] = fb_hud(fb) + "\n\n" + fb_render(fb)
     except Exception as e:  # never fail the snapshot on one section
         snap["factor_board"] = f"(factor board unavailable: {e})"
 
