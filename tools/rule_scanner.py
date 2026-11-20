@@ -71,7 +71,9 @@ def load_universe():
                 if s and s.isalpha() and len(s) <= 5 and s not in CASH]
         cur.execute("""select distinct on (ticker, side) ticker, side, removed_on from ss_roster_history
                        order by ticker, side, added_on desc""")
-        ss = {(t, s) for t, s, r in cur.fetchall() if r is None}
+        ss_rows = cur.fetchall()
+        ss = {(t, s) for t, s, r in ss_rows if r is None}
+        ss_removed = {(t, s) for t, s, r in ss_rows if r is not None}
         cur.execute("select ticker, hedgeye_bucket_0629 from ticker_tags where hedgeye_bucket_0629 is not null")
         pm = dict(cur.fetchall())
         cur.execute("""select distinct on (ticker) ticker, bias from hedgeye_etf_pro_ranges
@@ -83,7 +85,76 @@ def load_universe():
             for r in csv.DictReader(f):
                 for t in r["ticker"].split():
                     watch[t] = r["side"]
+    for t, side in extra_inventory().items():      # desk_watch.csv wins on a conflict
+        if (t, side) in ss_removed:                # card: removed from Signal Strength = off the stalk
+            continue
+        watch.setdefault(t, side)
     return acct, book, ss, pm, etf, watch
+
+
+# Risk Range rows that are indexes, yields, FX or futures, not tickers you can trade.
+# "USD" there is the dollar index; in the book USD is ProShares Ultra Semis, so it is skipped too.
+RR_SKIP = {"SPX", "COMPQ", "RUT", "VIX", "USD", "WTIC", "BRENT", "GOLD", "SILVER", "COPPER", "NATGAS",
+           "BITCOIN", "NIKK", "DAX", "SSEC", "KOSPI", "UST2Y", "UST10Y", "UST30Y"}
+LEDGER = os.path.join(ROOT, "data", "stalk", "ledger.csv")
+CRYPTO_PRODUCTS = ("crypto_quant", "digital_assets_position_monitor")
+
+
+def _tradable(t: str) -> bool:
+    return bool(t) and t.isalpha() and t.isupper() and len(t) <= 5 and t not in RR_SKIP and t not in CASH
+
+
+def extra_inventory(today: dt.date | None = None) -> dict:
+    """The rest of Hedgeye's inventory (Kris 11/20: "the whole universe"): ticker -> 'long' | 'short'.
+
+    Later sources fill in only names the earlier ones don't have:
+    1. the latest daily Risk Range table (BULLISH = long, BEARISH = short);
+    2. Crypto Quant and the Digital Assets Position Monitor calls of the last 14 days;
+    3. the sector-call ledger (data/stalk/ledger.csv), last 30 days.
+    Every source is optional: a failure in one never stops the scan.
+    """
+    today = today or dt.date.today()
+    out: dict = {}
+    try:
+        import db_pg
+        with db_pg.get_conn() as c, c.cursor() as cur:
+            cur.execute("""select ticker, trend from hedgeye_risk_ranges
+                           where signal_date = (select max(signal_date) from hedgeye_risk_ranges)""")
+            for t, trend in cur.fetchall():
+                side = {"BULLISH": "long", "BEARISH": "short"}.get((trend or "").upper())
+                if side and _tradable(t):
+                    out.setdefault(t, side)
+            cur.execute("""select distinct on (name) name, direction from research_calls
+                           where product = any(%s) and signal_date >= %s
+                           order by name, signal_date desc, id desc""",
+                        (list(CRYPTO_PRODUCTS), today - dt.timedelta(days=14)))
+            for t, direction in cur.fetchall():
+                side = {"long": "long", "bullish": "long", "short": "short", "bearish": "short"}.get(direction)
+                if side and _tradable(t):
+                    out.setdefault(t, side)
+    except Exception as e:                                           # noqa: BLE001
+        print(f"extra_inventory: database sources skipped ({type(e).__name__})", file=sys.stderr)
+    try:
+        latest: dict = {}
+        with open(LEDGER, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                try:
+                    d = dt.date.fromisoformat(r["date"])
+                except (KeyError, ValueError):
+                    continue
+                if (today - d).days > 30:
+                    continue
+                call = (r.get("call") or "").lower()
+                lg, sh = "long" in call, "short" in call
+                side = "long" if lg and not sh and "bearish" not in call else "short" if sh and not lg else None
+                t = (r.get("ticker") or "").strip()
+                if side and _tradable(t) and d >= latest.get(t, (dt.date.min, None))[0]:
+                    latest[t] = (d, side)
+        for t, (_, side) in latest.items():
+            out.setdefault(t, side)
+    except OSError:
+        pass
+    return out
 
 
 def sides(t, ss, pm, etf, watch):
