@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press 11/21)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press and options note 11/21)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -95,10 +95,10 @@ Tools: `tools/desk_rot.py`, `tools/desk_shorts.py`, `tools/desk_sizing.py`, `too
 The one case where a short is added on weakness, not on a bounce. All four must be true at the same time:
 1. The name is Bearish Trend on Hedgeye, below Trade, and already a short in the book (never a new short).
 2. SPX is below SpotGamma's Volatility Trigger (negative gamma).
-3. SpotGamma HIRO for the S&P is breaking down and the TRACE Stability Gauge is low. **This needs SpotGamma Alpha. Until the desk can read HIRO and TRACE live, the press cannot fire.** The exact HIRO and Stability numbers get set after the first live look.
+3. SpotGamma HIRO for the S&P is breaking down and the TRACE Stability Gauge is low. The SpotGamma watcher chat reads both every 10 minutes (Alpha is live from 11/21). **The press cannot fire until Kris sets the HIRO and Stability numbers,** after the first live week.
 4. The name is above rp 0.15. At rp ≤ 0.15 the bottom-of-range cover wins, as always.
 - The press is **one extra add of one normal step**, once per name per break, and never past the 2% MAX. The negative-gamma half-size rule does not shrink it: negative gamma is the setup.
-- The press piece comes off first: cover it at the range low (rp ≤ 0.15) or when HIRO turns up, whichever comes first, on any day colour.
+- The press piece comes off first: cover it at the range low (rp ≤ 0.15) or when HIRO goes flat or turns up, whichever comes first, on any day colour. (SpotGamma's own guide: take profit when the HIRO line flatlines or reverses.)
 - The 4%-against stop and the Trade and Trend stops apply to the whole position, as now.
 - No press within 2 days of earnings.
 - Log every press, and every time the four lined up but no press was taken, in the conviction log, so the rule gets its own hit rate.
@@ -236,6 +236,7 @@ Every action and stalk line carries a score out of 100. Lists sort highest first
 - **Concentration:** flag when more than half the book depends on one quad outcome. Single stocks and ETFs are both fine; Kris uses single stocks sometimes, not always.
 - **No daily cap on new names, and no limit on the number of positions** (Kris's call), but flag when more than 3 A-grades show up on one side the same day.
 - **Leverage:** no 3x products. Margin is fine; keep the Individual account's $5,000 margin buffer.
+- **No options, in any account.** The options paper study (see Open) is on paper only and changes nothing here until Kris rules on its results.
 
 **The clock**
 - **No time-of-day limit on new positions (Kris 11/14, round 3):** longs and shorts can be added at any time. Kris tries not to trade the first 20 minutes, so the desk marks early actions "after 9:50". (Keith's own windows, 9:50–11:30 and 2:15–3:30, are context; may be revisited.)
@@ -284,7 +285,8 @@ Every action and stalk line carries a score out of 100. Lists sort highest first
   - the own-vol-index rule (tentative; the 30+ part was ruled 11/20), and how hedge products (BTAL, TAIL, CAOS, UVXY) are sized;
   - whether to add time windows (Kris: not yet);
   - day-1 shorts at the SPX backboard;
-  - the short press (11/21): set the HIRO and Stability Gauge numbers once Alpha is live, then check its hit rate.
-- **Talked through 11/21, not ruled, waiting on SpotGamma Alpha:** (1) use the live S&P read to time trims, covers and adds the card already calls for; (2) a separate index sleeve that trades the move itself (long beta up, inverse funds or UVXY down) with its own products, size, stop and time limit. Neither is a rule yet.
+  - the short press (11/21): set the HIRO and Stability Gauge numbers after the first live week of the SpotGamma watcher (starts 11/23), then check its hit rate.
+- **Talked through 11/21, not ruled (SpotGamma Alpha is live; waiting on the first live week):** (1) use the live S&P read to time trims, covers and adds the card already calls for; (2) a separate index sleeve that trades the move itself (long beta up, inverse funds or UVXY down) with its own products, size, stop and time limit. Neither is a rule yet.
+- **Options paper study (Kris 11/20 and 11/21): paper only.** For every A-grade call the desk logs what the option version cost at that moment, off live TradingView quotes, and compares the outcome with cash (`data/stalk/options_study.csv`; the desk prompt has the steps). SpotGamma (cheap or expensive options, the walls) is context for it. Review after 30 finished calls; until Kris rules, no options.
 - Audit round 3 batches 2–3 (16 items, single-source or low confidence) are parked in `PROCESS_AUDIT_ROUND3.md`.
 - **Mid-December SpotGamma keep/cancel review:** re-score the tape (15-minute reads from 11/16) and call-wall distance net of momentum (11/15: about zero once 1-month momentum is removed, so no single-name rule); check the three SpotGamma rules above against the conviction log. Evidence: `data/reviews/sg_scorecard_2026-11-16.md`, `PROPOSAL_SPOTGAMMA_CARD.md`.

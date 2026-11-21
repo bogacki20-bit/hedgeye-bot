@@ -81,7 +81,7 @@ C. Hedgeye special events: The Big Theme (incl. the AI Bubble deck), Market Situ
 
 D. Tier 1 Alpha Market Situation Report (all pages).
 
-E. SpotGamma: everything my plan (Essential) shows. There is no API; capture it from my FIRST Chrome. SpotGamma doesn't need Hedgeye's slow pacing, but keep it to one page at a time.
+E. SpotGamma: everything my plan shows (Alpha since 11/21; it was Essential before). There is no API; capture it from my FIRST Chrome. SpotGamma doesn't need Hedgeye's slow pacing, but keep it to one page at a time.
 - THE TAPE IS NOT YOUR JOB ANY MORE (Kris 11/21). A separate small chat, the tape reader (docs/playbook/TAPE_DESK_PROMPT.md), reads it every 15 minutes from 9:30 AM to 4:15 PM ET in its own "Tape - SpotGamma" tab. Never touch that tab.
   - Your part: at every block, look at feed_health's two "SpotGamma tape" lines. If the newest read is over 30 minutes old in market hours, tell me and the desk chat in one line.
   - Backstop: if no tape read has landed by 9:50 AM, or I tell you the tape chat is down, do the reads yourself until it is back: in a SpotGamma tab navigate to /tape, wait 8 s, click Flow Data, wait 5 s, run (0,eval)(localStorage.getItem('__sgtape2')), then railway run py -m tools.sg_tape --ingest-downloads.
@@ -105,6 +105,7 @@ F. Trade/Trend levels and ranges for the last close: every name in the bot AND t
 - I switched the line source on 11/15: the bot reads Trade (Vola2vola) and the Trend cloud from MFR first (section J), TradingView second. The newest bar wins; a tie goes to MFR (view v_line_source).
 - Keep running the TradingView capture in full as today (docs/TV_LEVELS.md). It is the backup, it covers what MFR can't (futures, the foreign 10Y yields, index codes, FX, names not in MFR), and it still feeds the TradingView ranges and closes other tools read. Don't shrink it until the desk tells you every reader is off it.
 - If the nightly MFR indicators job misses, the lines fall back to TradingView on their own. Report it in feed_health either way.
+- OPTION QUOTES ARE THE DESK'S (Kris 11/21): for its options paper study the desk chat opens its own temp TradingView options-chain tab, reads a quote with tools/tv_option_quote.js and closes it. Leave that tab alone, and do not price options yourself unless I ask.
 
 G. Sundays: the quad dashboard, the weekly quad forecast, the Big Theme update.
 

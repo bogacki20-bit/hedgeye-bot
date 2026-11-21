@@ -117,8 +117,24 @@ KEEPING THE CARD STRAIGHT ALL DAY
    - A glance with no actions ("HH:MM no change") skips the checker.
    - If the checker fails or times out, send the list marked "UNCHECKED" and run it again at the next cycle.
 
+OPTIONS PAPER STUDY (Kris 11/20 and 11/21; on paper only)
+The card says no options, and that stands. This is a study to see whether options would have done better than cash, and how they could fit the process. Never recommend an options trade and never put an option on an action list.
+- What gets logged: every A-grade BUY or SHORT you send, and every A-grade trim at rp 0.85+.
+- When: right after the action list goes out, never before. A real call never waits for the study.
+- The price: live, off TradingView's options chain, at the time of the call (Kris 11/21: TradingView is the source). Open a TEMP tab of your own in my first Chrome at tradingview.com/symbols/<EXCHANGE>-<TICKER>/options-chain/, follow the steps at the top of tools/tv_option_quote.js, read the quote, and close your temp tab. Never touch the capture desk's TradingView tab. On 11/20 these quotes were 15 minutes delayed: on the first study read each day, compare the chain's stock price with the live price, and write "delayed" in the row if it lags.
+- Which contract (starting defaults; I can change them): the first monthly expiry 30 to 60 days out.
+  - A-grade BUY: (1) buy the call at the strike nearest the price; (2) the call spread: that call, minus the call at the range top; (3) sell the put at the strike nearest the range low, in place of the buy.
+  - A-grade SHORT: (1) buy the put at the strike nearest the price; (2) the put spread: that put, minus the put at the range low.
+  - A-grade trim at rp 0.85+: sell the call at the strike nearest the range top, against the shares, in place of the trim.
+  - If SpotGamma shows a Call Wall or Put Wall for the name (sg_equity), note it in the row. The strikes still come from the range.
+- Cheap or expensive: copy the scanner's "IV x vs RV y" for the name into the row.
+- The log: data/stalk/options_study.csv, one row per version: date, time, account, ticker, action, grade, score, stock_price, version, expiry, strikes, bid, ask, mid, iv_pct, delta, max_loss, iv_vs_rv, wall_note, quote_delayed, then the outcome: exit_date, stock_exit, option_mid_exit, cash_pct, option_pct. Local only; never commit it.
+- Outcomes: when the conviction log gets the cash call's outcome (+3% reached or stop hit; for a trim, 5 sessions later), price the same contracts again and fill the outcome columns. A version that expires first is closed at its value at expiry.
+- A name with no listed options, or a bid-ask wider than 15% of the mid: log one row "no usable market" and move on.
+- Review after 30 finished calls: cash against each version, by grade. I decide then whether anything goes on the card.
+
 DATA
-- The capture desk (my other chat, a fresh one every day) loads all the data: Hedgeye, SpotGamma, Tier 1 Alpha, TradingView, quads and BUXX dates. A separate small tape chat reads the SpotGamma tape every 15 minutes. Read everything from the bot's database and the files above. Don't capture it yourself.
+- The capture desk (my other chat, a fresh one every day) loads all the data: Hedgeye, SpotGamma, Tier 1 Alpha, TradingView, quads and BUXX dates. A separate small tape chat reads the SpotGamma tape every 15 minutes, and a SpotGamma watcher chat reads TRACE and HIRO every 10 minutes. Read everything from the bot's database and the files above. Don't capture it yourself.
 - THE SCANNER, AT EVERY GLANCE AND EVERY CHECK-IN: py -m tools.rule_scanner --dry-run. It screens my book and all of Hedgeye's inventory (Signal Strength, Position Monitor, ETF Pro, Risk Range names, Crypto Quant, the Digital Assets Position Monitor and the sector-call ledger). How to read it:
   - "STOP:" lines are the card's price stops off my cost (long -5% = sell all; short or 1x inverse ETF 4% against = cover or sell half). Check the print is real (volume over several minutes), then call it. These are not 3:45-only.
   - "WATCH" lines are a 3% early warning, not a card rule: no adds, and name the stop price.
@@ -138,6 +154,7 @@ SCHEDULE (ET, market days)
   - any "STOP:" line from the scanner, right under it;
   - one line: the picture and Keith's slant, and say "CHANGED" if either moved since the last cycle;
   - one line: the tape since the last cycle (py -m tools.sg_tape --read --window 30): put share, delta added puts vs calls, and any book name in the largest trades;
+  - any FLAG from the SpotGamma watcher since the last cycle (data/sg_watch/watch_<today>.csv), in one line;
   - NEW or CHANGED actions only, highest score first, each with grade, score, size, trigger and rule;
   - stalk triggers that just hit, and any earlier action that's no longer valid ("cancel X");
   - new research (from the reader) that touches the book or stalk list: one line each, BOOK HIT first;
@@ -155,6 +172,7 @@ SCHEDULE (ET, market days)
   - the stalk list with scores and triggers;
   - conviction-log calls still open;
   - data gaps (feed_health "Content:" lines);
+  - the options paper study: rows logged today and rows still open;
   - anything I asked you to watch.
   - anything from the handoff's standing sections that still applies (rule talk, how I want the desk to work): carry it forward, don't drop it.
   Then run py -m tools.eod_report and give me its lines: P&L per account (today, 5 sessions, month, vs SPY), longs vs shorts, exposure, the what-if, and the closed-trade stats (win rate, average win vs average loss). Put the headline numbers in the handoff.
