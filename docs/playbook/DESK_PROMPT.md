@@ -122,10 +122,12 @@ The card says no options, and that stands. This is a study to see whether option
 - What gets logged: every A-grade BUY or SHORT you send, and every A-grade trim at rp 0.85+.
 - When: right after the action list goes out, never before. A real call never waits for the study.
 - The price: live, off TradingView's options chain, at the time of the call (Kris 11/21: TradingView is the source). Open a TEMP tab of your own in my first Chrome at tradingview.com/symbols/<EXCHANGE>-<TICKER>/options-chain/, follow the steps at the top of tools/tv_option_quote.js, read the quote, and close your temp tab. Never touch the capture desk's TradingView tab. On 11/20 these quotes were 15 minutes delayed: on the first study read each day, compare the chain's stock price with the live price, and write "delayed" in the row if it lags.
-- Which contract (starting defaults; I can change them): the first monthly expiry 30 to 60 days out.
-  - A-grade BUY: (1) buy the call at the strike nearest the price; (2) the call spread: that call, minus the call at the range top; (3) sell the put at the strike nearest the range low, in place of the buy.
-  - A-grade SHORT: (1) buy the put at the strike nearest the price; (2) the put spread: that put, minus the put at the range low.
+- Which contract (Kris 11/21: the best one from the 11/20 backtest, side by side with the plain one): the first monthly expiry 60 to 90 days out. No spreads: the 11/20 backtest (data/reviews/options_study_2026-11-20.md) had them worst in every cut.
+  - A-grade BUY: (1) MAIN: buy the in-the-money call with delta nearest 0.70; (2) SIDE BY SIDE: buy the call at the strike nearest the price, same expiry; (3) sell the put at the strike nearest the range low, in place of the buy.
+  - A-grade SHORT: (1) MAIN: buy the in-the-money put with delta nearest -0.70; (2) SIDE BY SIDE: buy the put at the strike nearest the price, same expiry.
   - A-grade trim at rp 0.85+: sell the call at the strike nearest the range top, against the shares, in place of the trim.
+  - Exits follow the backtest: a long call comes off at the range high or at half its days to expiry, with no price stop (the premium is the stop); a long put keeps the cash trade's price stop.
+  - The backtest said to buy options only when the name's implied vol is low. Log every A-grade call anyway, and mark the row "IV high" when the scanner shows IV above RV, so the review can test that.
   - If SpotGamma shows a Call Wall or Put Wall for the name (sg_equity), note it in the row. The strikes still come from the range.
 - Cheap or expensive: copy the scanner's "IV x vs RV y" for the name into the row.
 - The log: data/stalk/options_study.csv, one row per version: date, time, account, ticker, action, grade, score, stock_price, version, expiry, strikes, bid, ask, mid, iv_pct, delta, max_loss, iv_vs_rv, wall_note, quote_delayed, then the outcome: exit_date, stock_exit, option_mid_exit, cash_pct, option_pct. Local only; never commit it.
