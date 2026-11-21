@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -120,7 +120,9 @@ The picture changes two things: **which side gets added first** and **the step s
 - VXN rising faster than VIX = stress in tech/AI: press AI-sleeve shorts. RVX rising faster than VIX = stress in small caps: press small-cap shorts.
 - MOVE: 110+ = risk-off; 90 or lower = risk-on.
 - **Vol sets the size (Keith's buckets, audit 11/14):** 9–19 investable (normal steps); **20–29 chop: half-size steps on new longs; 30+: no new longs**, just cash and the stops.
-  - **Each market's own vol index (Keith, 3/6 lesson; Kris 11/14, tentative, recheck at the 11/28 review):** VXN for tech and AI names only (Kris 11/16: "tech only"; a Nasdaq listing alone doesn't count, so staples, healthcare and consumer names like COST, KDP, ISRG and SBUX go on VIX), RVX for small caps, VIX for everything else. Use the higher of the name's own index and VIX. At 30+, that market's long exposure is also sold, even at MIN.
+  - **30+ blocks new longs only (Kris 11/20, VIX 38):** no long buys or adds. Longs already held are NOT sold for the vol bucket; their own lines, trims and stops still manage them.
+  - **Shorts stay open at 30+** on the card's entry rules. **Inverse funds and hedge products can be bought at 30+** (PSQ, SH, RWM, METD, NVDD, ORCS; BTAL, TAIL, CAOS, UVXY): they are short or hedge exposure, not new longs. Their own lines and sizes still apply.
+  - **Each market's own vol index (Keith, 3/6 lesson; Kris 11/14, tentative, recheck at the 11/28 review):** VXN for tech and AI names only (Kris 11/16: "tech only"; a Nasdaq listing alone doesn't count, so staples, healthcare and consumer names like COST, KDP, ISRG and SBUX go on VIX), RVX for small caps, VIX for everything else. Use the higher of the name's own index and VIX. At 30+ on its own index, that market gets no new longs (Kris 11/20: held longs are not sold for it; this replaces "long exposure is also sold, even at MIN").
 - **Implied vs realized: are puts cheap or expensive? (Kris 11/14)** Use Keith's implied-vol premium table (tms_decks.ivol `ivol_prem` = implied vs realized, per ETF; SPY, QQQ, IWM first) with SpotGamma's IV/RV, skew rank and 25-delta risk reversal (rr25).
   - Premium 0% or below (implied at or under realized) = **protection is cheap; complacency** → risk-off lean: inverse-ETF protection is cheap, press shorts, trim longs into strength.
   - Premium +30% or more = **protection is expensive; fear is priced** → risk-on lean: cover shorts on red days, buy dips.
@@ -267,7 +269,7 @@ Every action and stalk line carries a score out of 100. Lists sort highest first
 
 ## Open
 - For the first monthly rule review (weekend of 11/28–29):
-  - the own-vol-index rule (tentative);
+  - the own-vol-index rule (tentative; the 30+ part was ruled 11/20), and how hedge products (BTAL, TAIL, CAOS, UVXY) are sized;
   - whether to add time windows (Kris: not yet);
   - day-1 shorts at the SPX backboard.
 - Audit round 3 batches 2–3 (16 items, single-source or low confidence) are parked in `PROCESS_AUDIT_ROUND3.md`.
