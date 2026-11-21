@@ -40,6 +40,10 @@ TV_KEY = {"USD": "USD_SEMI"}
 LONG_PM = ("active_long", "top_idea_long")
 SHORT_PM = ("active_short", "top_idea_short")
 BUF = 0.02
+STOP_LONG = 0.05        # card: -5% from cost = close
+STOP_SHORT = 0.04       # card: 4% against = cover half
+WARN = 0.03             # early warning only, not a card rule (Kris 11/21)
+INVERSE_1X = {"NVDD", "METD", "ORCS", "PSQ", "SH", "RWM", "MSFD", "TSLQ", "SKYD"}
 
 
 def _vol_frac(now: dt.datetime) -> float:
@@ -254,6 +258,33 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
             mv = q * p
             pct = abs(mv) / acct.get(a, 1) * 100
             tag = "" if closing else " (if it closes here)"
+            # price stops off cost (Kris 11/21; card: longs -5% = close, shorts 4% against = cover half).
+            # A 1x inverse ETF held long is a short: 4% under its cost = 4% against.
+            avg_c = abs(cb / q) if q and cb else None
+            vs = (p / avg_c - 1) if avg_c else None             # long: negative = losing
+            inv = q > 0 and t in INVERSE_1X
+            stopped = False
+            if vs is not None and q > 0 and not inv:
+                if vs <= -STOP_LONG:
+                    out.append(dict(base, acct=a, action="SELL ALL", exit=True,
+                                    why=f"STOP: {vs * 100:+.1f}% from cost {avg_c:.2f} (stop {avg_c * (1 - STOP_LONG):.2f}); check the print is real"))
+                    stopped = True
+                elif vs <= -WARN:
+                    out.append(dict(base, acct=a, action="WATCH", why=f"{vs * 100:+.1f}% from cost {avg_c:.2f}; "
+                                    f"stop at {avg_c * (1 - STOP_LONG):.2f}, no adds"))
+            elif vs is not None and (q < 0 or inv):
+                against = vs if q < 0 else -vs                  # short: price up = against; inverse ETF: its price down
+                lvl = avg_c * (1 + STOP_SHORT) if q < 0 else avg_c * (1 - STOP_SHORT)
+                if against >= STOP_SHORT:
+                    half = f"{max(1, math.ceil(abs(q) / 2)):g}" if q < 0 else f"{abs(q) / 2:.3f} sh"
+                    out.append(dict(base, acct=a, action=f"{'COVER' if q < 0 else 'SELL'} {half}", exit=True,
+                                    why=f"STOP: {against * 100:.1f}% against (entry {avg_c:.2f}, line {lvl:.2f}) = cover half"))
+                    stopped = True
+                elif against >= WARN:
+                    out.append(dict(base, acct=a, action="WATCH", why=f"{against * 100:.1f}% against (entry {avg_c:.2f}); "
+                                    f"cover half at {lvl:.2f}, no adds"))
+            if stopped:
+                continue
             if q > 0:
                 if tn_l and p < tn_l * (1 - nb_l):
                     out.append(dict(base, acct=a, action="SELL ALL", why=f"below Trend {tn_l:.2f}{tag}", exit=True))
