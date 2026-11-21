@@ -216,10 +216,65 @@ INDEX_COLS = [("upx", "upx"), ("zero_gamma", "zero_g_strike"), ("vol_trigger", "
               ("sig5", "sig5"), ("gamma_notional", "gamma_not"), ("futures_diff", "futuresDiff")]
 
 
+def _last_upx(series: list) -> float | None:
+    """Underlying price on the newest point of the first series that carries one (tilt_intraday, levels_history)."""
+    for s in series:
+        rows = s["data"]
+        if rows and isinstance(rows[-1], dict) and _num(rows[-1].get("upx")) is not None:
+            return _num(rows[-1]["upx"])
+    return None
+
+
+def _ref_upx(cur, sym: str, on: str | None = None) -> float | None:
+    """SpotGamma's own reference price for sym from the Home Index Levels (sg_index_daily), on a date or latest."""
+    if on:
+        cur.execute("SELECT upx FROM sg_index_daily WHERE sym=%s AND trade_date=%s", (sym, on))
+    else:
+        cur.execute("SELECT upx FROM sg_index_daily WHERE sym=%s ORDER BY trade_date DESC LIMIT 1", (sym,))
+    r = cur.fetchone()
+    return float(r[0]) if r and r[0] is not None else None
+
+
+def _scale_ok(px: float | None, ref: float | None) -> bool:
+    return px is not None and ref is not None and abs(px / ref - 1) <= 0.08
+
+
+def _write_tilt(cur, sym: str, series: list) -> dict | None:
+    """sg_tilt row from the last point of the Indices tilt_intraday series (11/20: nothing wrote sg_tilt after
+    indices_capture.py went; the capture desk filled 11/19 by hand). Only when the price matches that symbol's
+    Home Index Levels price for the same date, so a mislabeled page can't write another index's tilt."""
+    s = next((x for x in series if x["name"] == "tilt_intraday"), None)
+    if not s or not s["data"]:
+        return None
+    last = s["data"][-1]
+    ms = _num(last.get("epoch_millis"))
+    if ms is None:
+        return None
+    td = dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).date().isoformat()
+    upx = _num(last.get("upx"))
+    if not _scale_ok(upx, _ref_upx(cur, sym, td)):
+        return {"sym": sym, "trade_date": td, "skipped": "price does not match sg_index_daily"}
+    cur.execute("INSERT INTO sg_tilt (sym, trade_date, gamma_tilt, delta_tilt, upx, fetched_at) VALUES "
+                "(%s,%s,%s,%s,%s,now()) ON CONFLICT (sym, trade_date) DO UPDATE SET gamma_tilt=EXCLUDED.gamma_tilt, "
+                "delta_tilt=EXCLUDED.delta_tilt, upx=EXCLUDED.upx, fetched_at=EXCLUDED.fetched_at",
+                (sym, td, _num(last.get("gamma_tilt")), _num(last.get("delta_tilt")), upx))
+    return {"sym": sym, "trade_date": td, "gamma_tilt": _num(last.get("gamma_tilt"))}
+
+
 def _store(conn, d: dict, fname: str) -> dict:
     from psycopg2.extras import Json
     c = classify(d)
     cur = conn.cursor()
+    stale = None
+    sym = d.get("sym") or ""
+    if (d.get("page") or "") == "indices" and sym and c["series"]:
+        # 11/20: the daily run switched Indices symbols with pushState, which doesn't reload the page's data, so every
+        # symbol after the first in a tab load carried the first symbol's series (QQQ/NDX/RUT as SPY, IWM as RUT).
+        # Check the page's price against that symbol's Home Index Levels price; drop the series if it is another index.
+        px, ref = _last_upx(c["series"]), _ref_upx(cur, sym)
+        if px is not None and ref is not None and not _scale_ok(px, ref):
+            stale = {"sym": sym, "page_upx": px, "ref_upx": ref}
+            c["series"] = []
     for r in c["index"]:
         cols = ["trade_date", "sym"] + [a for a, _ in INDEX_COLS] + ["futures_sym", "levels", "gamma_curve", "captured_at"]
         vals = ([_date(r.get("keyLevelTradeDate") or r.get("trade_date")), r["sym"]] +
@@ -234,6 +289,7 @@ def _store(conn, d: dict, fname: str) -> dict:
                     "(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (captured_date, page, sym, name) DO UPDATE SET "
                     "n=EXCLUDED.n, data=EXCLUDED.data, captured_at=EXCLUDED.captured_at",
                     (s["captured_date"], s["page"], s["sym"], s["name"], s["n"], Json(s["data"]), s["captured_at"]))
+    tilt = _write_tilt(cur, sym, c["series"]) if (d.get("page") or "") == "indices" and sym else None
     for e in c["events"]:
         if not e.get("date") or not e.get("event"):
             continue
@@ -267,8 +323,13 @@ def _store(conn, d: dict, fname: str) -> dict:
                  len(d.get("states") or {}), len(d.get("grids") or []), len(c["series"]),
                  len(json.dumps(d))))
     conn.commit()
-    return {"file": fname, "index": len(c["index"]), "series": len(c["series"]), "events": len(c["events"]),
-            "scanner": len(c["scanner"]), "equity": len(c["equity"])}
+    out = {"file": fname, "index": len(c["index"]), "series": len(c["series"]), "events": len(c["events"]),
+           "scanner": len(c["scanner"]), "equity": len(c["equity"])}
+    if stale:
+        out["stale"] = stale
+    if tilt:
+        out["tilt"] = tilt
+    return out
 
 
 def _store_reports(conn, d: dict, fname: str) -> dict:
@@ -317,6 +378,10 @@ def ingest(path: str) -> dict:
             for one in d["captures"]:
                 r = _store(conn, one, name)
                 tot["pages"] += 1
+                if r.get("stale"):
+                    tot.setdefault("stale", []).append(r["stale"]["sym"] + " " + (one.get("tab") or ""))
+                if r.get("tilt"):
+                    tot.setdefault("tilt", []).append(r["tilt"])
                 for k in ("index", "series", "events", "scanner", "equity"):
                     tot[k] = tot.get(k, 0) + r[k]
             return tot

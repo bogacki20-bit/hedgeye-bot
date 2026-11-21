@@ -44,12 +44,32 @@
     } catch (e) { return ms => new Promise(r => setTimeout(r, ms)); }
   })();
   const go = path => { history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')); };
+  const lastUpx = out => {   // price on the newest point of the first state that carries one (tilt / level history)
+    for (const v of Object.values(out.states || {}))
+      if (Array.isArray(v) && v.length && v[v.length - 1] && typeof v[v.length - 1].upx === 'number') return v[v.length - 1].upx;
+    return null;
+  };
   const clickTab = name => {
     const t = [...document.querySelectorAll('[role=tab], button')].find(e => (e.innerText || '').trim() === name);
     if (t) { t.click(); return true; }
     return false;
   };
   const waitFor = async (test, ms) => { for (let i = 0; i < ms / 250; i++) { if (test()) return true; await sleep(250); } return false; };
+  // 11/20: the Indices page reads ?sym= only when it mounts, so a pushState from /indices?sym=SPY to ?sym=QQQ kept
+  // SPY's data (the URL, and so the saved label, said QQQ). Leaving through /home makes it mount again for each symbol.
+  let mounted = location.pathname + location.search;
+  const open = async (path, force) => {
+    if (force || (path.split('?')[0] === mounted.split('?')[0] && path !== mounted)) {
+      go('/home');
+      await sleep(1500);
+      await waitFor(() => location.pathname === '/home' && document.querySelectorAll('[role=tab]').length > 0, 8000);
+    }
+    go(path);
+    mounted = path;
+    await sleep(2500);
+    await waitFor(() => document.querySelectorAll('[role=tab]').length > 0, 12000);
+    await sleep(2500 + Math.random() * 1500);
+  };
   const etParts = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit',
     day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d)
     .reduce((a, x) => (a[x.type] = x.value, a), {});
@@ -98,10 +118,11 @@
       steps.push({ path: '/equityhub?sym=' + encodeURIComponent(s), tab: 'Composite View' });
       if (i < 15) steps.push({ path: '/equityhub?sym=' + encodeURIComponent(s), tab: 'History' });
     });
-    prog = { day, started: new Date().toISOString(), steps, next: 0, got: 0, failed: [], loads: 0, done: false };
+    prog = { day, started: new Date().toISOString(), steps, next: 0, got: 0, failed: [], loads: 0, done: false, px: {} };
     window.__sgDailyRestart = false;
   }
   prog.loads = (prog.loads || 0) + 1;
+  prog.px = prog.px || {};
   saveProg();
   const st = { done: prog.done, total: prog.steps.length, got: prog.got, next: prog.next, failed: prog.failed,
                batch: BATCH, loads: prog.loads, current: null, phase: 'running' };
@@ -139,20 +160,37 @@
       st.current = step.path + ' / ' + step.tab;
       try {
         if (step.path !== lastPath) {
-          go(step.path);
+          await open(step.path);
           lastPath = step.path;
-          await sleep(2500);
-          await waitFor(() => document.querySelectorAll('[role=tab]').length > 0, 12000);
-          await sleep(2500 + Math.random() * 1500);
         }
         if (!clickTab(step.tab)) {
           prog.failed.push(st.current + ' (no tab)');
         } else {
           await sleep(3500 + Math.random() * 1500);
-          const out = cap('obj');
-          out.step = step;
-          await idbAdd(JSON.parse(JSON.stringify(out)));   // plain data, as the old JSON save wrote it
-          prog.got++;
+          let out = cap('obj');
+          // 11/20: same-page symbol switches kept the old symbol's data. If this Indices page still shows the price
+          // another symbol showed, re-open it through Home once; if it still matches, skip it (failed list).
+          const sym = (step.path.match(/[?&]sym=([^&]+)/) || [])[1];
+          if (step.path.startsWith('/indices') && sym) {
+            let px = lastUpx(out);
+            const other = px != null && Object.entries(prog.px).find(([s, v]) => s !== sym && v === px);
+            if (other) {
+              await open(step.path, true);
+              clickTab(step.tab);
+              await sleep(4500);
+              out = cap('obj');
+              px = lastUpx(out);
+            }
+            if (px != null && Object.entries(prog.px).some(([s, v]) => s !== sym && v === px)) {
+              prog.failed.push(st.current + ' (still shows ' + Object.entries(prog.px).find(([s, v]) => s !== sym && v === px)[0] + ' data)');
+              out = null;
+            } else if (px != null && !prog.px[sym]) prog.px[sym] = px;
+          }
+          if (out) {
+            out.step = step;
+            await idbAdd(JSON.parse(JSON.stringify(out)));   // plain data, as the old JSON save wrote it
+            prog.got++;
+          }
         }
       } catch (e) { prog.failed.push(st.current + ' ' + e.message); }
       prog.next++;

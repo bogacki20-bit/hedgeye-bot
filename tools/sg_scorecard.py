@@ -41,6 +41,24 @@ def _conn():
 
 
 # ---------- 1-2. index levels ----------
+_REF: dict = {}
+
+
+def _own_prices(sym: str, df: pd.DataFrame) -> bool:
+    """11/20: until the daily run's Indices fix, symbols after the first in a tab load were saved with another index's
+    data (QQQ/NDX/RUT as SPY, IWM as RUT). Keep a history only if its last price matches sym's Home Index Levels."""
+    from tools.sg_pages import _ref_upx, _scale_ok
+    if "upx" not in df or not len(df) or df["upx"].iloc[-1] is None:
+        return True
+    if sym not in _REF:
+        with _conn() as c:
+            _REF[sym] = _ref_upx(c.cursor(), sym)
+    if _REF[sym] is None or _scale_ok(float(df["upx"].iloc[-1]), _REF[sym]):
+        return True
+    print(f"sg_scorecard: {sym} level history carries another index's prices ({float(df['upx'].iloc[-1]):,.0f}); skipped")
+    return False
+
+
 def load_level_history() -> dict[str, pd.DataFrame]:
     out = {}
     files = sorted(glob.glob(os.path.join("data", "sg_pages", "raw", "*", "sg_page_daily_*.json.gz")))
@@ -53,14 +71,18 @@ def load_level_history() -> dict[str, pd.DataFrame]:
                 continue
             for v in cap.get("states", {}).values():
                 if isinstance(v, list) and v and isinstance(v[0], dict) and {"max_g_strike", "call_wall_strike", "net_gamma"} <= set(v[0]):
-                    out[sym] = pd.DataFrame([x for x in v if isinstance(x, dict)])
+                    df = pd.DataFrame([x for x in v if isinstance(x, dict)])
+                    if _own_prices(sym, df):
+                        out[sym] = df
                     break
     if len(out) < 6:   # fallback: the table keeps the last 400 sessions
         with _conn() as c:
             q = pd.read_sql("SELECT DISTINCT ON (sym) sym, data FROM sg_series WHERE name='levels_history' AND page LIKE 'indices%%' "
                             "ORDER BY sym, captured_date DESC", c)
         for _, r in q.iterrows():
-            out.setdefault(r["sym"], pd.DataFrame(r["data"]))
+            df = pd.DataFrame(r["data"])
+            if r["sym"] not in out and _own_prices(r["sym"], df):
+                out[r["sym"]] = df
     for s, df in out.items():
         df["date"] = pd.to_datetime(df["trade_date"].str[:10])
         out[s] = df.drop_duplicates("date").set_index("date").sort_index()
