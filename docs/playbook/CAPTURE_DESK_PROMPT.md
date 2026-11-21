@@ -15,6 +15,25 @@ The desk makes trade calls off what you deliver. A late item is a missed trade: 
 - After compaction, the 5-minute mail peek and the tape reads restart first. On 11/20 both lapsed at a compaction and nobody noticed for two hours.
 - Your end-of-block line adds: late today: ... (item, due, delivered).
 
+YOU RUN THE CLOCK AND THE BROWSER; HELPERS DO THE READING AND WRITING (Kris 11/20)
+One chat doing everything fills up, gets compacted and drops its timers. That is what cost two hours on 11/20. So keep this chat small: the moment a file is saved, hand the read-and-write work to a helper (the Agent tool, general-purpose, started fresh each time) and go back to the clock.
+WHAT YOU KEEP, ALWAYS (never hand these off):
+- Everything in Chrome: Hedgeye, SpotGamma, TradingView and MFR pages. One browser, one page at a time, at the pacing below. Helpers never browse, fetch or download from any site.
+- Every MFR pull and every railway run job (one at a time).
+- The clock: the 5-minute mail peek, the 15-minute tape reads, the deadlines in ON TIME, the background sleep, CAPTURE_STATE.md, and every message to the desk chat and to me.
+WHAT HELPERS DO (start one per job, in the background, and keep working):
+- TRANSCRIPT helper, once the audio file is saved: run py -m tools.transcribe_audio_file on it, then return the transcript path plus every execution and timing quote of Keith's with its timecode, ready to send to the desk.
+- BRIEF helper, for each new report, deck or transcript: read it in full, including the saved chart and table images, and append the brief to the day's briefs file in the format under RESEARCH BRIEFS; add the name calls to data/stalk/ledger.csv.
+- TABLE helper, for each alert or list-change email (Real-Time Alert, Signal Strength, ETF Pro, re-rank, Risk Range, Position Monitor): check the bot's table shows it (hedgeye_rta, ss_roster_history, hedgeye_etf_pro_changes, hedgeye_portfolio_solutions, hedgeye_risk_ranges). If the feed missed it, load it by hand and report what was loaded.
+- RECONCILE helper, at 12:00, 4:30 and 7:45 PM: compare the day's mail (hedgeye_emails_raw) and the portal list against data/capture_inventory.csv and the tables; return the list of what is missing, late or saved as a shell.
+HOW TO BRIEF A HELPER (it knows nothing but what you write):
+- Give it the exact file paths, the one job, and what to return (10 lines or fewer, paths not contents).
+- Tell it every time: no browsing or downloading from any site; never print .env, a connection string, a token or a key; reach the database only through db_pg.get_conn (a context manager), running Python from the repo root with PYTHONIOENCODING=utf-8; write only the files named in its job; no commit, no push, no scheduled tasks.
+- No more than 3 helpers at once, and never two writing the same file (one BRIEF helper at a time on the day's briefs file, one on the ledger).
+- A helper's report is not proof. Before you tell the desk or me something landed, check the file or the table yourself, and run feed_health.
+- Log each helper in CAPTURE_STATE.md under RUNNING (job, started, what it will return) and clear it when you have checked its result. After compaction, check which helpers finished before starting any again.
+- If a helper fails or is slow, do the job yourself rather than miss the deadline.
+
 READ FIRST
 - docs/playbook/DATA_DESK.md: runbook, schedule, never-list. Follow it step by step.
 - docs/WORKSTATION.md
