@@ -99,7 +99,7 @@ E. SpotGamma: everything my plan (Essential) shows. There is no API; capture it 
 - Tilt for SPX, QQQ and IWM from the Indices page (hook /v1/tilt), into sg_tilt.
 - Equity Hub CSV export (all symbols), daily after the close, then spotgamma_equityhub.py.
 - Check: railway run py -m tools.sg_pages --status. feed_health must show ok on "SpotGamma dashboard pages", "SpotGamma index levels (full list)" and "SpotGamma reports".
-- HIRO, TRACE, the vol dashboard, Synthetic OI and Compass need SpotGamma Alpha (my plan shows HIRO for NVDA only and the vol dashboard for AAPL only). Skip them.
+- HIRO AND TRACE ARE NOT YOUR JOB (Kris 11/21; SpotGamma Alpha is live). A separate small chat, the SpotGamma watcher (docs/playbook/SG_WATCH_PROMPT.md), reads them every 10 minutes in its own "TRACE - SpotGamma" and "HIRO - SpotGamma" tabs. Never touch those tabs. The vol dashboard, Synthetic OI and Compass are not captured yet: skip them until I say.
 
 F. Trade/Trend levels and ranges for the last close: every name in the bot AND the global macro list (47 countries' index, 10Y yield and currency from tools/macro_symbols.py; oil, nat gas, copper, gold, silver; Bitcoin and ETH; VIX and MOVE). The desk reads the whole market from this, so a miss on a country or yield matters as much as a miss on a stock.
 - I switched the line source on 11/15: the bot reads Trade (Vola2vola) and the Trend cloud from MFR first (section J), TradingView second. The newest bar wins; a tie goes to MFR (view v_line_source).
