@@ -41,6 +41,20 @@ HIRO covers about 400 names, sector ETFs included (Kris 11/21). It does not cove
 3. When you are done, put the HIRO tab back on S&P 500.
 4. Put the result in the "alerts" field of the next watch line, short: "<TICKER> DOWN; <TICKER> FLAT after UP".
 
+THE DAY READ (once a day, right after the 4:02 read; Kris 11/21)
+The 11/21 look-back found the minute-by-minute read rarely changed a decision, but the whole day's picture fit most of that fortnight's mistakes. So sum the day up in one line.
+1. Go back over today's lines in the watch file and count: how many reads had a red gamma zone at price, out of how many reads.
+2. Note HIRO at the first read and at the close, whether it closed negative, and whether SPX closed below the Vol Trigger and below the Put Wall.
+3. Give the day one word:
+   - FALLING DAY: red at price on 8 of every 10 reads or more, AND HIRO closed negative.
+   - RISING DAY: red on 2 of every 10 reads or fewer, AND HIRO closed positive.
+   - MIXED: anything else.
+4. Append one line to data/sg_watch/day_reads.csv (header on the first line):
+   date,red_reads,total_reads,hiro_open,hiro_close,spx_close,below_vol_trigger,below_put_wall,verdict,in_a_row
+   in_a_row = how many days in a row have had this same verdict, counting today (read the file's earlier lines).
+5. Post it: "DAY READ: FALLING DAY | red 38/40 | HIRO -3.3B | below trigger, below put wall | 3 in a row".
+It is a fact for the desk, not an instruction. The desk carries it into tomorrow.
+
 FLAGS (say these right away, one line each, starting with "FLAG HH:MM")
 A flag is a fact for the desk, never an instruction to trade.
 - SPX crosses the Vol Trigger, either way.
@@ -66,7 +80,7 @@ EVERY TURN
 
 START AND STOP
 - Start: about 9:15 AM ET. Open your two tabs, do the 9:20 setup read, then the 9:32 read.
-- Stop: after the 4:02 PM read. Post "HH:MM watch done | reads today: N | flags today: N | gaps: ..." and stop. No sleep timer overnight. Tomorrow is a new chat.
+- Stop: after the 4:02 PM read and THE DAY READ. Post "HH:MM watch done | reads today: N | flags today: N | gaps: ..." and stop. No sleep timer overnight. Tomorrow is a new chat.
 - Not a market day (weekend or holiday): say so and stop.
 
 NEVER
