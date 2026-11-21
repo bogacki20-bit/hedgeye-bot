@@ -135,6 +135,13 @@ def closed_trades():
     """FIFO-match book_activity buys and sells per (account, symbol) -> list of closed pieces.
     Each piece: account, sym, side (long/short), qty, entry, exit, opened, closed, gain.
     A plain sell with no open lot is a position opened before the activity history: skipped (counted)."""
+    out, _lots, skipped, first, latest = fifo()
+    return out, skipped, first, latest
+
+
+def fifo():
+    """The FIFO match behind closed_trades(), also returning the lots still open:
+    (closed pieces, {(acct, sym): [[opened, signed qty, price], ...]}, skipped, first, latest)."""
     import db_pg
     with db_pg.get_conn() as c, c.cursor() as cur:
         cur.execute("""select run_date, account_name, symbol, action_raw, price, quantity from book_activity
@@ -170,7 +177,7 @@ def closed_trades():
             skipped += 1
             continue
         book.append([d, q, px])
-    return out, skipped, first, latest
+    return out, lots, skipped, first, latest
 
 
 def closed_section(bar) -> list:

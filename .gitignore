@@ -42,3 +42,7 @@ data/fills_autoingest_state.json
 exports/bot_dump_*
 outputs/briefs/
 docs/playbook/CAPTURE_STATE.md
+
+# local reports and watcher files that hold the book or SpotGamma data
+outputs/execution_report/
+data/sg_watch/
