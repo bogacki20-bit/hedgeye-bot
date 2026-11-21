@@ -131,6 +131,106 @@ def session_pnl(snaps, close, n_sessions=30):
     return out
 
 
+def closed_trades():
+    """FIFO-match book_activity buys and sells per (account, symbol) -> list of closed pieces.
+    Each piece: account, sym, side (long/short), qty, entry, exit, opened, closed, gain.
+    A plain sell with no open lot is a position opened before the activity history: skipped (counted)."""
+    import db_pg
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("""select run_date, account_name, symbol, action_raw, price, quantity from book_activity
+                       where action_type in ('buy', 'sell') and not coalesce(is_option, false)
+                         and symbol is not null and price is not null and quantity is not null
+                         and account_name = any(%s) order by run_date, id""", (ACCOUNTS,))
+        rows = cur.fetchall()
+        cur.execute("select min(run_date), max(run_date) from book_activity where action_type in ('buy', 'sell')")
+        first, latest = cur.fetchone()
+    lots = defaultdict(list)            # (acct, sym) -> [[date, signed qty, price]]
+    out, skipped = [], 0
+    for d, a, s, raw, px, q in rows:
+        s, px, q = _sym(s), float(px), float(q)
+        if not q or s in CASH:
+            continue
+        book = lots[(a, s)]
+        while q and book and (book[0][1] > 0) != (q > 0):
+            lot = book[0]
+            m = min(abs(q), abs(lot[1]))
+            long_ = lot[1] > 0
+            out.append(dict(acct=a, sym=s, side="long" if long_ else "short", qty=m, entry=lot[2], exit=px,
+                            opened=lot[0], closed=d, gain=m * (px - lot[2]) * (1 if long_ else -1)))
+            lot[1] -= m if long_ else -m
+            q += m if q < 0 else -m
+            if abs(lot[1]) < 1e-9:
+                book.pop(0)
+        if abs(q) < 1e-9:
+            continue
+        if q < 0 and "SHORT SALE" not in (raw or "").upper():
+            skipped += 1                # selling something bought before the history starts
+            continue
+        if q > 0 and "SHORT COVER" in (raw or "").upper():
+            skipped += 1
+            continue
+        book.append([d, q, px])
+    return out, skipped, first, latest
+
+
+def closed_section(bar) -> list:
+    try:
+        pieces, skipped, first, latest = closed_trades()
+    except Exception as e:
+        return ["", f"6. CLOSED TRADES: could not build ({type(e).__name__})"]
+    L = ["", f"6. CLOSED TRADES (first in, first out, from Fidelity activity {first} to {latest}; fills after {latest} not loaded yet)"]
+
+    def stats(ps, label):
+        if not ps:
+            return f"  {label:22} none"
+        w = [p for p in ps if p["gain"] > 0]
+        l_ = [p for p in ps if p["gain"] < 0]
+        cost = sum(p["qty"] * p["entry"] for p in ps) or 1.0
+        days = sum((p["closed"] - p["opened"]).days * p["qty"] * p["entry"] for p in ps) / cost
+        return (f"  {label:22}{len(ps):>5} closes | won {len(w) / len(ps) * 100:>3.0f}% | gain {sum(p['gain'] for p in ps):>+8,.0f}"
+                f" | avg win {sum(p['gain'] for p in w) / len(w) if w else 0:>+6.1f} | avg loss "
+                f"{sum(p['gain'] for p in l_) / len(l_) if l_ else 0:>+6.1f} | return on cost {sum(p['gain'] for p in ps) / cost * 100:>+5.2f}%"
+                f" | avg {days:.0f} days held")
+
+    # one line per (account, symbol, side, close date)
+    agg = defaultdict(lambda: dict(qty=0.0, cost=0.0, proceeds=0.0, gain=0.0, days=0.0))
+    for p in pieces:
+        k = (p["closed"], p["acct"], p["sym"], p["side"])
+        g = agg[k]
+        g["qty"] += p["qty"]
+        g["cost"] += p["qty"] * p["entry"]
+        g["proceeds"] += p["qty"] * p["exit"]
+        g["gain"] += p["gain"]
+        g["days"] += (p["closed"] - p["opened"]).days * p["qty"]
+    closes = [dict(closed=k[0], acct=k[1], sym=k[2], side=k[3], qty=g["qty"], entry=g["cost"] / g["qty"],
+                   exit=g["proceeds"] / g["qty"], gain=g["gain"], opened=k[0] - dt.timedelta(days=round(g["days"] / g["qty"])))
+              for k, g in agg.items()]
+    month = [p for p in closes if p["closed"].month == bar.month and p["closed"].year == bar.year]
+    d30 = [p for p in closes if (bar - p["closed"]).days <= 90]
+    L.append(f"  Month to date ({bar:%b}):")
+    L.append(stats(month, "  all"))
+    L.append(stats([p for p in month if p["side"] == "long"], "  longs"))
+    L.append(stats([p for p in month if p["side"] == "short"], "  shorts"))
+    for a in ACCOUNTS[:2]:
+        L.append(stats([p for p in month if p["acct"] == a], f"  {a}"))
+    L.append("  Last 90 days:")
+    L.append(stats(d30, "  all"))
+    L.append(stats([p for p in d30 if p["side"] == "long"], "  longs"))
+    L.append(stats([p for p in d30 if p["side"] == "short"], "  shorts"))
+    recent_days = sorted({p["closed"] for p in closes})[-5:]
+    recent = sorted((p for p in closes if p["closed"] in recent_days), key=lambda p: (p["closed"], -abs(p["gain"])))
+    L.append(f"  Closes in the last 5 trading days with activity ({len(recent)}; the 30 biggest shown):")
+    L.append(f"    {'closed':10} {'acct':10} {'name':7}{'side':6}{'qty':>8}{'entry':>10}{'exit':>10}{'days':>6}{'gain $':>9}{'gain':>8}")
+    keep = sorted(sorted(recent, key=lambda p: -abs(p["gain"]))[:30], key=lambda p: (p["closed"], p["gain"]))
+    for p in keep:
+        r = (p["exit"] / p["entry"] - 1) * (1 if p["side"] == "long" else -1)
+        L.append(f"    {p['closed']:%m/%d}      {p['acct'].split()[0]:10} {p['sym']:7}{p['side']:6}{p['qty']:>8.3f}{p['entry']:>10.2f}"
+                 f"{p['exit']:>10.2f}{(p['closed'] - p['opened']).days:>6}{p['gain']:>+9.2f}{r * 100:>+7.1f}%")
+    L.append(f"  A close = all of one name sold or covered in one account on one day. {skipped} sells of positions "
+             f"opened before {first} are left out. Dividends and fees are not in the gain.")
+    return L
+
+
 def chain(pairs) -> float | None:
     """pairs = [(pnl, nav)] -> compounded return."""
     x, used = 1.0, 0
@@ -289,13 +389,15 @@ def build() -> str:
     except Exception as e:
         L.append(f"  could not read the log ({type(e).__name__})")
 
+    L += closed_section(bar)
+
     L.append("")
     if missing:
         L.append("NO PRICE (left at the snapshot value, no P&L, no beta): " + ", ".join(sorted(missing)))
     nb = sorted(s for s in held if s not in betas and s not in missing)
     if nb:
         L.append("NO BETA (too little history): " + ", ".join(nb))
-    L.append("Not in this version: closed-trade list (entry, exit, days, gain), intraday trading P&L, and the split by sleeve.")
+    L.append("Not in this version: intraday trading P&L in section 1, the split by sleeve, and hit rates by conviction grade.")
     return "\n".join(L)
 
 
