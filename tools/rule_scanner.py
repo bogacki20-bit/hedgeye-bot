@@ -201,6 +201,12 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                        where ticker=any(%s) and range_high is not null and bar_date >= current_date - 7
                        order by ticker, bar_date desc""", ([TV_KEY.get(t, t) for t in T],))
         rng = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
+        # MFR implied vs realized vol (Kris 11/20): context on every line, never a gate
+        cur.execute("""select distinct on (ticker) ticker, iv, rv from mfr_snapshots
+                       where ticker=any(%s) and iv is not null and rv is not null and rv > 0
+                         and snapshot_date >= current_date - 5
+                       order by ticker, snapshot_date desc, fetched_at desc""", (T,))
+        ivrv = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
     lv = lookup(T)
     rs = structure(T)
     d = yf.download(T, period="3mo", interval="1d", progress=False, threads=True, group_by="ticker")
@@ -240,7 +246,8 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         n = max(streak, 2)
         vol_falling = vo[-n:].mean() < a20 and vo[-1] < vo[-2]
         base = dict(ticker=t, px=p, day=day, rp=rp, trade=tr, trend=tn_l, rl=rl, rh=rh,
-                    vol3="/".join(_fv(x) for x in vo[-3:]), avg=_fv(a20), streak=streak)
+                    vol3="/".join(_fv(x) for x in vo[-3:]), avg=_fv(a20), streak=streak,
+                    ivrv=ivrv.get(t))
         side = sides(t, ss, pm, etf, watch)
 
         for a, q, cb in held.get(t, []):
@@ -313,8 +320,12 @@ def fmt(alerts, now):
     lines = [f"as of {now:%H:%M}"]
     for o in sorted(alerts, key=lambda o: (not o.get("exit"), o["acct"], o["ticker"])):
         rp = "-" if o["rp"] is None else f"{o['rp']:.2f}"
+        iv = ""
+        if o.get("ivrv"):
+            i, r = o["ivrv"]
+            iv = f" | IV {i * 100:.0f} vs RV {r * 100:.0f} ({(i / r - 1) * 100:+.0f}%)"
         lines.append(f"{o['acct'].split()[0]}: {o['action']} {o['ticker']} @ {o['px']:.2f} | rp {rp} | "
-                     f"vol {o['vol3']} (avg {o['avg']}) | {o['why']}")
+                     f"vol {o['vol3']} (avg {o['avg']}){iv} | {o['why']}")
     return "\n".join(lines)
 
 
