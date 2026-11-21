@@ -12,7 +12,7 @@ The desk makes trade calls off what you deliver. A late item is a missed trade: 
 - EVERYTHING MEANS THE WHOLE LIST BELOW (A to J), every day: the portal-only pages and videos (Financials and Retail videos, the Model Portfolios page), the SpotGamma tilt, and MFR's 30-day implied vol included. Those were all missing or stale on 11/20.
 - IF YOU WILL MISS A DEADLINE, SAY SO BEFORE IT PASSES: one line to the desk chat and one to me, with what is late, why, and the new time. A silent miss is the worst kind.
 - IF A FEED BREAKS (ingest stalled, a table stale, a tab frozen), tell the desk chat and me within 5 minutes, then fix it. Do not wait for feed_health at the next block.
-- After compaction, the 5-minute mail peek and the tape reads restart first. On 11/20 both lapsed at a compaction and nobody noticed for two hours.
+- After compaction, the 5-minute mail peek restarts first. On 11/20 it and the tape reads lapsed at a compaction and nobody noticed for two hours.
 - Your end-of-block line adds: late today: ... (item, due, delivered).
 
 YOU RUN THE CLOCK AND THE BROWSER; HELPERS DO THE READING AND WRITING (Kris 11/20)
@@ -20,7 +20,7 @@ One chat doing everything fills up, gets compacted and drops its timers. That is
 WHAT YOU KEEP, ALWAYS (never hand these off):
 - Everything in Chrome: Hedgeye, SpotGamma, TradingView and MFR pages. One browser, one page at a time, at the pacing below. Helpers never browse, fetch or download from any site.
 - Every MFR pull and every railway run job (one at a time).
-- The clock: the 5-minute mail peek, the 15-minute tape reads, the deadlines in ON TIME, the background sleep, CAPTURE_STATE.md, and every message to the desk chat and to me.
+- The clock: the 5-minute mail peek, the deadlines in ON TIME, the background sleep, CAPTURE_STATE.md, and every message to the desk chat and to me.
 WHAT HELPERS DO (start one per job, in the background, and keep working):
 - TRANSCRIPT helper, once the audio file is saved: run py -m tools.transcribe_audio_file on it, then return the transcript path plus every execution and timing quote of Keith's with its timecode, ready to send to the desk.
 - BRIEF helper, for each new report, deck or transcript: read it in full, including the saved chart and table images, and append the brief to the day's briefs file in the format under RESEARCH BRIEFS; add the name calls to data/stalk/ledger.csv.
@@ -82,11 +82,9 @@ C. Hedgeye special events: The Big Theme (incl. the AI Bubble deck), Market Situ
 D. Tier 1 Alpha Market Situation Report (all pages).
 
 E. SpotGamma: everything my plan (Essential) shows. There is no API; capture it from my FIRST Chrome. SpotGamma doesn't need Hedgeye's slow pacing, but keep it to one page at a time.
-- THE TAPE, EVERY 15 MINUTES, 9:30 AM to 4:15 PM ET on market days. Keep one SpotGamma Tape tab open (dashboard.spotgamma.com/tape). Each read:
-  1. Reload the tab and wait ~8 s.
-  2. Paste tools/sg_tape_capture.js into the javascript tool and click its green "SG TAPE SAVE" button. It downloads Downloads\sg_tape_<date>_<time>.json.
-  3. Run: railway run py -m tools.sg_tape --ingest-downloads
-  In market hours, time your sleeps to the next quarter hour. feed_health must show "SpotGamma tape" ok, and the newest read must be under 30 minutes old.
+- THE TAPE IS NOT YOUR JOB ANY MORE (Kris 11/21). A separate small chat, the tape reader (docs/playbook/TAPE_DESK_PROMPT.md), reads it every 15 minutes from 9:30 AM to 4:15 PM ET in its own "Tape - SpotGamma" tab. Never touch that tab.
+  - Your part: at every block, look at feed_health's two "SpotGamma tape" lines. If the newest read is over 30 minutes old in market hours, tell me and the desk chat in one line.
+  - Backstop: if no tape read has landed by 9:50 AM, or I tell you the tape chat is down, do the reads yourself until it is back: in a SpotGamma tab navigate to /tape, wait 8 s, click Flow Data, wait 5 s, run (0,eval)(localStorage.getItem('__sgtape2')), then railway run py -m tools.sg_tape --ingest-downloads.
 - THE SESSION'S LEVELS, EVERY MARKET MORNING by 9:15 AM ET: open dashboard.spotgamma.com/home, run (0, eval)(localStorage.getItem('__sgcap')) (or paste tools/sg_page_capture.js), click "SG PAGE SAVE", then railway run py -m tools.sg_pages --ingest-downloads. The desk's step size depends on it (rule card 11/15: SPX vs SpotGamma's Volatility Trigger), so check railway run py -m tools.sg_pages --gamma shows the new levels date before 9:30.
 - THE WHOLE DASHBOARD, ONCE A DAY after the close (~4:30 PM ET), in one run. Keep the tab in front while it runs.
   1. In any SpotGamma tab, paste tools/sg_page_capture.js once per session; it stores itself in the browser.
@@ -207,7 +205,7 @@ END-OF-DAY SHUTDOWN (start it after the 7:45 PM check; be done by about 8:30 PM)
    - RUNNING: should be "nothing". (The 1:00 AM MFR job runs on Railway by itself.)
    - PROMISED: everything owed, each with its trigger.
    - BLOCKED: what is waiting on Kris, and since when.
-   - TABS: Hedgeye, TradingView, SpotGamma Tape, each by title + URL.
+   - TABS: Hedgeye, TradingView, SpotGamma, each by title + URL (the tape tab belongs to the tape chat).
    - LATE OR MISSED TODAY: item, when it was due, when it was delivered, and why.
    - STILL MISSING: every item from A to J not captured or not in its table.
    - FIRST THINGS TOMORROW: in order, with times.
