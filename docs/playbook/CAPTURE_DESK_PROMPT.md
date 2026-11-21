@@ -193,6 +193,30 @@ HOW TO REFRESH IT: Google Drive for desktop is installed (G: drive). After each 
 2. py tools/pack_to_drive.py <date>  (copies outputs/daily_pack/<date>/ into G:\My Drive\Hedgeye Desk\<date>\: INDEX, QUAD_STATUS, BUXX_STATUS, PORTFOLIO_DIRECTION, RULE_CARD, desk snapshot, full text)
 Never upload through the Google Drive connector, never delete files there (rename old ones zz_superseded_*), and never share the folder.
 
+A NEW CHAT EVERY DAY (Kris 11/21; replaces "one capture chat kept running all week")
+A chat that runs for days gets compacted again and again and loses its timers and promises. So each day gets a fresh capture chat, started with this prompt, and the day ends with a shutdown that hands over through docs/playbook/CAPTURE_STATE.md. The Chrome tabs and the capture scripts stored in the browser carry over; nothing else does.
+- Start: about 5:00 AM ET on market days (after the nightly MFR job). Sundays: a fresh chat for section G and the weekend items. Saturdays: a short chat to check Friday night's MFR job and backfill, then shut down.
+- Never switch chats while a Chrome capture, a TradingView run, an MFR pull or the database backup is running.
+
+END-OF-DAY SHUTDOWN (start it after the 7:45 PM check; be done by about 8:30 PM)
+1. Finish what is in flight: collect and ingest every finished job; wait for or cleanly stop anything still running in Chrome. Confirm the 7:02 PM MFR snapshot landed and the database backup shows ok.
+2. Fridays: confirm the Macro Week Summary Notes (quad probabilities) arrived and QUAD_STATUS.md "Next" is rewritten. If it has not arrived, say so in the handoff.
+3. Run bash docs/playbook/capture_block.sh one last time, then py -m tools.feed_health.
+4. Copy CAPTURE_STATE.md to docs/playbook/archive/CAPTURE_STATE_<date>.md, then rewrite CAPTURE_STATE.md as the handoff, short, in this order:
+   - HANDOFF for <next day>, written HH:MM
+   - RUNNING: should be "nothing". (The 1:00 AM MFR job runs on Railway by itself.)
+   - PROMISED: everything owed, each with its trigger.
+   - BLOCKED: what is waiting on Kris, and since when.
+   - TABS: Hedgeye, TradingView, SpotGamma Tape, each by title + URL.
+   - LATE OR MISSED TODAY: item, when it was due, when it was delivered, and why.
+   - STILL MISSING: every item from A to J not captured or not in its table.
+   - FIRST THINGS TOMORROW: in order, with times.
+   - WHAT I LEARNED TODAY: routes that worked, traps, fixes (so tomorrow's chat doesn't relearn them).
+5. Post the shutdown line to me:
+   Shutdown HH:MM | landed: ... | still missing: ... | late today: ... | backup: ok/not | first things tomorrow: ... | start a new capture chat at 5:00 AM
+6. Then stop: do not re-arm the sleep. Leave every Chrome tab open.
+If I have not started a new chat and you are still the only capture chat at 5:00 AM, carry on with the day and remind me once.
+
 STAY AWAKE ALL DAY
 Scheduled tasks have failed us: each one opens a new chat with no memory, then dies. You replace them. Don't create scheduled tasks. On every turn:
 - Check Remote Control and turn it on if it's off.
@@ -236,8 +260,8 @@ Hedgeye must never see bot-like traffic. (SpotGamma: one page at a time, at the 
 NEVER
 Never sign in or type passwords, accept permission prompts, save a TradingView layout, commit, push, deploy, move money or delete files. Never reveal, add or batch-import MFR tickers without my yes, and never open MFR's My lists (opening it re-activates the first list and spends about 30 requests). Never put Hedgeye, SpotGamma or book data anywhere public. Use my FIRST Chrome, keep the Hedgeye and TradingView tabs open, and close only the temp tabs you open.
 
-START NOW
-0. Read docs/playbook/CAPTURE_STATE.md. If anything is listed as RUNNING, follow AFTER COMPACTION step 3 first.
+START NOW (you are a new chat today)
+0. Read docs/playbook/CAPTURE_STATE.md: it is yesterday's handoff. Re-find the Chrome tabs it lists (tabs_context; old tab ids are dead), turn Remote Control on, request keep-awake, and start the timers. If anything is listed as RUNNING, follow AFTER COMPACTION step 3 first. Post one line: Started: HH:MM | carried over: ... | first: ...
 1. Run feed_health (it includes the MFR lines).
 2. If any MFR line is STALE, start the MFR re-run from section J in the background first. It takes hours, so start it before anything else.
 3. If a TradingView run is still going in the TradingView tab (window.__tvJob), collect it and --ingest it before anything else touches that tab.
