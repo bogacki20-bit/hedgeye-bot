@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px/1.4 system-ui, sans-serif; width: 320px; margin: 12px; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  ul { padding-left: 18px; margin: 0 0 10px; max-height: 260px; overflow: auto; }
+  button { width: 100%; padding: 8px; font-size: 13px; cursor: pointer; }
+  #note { color: #666; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1 id="head">Looking...</h1>
+  <ul id="list"></ul>
+  <button id="go" disabled>Close all groups</button>
+  <div id="note">Tabs that are not in a group stay open.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

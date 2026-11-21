@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Close All Tab Groups",
+  "version": "1.0",
+  "description": "One button: closes every tab that sits in a tab group, in every Chrome window. Tabs outside groups are left alone.",
+  "permissions": ["tabs", "tabGroups"],
+  "action": {
+    "default_title": "Close all tab groups",
+    "default_popup": "popup.html"
+  }
+}
