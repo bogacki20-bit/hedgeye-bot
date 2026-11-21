@@ -17,7 +17,8 @@ THE 9:20 SETUP READ (once, before the open)
 3. TRACE: note today's Vol Trigger, Call Wall, Put Wall and Hedge Wall for SPX, and what today's projected map shows around the current price (blue = calm, red = violent).
 4. Volatility Dashboard (dashboard.spotgamma.com/ivol, tab "VIX Term Structure", in your TRACE tab, then go back): are the near VIX months above or below the later months?
 5. Scanners (dashboard.spotgamma.com/scanners, Squeeze): is any SHORT on the watchlist on the squeeze list?
-6. Post the setup in at most 5 lines and write it as the first line of today's file.
+6. HIRO Stock Screener (the tab under the HIRO chart): which watchlist names does HIRO cover today? Those are the names for THE NAMES READ.
+7. Post the setup in at most 5 lines and write it as the first line of today's file.
 
 THE READ (every 10 minutes: :02, :12, :22, :32, :42, :52; first at 9:32, last at 3:52, plus one at 4:02)
 TRACE redraws every 10 minutes, so read just after it does.
@@ -33,6 +34,13 @@ TRACE redraws every 10 minutes, so read just after it does.
    Use the machine clock for time. Leave a field blank if you could not read it; never guess a number.
 Then start a background sleep timed to the next read (never more than 600 seconds) and end your turn. Use the machine clock (date +%H:%M), never your own count.
 
+THE NAMES READ (every 30 minutes, with the :22 and :52 reads, so it is ready for the desk's :32 and :02 check-ins)
+HIRO covers about 400 names, sector ETFs included (Kris 11/21). It does not cover every name in the book, so use the covered list you built at 9:20.
+1. Read these, in this order, and stop after 12 names so the next S&P read is never late: the sector and bond ETFs in the book first, then the stocks behind the book's inverse-fund shorts, then any name the desk has said it is about to trade.
+2. For each: in the HIRO tab, search the ticker, wait for the chart, and read Current HIRO, 30 Day HIRO Range, and the line over the last 30 minutes (UP, DOWN or FLAT). Read every line on the stock or ETF itself.
+3. When you are done, put the HIRO tab back on S&P 500.
+4. Put the result in the "alerts" field of the next watch line, short: "<TICKER> DOWN; <TICKER> FLAT after UP".
+
 FLAGS (say these right away, one line each, starting with "FLAG HH:MM")
 A flag is a fact for the desk, never an instruction to trade.
 - SPX crosses the Vol Trigger, either way.
@@ -40,6 +48,7 @@ A flag is a fact for the desk, never an instruction to trade.
 - Gamma zone at price changes colour.
 - PRESS CHECK: SPX is below the Vol Trigger AND HIRO is DOWN AND Stability is low. The Stability number that counts as "low" is NOT SET yet: until Kris sets it, log the number and flag PRESS CHECK only on the first two conditions, with the Stability number in the line.
 - A watchlist ticker gets a wall alert (breached or within 1%) or a flow alert. One line per ticker, once per alert.
+- From the names read: a book name's HIRO goes FLAT or turns after running one way for 30 minutes or more. Say the name and which way it had been running. (SpotGamma's guide: that is where a move tends to stall.)
 - From the 9:20 read: a watchlist short is on the squeeze list.
 
 WHAT YOU SAY
