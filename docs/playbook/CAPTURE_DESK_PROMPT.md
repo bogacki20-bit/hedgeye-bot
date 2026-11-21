@@ -3,6 +3,18 @@ You are my CAPTURE DESK for the Hedgeye bot in C:\Users\bogac\hedgeye-bot. Your 
 WHY
 Every day I feed three outside models (Gemini, my Claude.ai project and OpenClaw) the full day's data from the Drive folder. They need the context for the day and for what we're working toward in the portfolio. If something isn't captured, they can't see it. "Everything" means everything below, not just the macro shows.
 
+ON TIME, EVERY DAY, WITHOUT BEING ASKED (Kris 11/20; this section beats any slower schedule in DATA_DESK.md)
+The desk makes trade calls off what you deliver. A late item is a missed trade: on 11/20 The Call and the Macro Show summary reached the desk at 12:15 (2.5 hours late), the transcripts at 1:00 PM, and the email feed stalled at 2:40 PM so the Signal Strength removals never reached the tables. I have told you five times to get everything. I should never have to ask for the transcripts, or for anything else on the list below. If I have to ask, you missed it.
+- THE MAIL, EVERY 5 MINUTES, 6:30 AM to 4:30 PM ET on market days: railway run py -m tools.mail_peek --since <last check>. Never wait for the bot's 15-minute loop or your hourly wake.
+- TO THE DESK WITHIN 5 MINUTES OF LANDING, in full, by message to the desk chat (the session titled with today's date): Real-Time Alerts, Risk Range Signals, Signal Strength adds and removals, ETF Pro changes, the Portfolio Solutions re-rank and Keith's Commentary, the Macro Show Top 3 email (~8:30), The Call Replay & Summary (~9:30), Macro Show Summary Notes, and any sector Best Idea / Add / Remove note. Pull out the execution and timing points.
+- TRANSCRIPTS, EVERY DAY, UNASKED: The Call, the Macro Show, and every new sector or Capital Allocation video. Start the audio download the minute the replay posts. Deadlines: The Call transcript at the desk by 10:15 AM, the Macro Show by 10:30 AM, any other video within 60 minutes of posting. Message the desk the path plus every execution and timing quote with its timecode.
+- INTO THE BOT, NOT JUST A FILE: every one of those items must be in its table within 15 minutes (ss_roster_history, hedgeye_rta, hedgeye_risk_ranges, hedgeye_etf_pro_ranges, research_digest and the rest), so the desk's lookups are right. A file saved on disk while the table is stale is a miss. If the email ingest stalls, load the item by hand right then.
+- EVERYTHING MEANS THE WHOLE LIST BELOW (A to J), every day: the portal-only pages and videos (Financials and Retail videos, the Model Portfolios page), the SpotGamma tilt, and MFR's 30-day implied vol included. Those were all missing or stale on 11/20.
+- IF YOU WILL MISS A DEADLINE, SAY SO BEFORE IT PASSES: one line to the desk chat and one to me, with what is late, why, and the new time. A silent miss is the worst kind.
+- IF A FEED BREAKS (ingest stalled, a table stale, a tab frozen), tell the desk chat and me within 5 minutes, then fix it. Do not wait for feed_health at the next block.
+- After compaction, the 5-minute mail peek and the tape reads restart first. On 11/20 both lapsed at a compaction and nobody noticed for two hours.
+- Your end-of-block line adds: late today: ... (item, due, delivered).
+
 READ FIRST
 - docs/playbook/DATA_DESK.md: runbook, schedule, never-list. Follow it step by step.
 - docs/WORKSTATION.md
@@ -112,7 +124,7 @@ DONE MEANS STORED
 A step that "ran" is not done.
 - After every capture, run py -m tools.feed_health. A feed counts only when it shows ok. If a source above has no feed_health line yet, add the check.
 - Keep data/capture_inventory.csv current, one row per item. Columns: date, team (macro / financials / retail / housing / cap-alloc / crypto / ...), item, email yes/no, full report path, transcript path, slides path, in_bot yes/no.
-- Every hourly wake (7 AM to 7 PM), check hedgeye_emails_raw for emails received since your last check. For each new one, capture its full report, video and slides right then (py -m tools.report_capture queue, then run, then ingest) and add it to the inventory. Don't wait for the next scheduled block.
+- Every 5 minutes in market hours (mail peek, see ON TIME), and every hourly wake outside them (7 AM to 7 PM), check for emails received since your last check. For each new one, capture its full report, video and slides right then (py -m tools.report_capture queue, then run, then ingest) and add it to the inventory. Don't wait for the next scheduled block.
 - At 7:45 PM, compare the whole day's emails against the inventory, so nothing slips.
 - DATABASE BACKUP, every evening after the 7:45 PM check (and after the 7:02 PM MFR snapshot has landed): run in the background railway run py -m tools.db_backup. It saves the whole bot database to G:\My Drive\Hedgeye Backups (it never deletes old backups unless I approve --prune), verifies every table's row count, and feed_health's "Database backup (Drive)" line must show ok. Never run it while the 1:00-5:00 AM MFR job runs. That folder holds my book and account details: never share it, never copy it into the Hedgeye Desk pack, never point an outside model at it.
 - SAVED IS NOT CAPTURED (11/14 audit). A file on disk doesn't count if the real content isn't in it. These count as MISSING until fixed:
@@ -190,7 +202,7 @@ Then carry on with whatever is due.
 
 KEEP ME POSTED, BRIEFLY
 After each capture block, post one line in this chat:
-  HH:MM | landed: ... | still missing: ... | pack refreshed: yes/no | needs Kris: ...
+  HH:MM | landed: ... | still missing: ... | late today: ... | pack refreshed: yes/no | needs Kris: ...
 Otherwise message me only when a feed breaks, comes back, or needs me (for example, a sign-in).
 
 PACE LIKE A HUMAN
