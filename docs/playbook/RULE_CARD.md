@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press 11/21)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -90,6 +90,18 @@ Tools: `tools/desk_rot.py`, `tools/desk_shorts.py`, `tools/desk_sizing.py`, `too
 - No new short within 2 days of earnings.
 - **No new short when the name's 1-month return is positive** (Keith, audit 11/14). The stalk list shows 1-week, 1-month and 3-month returns.
 - **No new short within 2% under the Trend cloud top:** a name just under Trend is a warning, not a short.
+
+## Shorts: press when the stars align (Kris 11/21)
+The one case where a short is added on weakness, not on a bounce. All four must be true at the same time:
+1. The name is Bearish Trend on Hedgeye, below Trade, and already a short in the book (never a new short).
+2. SPX is below SpotGamma's Volatility Trigger (negative gamma).
+3. SpotGamma HIRO for the S&P is breaking down and the TRACE Stability Gauge is low. **This needs SpotGamma Alpha. Until the desk can read HIRO and TRACE live, the press cannot fire.** The exact HIRO and Stability numbers get set after the first live look.
+4. The name is above rp 0.15. At rp ≤ 0.15 the bottom-of-range cover wins, as always.
+- The press is **one extra add of one normal step**, once per name per break, and never past the 2% MAX. The negative-gamma half-size rule does not shrink it: negative gamma is the setup.
+- The press piece comes off first: cover it at the range low (rp ≤ 0.15) or when HIRO turns up, whichever comes first, on any day colour.
+- The 4%-against stop and the Trade and Trend stops apply to the whole position, as now.
+- No press within 2 days of earnings.
+- Log every press, and every time the four lined up but no press was taken, in the conviction log, so the rule gets its own hit rate.
 
 ## Shorts: recycle on red (Kris 11/14, mirror of longs)
 - On any red day when the short is **0.5% or more in profit, OR low in its range (rp 0.35 or less)**, cover **25 bp of that account**. With an inverse ETF, sell 25 bp of the ETF.
@@ -271,6 +283,8 @@ Every action and stalk line carries a score out of 100. Lists sort highest first
 - For the first monthly rule review (weekend of 11/28–29):
   - the own-vol-index rule (tentative; the 30+ part was ruled 11/20), and how hedge products (BTAL, TAIL, CAOS, UVXY) are sized;
   - whether to add time windows (Kris: not yet);
-  - day-1 shorts at the SPX backboard.
+  - day-1 shorts at the SPX backboard;
+  - the short press (11/21): set the HIRO and Stability Gauge numbers once Alpha is live, then check its hit rate.
+- **Talked through 11/21, not ruled, waiting on SpotGamma Alpha:** (1) use the live S&P read to time trims, covers and adds the card already calls for; (2) a separate index sleeve that trades the move itself (long beta up, inverse funds or UVXY down) with its own products, size, stop and time limit. Neither is a rule yet.
 - Audit round 3 batches 2–3 (16 items, single-source or low confidence) are parked in `PROCESS_AUDIT_ROUND3.md`.
 - **Mid-December SpotGamma keep/cancel review:** re-score the tape (15-minute reads from 11/16) and call-wall distance net of momentum (11/15: about zero once 1-month momentum is removed, so no single-name rule); check the three SpotGamma rules above against the conviction log. Evidence: `data/reviews/sg_scorecard_2026-11-16.md`, `PROPOSAL_SPOTGAMMA_CARD.md`.
