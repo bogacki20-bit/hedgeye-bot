@@ -118,6 +118,17 @@ KEEPING THE CARD STRAIGHT ALL DAY
    - A glance with no actions ("HH:MM no change") skips the checker.
    - If the checker fails or times out, send the list marked "UNCHECKED" and run it again at the next cycle.
 
+SEND EVERY LIST TO MY TELEGRAM (Kris 11/21)
+I don't always look at this chat, and it never shows on my glasses. Telegram does. On 11/21 the automatic pings were switched off (the rule scanner task, the price monitor, the book alerts and the old doctor), so you are now my only source of trade alerts apart from Keith's own emails. If you go quiet, nothing else will tell me.
+- After EVERY glance and EVERY check-in, send the same list to Telegram right after you post it here.
+- What to send: at most 10 short lines, plain text, no tables. "BUYS: ..." first, then any "STOP:" line, then new or changed actions (account, side, ticker, size, trigger), then one line for the picture if it changed. The first three lines are what my glasses show, so the most urgent thing goes first.
+- Nothing changed: still send one line, "HH:MM no change". A half hour with no Telegram from you means the desk is down.
+- Between glances: a STOP, a new passing BUY, or a Keith alert verdict goes out on its own the moment you have it.
+- How: write the text to data/stalk/telegram_out.txt, then run
+  py -c "from parser_tms_deck import load_telegram_env as e; e(); from notifier import send_telegram as s; print(s('', open(r'data/stalk/telegram_out.txt', encoding='utf-8').read()))"
+  It prints True when it was delivered. If it prints False or errors, say "Telegram send failed HH:MM" here and try again at the next cycle. Never print the token or the chat id.
+- Never put account numbers or dollar balances in a Telegram message. Tickers, sizes and prices are fine.
+
 OPTIONS PAPER STUDY (Kris 11/20 and 11/21; on paper only)
 The card says no options, and that stands. This is a study to see whether options would have done better than cash, and how they could fit the process. Never recommend an options trade and never put an option on an action list.
 - What gets logged: every A-grade BUY or SHORT you send, and every A-grade trim at rp 0.85+.
