@@ -129,23 +129,75 @@ INDEX_FUND = {
     "IEF": ("UST10Y", "^TNX", True), "SHY": ("UST2Y", None, True),      # no live 2-year yield on Yahoo
 }
 LEDGER = os.path.join(ROOT, "data", "stalk", "ledger.csv")
-KEITH_BOOKS = ("portfolio_solutions", "go_anywhere_portfolio")
+# Everything Hedgeye publishes with a ticker and a side (Kris 11/22: "everything should be on the scanner").
+# Signal Strength, the Position Monitor and ETF Pro are read directly in load_universe(); these fill in the
+# rest, in this order: Keith's own books first, then his alerts and daily signal, then the analysts' lists,
+# then research mentions. Each query returns (ticker, side word); the newest row per ticker is used.
+_SIDE = {"long": "long", "bullish": "long", "above": "long", "short": "short", "bearish": "short", "below": "short"}
+_DASH = """select ticker, position from hedgeye_dashboard_positions d where product = '{p}' and as_of >= %(d7)s
+           and as_of = (select max(as_of) from hedgeye_dashboard_positions where product = d.product)"""
+_LAST = ("select distinct on (ticker) ticker, {side} from {tab} where {date} >= %({win})s {extra} "
+         "order by ticker, {date} desc{tie}")
+SOURCES = (
+    ("Portfolio Solutions", _DASH.format(p="portfolio_solutions")),
+    ("Go Anywhere portfolio", _DASH.format(p="go_anywhere_portfolio")),
+    ("Keith's holdings", _DASH.format(p="overview_holdings")),
+    ("Signal Strength dashboard", _DASH.format(p="signal_strength_stocks")),
+    ("ETF Pro Plus", _DASH.format(p="etf_pro_plus")),
+    ("Investing Ideas", _DASH.format(p="investing_ideas")),
+    ("Real-Time Alerts", _LAST.format(side="case when signal_type = 'cover' then null else side end",
+                                      tab="hedgeye_rta", date="signal_date", win="d14", extra="", tie=", id desc")),
+    ("Keith's signals", _LAST.format(side="side", tab="hedgeye_keiths_signals", date="signal_date", win="d14",
+                                     extra="", tie=", id desc")),
+    ("Risk Range", """select ticker, trend from hedgeye_risk_ranges
+                      where signal_date = (select max(signal_date) from hedgeye_risk_ranges)"""),
+    ("Hedgeye trend tag", _LAST.format(side="tag", tab="hedgeye_trend_daily", date="date", win="d7", extra="", tie="")),
+    ("Investing Ideas newsletter", _LAST.format(side="side", tab="hedgeye_ii_newsletter", date="signal_date",
+                                                win="d14", extra="", tie=", id desc")),
+    ("The Call", _LAST.format(side="side", tab="hedgeye_the_call", date="signal_date", win="d14", extra="",
+                              tie=", id desc")),
+    ("The Call analyst calls", _LAST.format(side="analyst_call", tab="hedgeye_the_call_analyst", date="as_of",
+                                            win="d14", extra="", tie="")),
+    ("sector monitor", _LAST.format(side="case when tier = 'removed' then null else side end",
+                                    tab="hedgeye_sector_monitor_events", date="signal_date", win="d14", extra="",
+                                    tie=", id desc")),
+    ("Retail", _LAST.format(side="side", tab="hedgeye_retail", date="signal_date", win="d14",
+                            extra="and side is not null", tie=", id desc")),
+    ("Financials", _LAST.format(side="side", tab="hedgeye_financials", date="signal_date", win="d35", extra="",
+                                tie=", id desc")),
+    ("HedgAI", _LAST.format(side="case when is_close then null else side end", tab="hedgeye_hedgai",
+                            date="signal_date", win="d14", extra="", tie=", id desc")),
+    ("Capital Allocation dashboard", _LAST.format(side="trend_status", tab="hedgeye_cap_alloc_dashboard",
+                                                  date="as_of", win="d14", extra="", tie="")),
+    ("Monthly Trend & Tail", _LAST.format(side="trend_signal", tab="hedgeye_monthly_trend_tail", date="as_of",
+                                          win="d35", extra="", tie="")),
+    ("Risk Range (rotated out)", _LAST.format(side="trend_signal", tab="hedgeye_risk_range_outbucket",
+                                              date="as_of", win="d14", extra="", tie="")),
+    ("research", """select distinct on (name) name, direction from research_calls
+                    where kind = 'ticker' and signal_date >= %(d14)s
+                      and direction in ('long','short','bullish','bearish')
+                    order by name, signal_date desc, id desc"""),
+    ("MOMO tracker", _LAST.format(side="sentiment", tab="hedgeye_momo", date="signal_date", win="d14",
+                                  extra="and sentiment is not null", tie=", id desc")),
+)
+EXTRA_SRC: dict = {}        # ticker -> which of the sources above put it on the scanner (filled by extra_inventory)
+YF_KEY = {"ATZ": "ATZAF"}   # Signal Strength lists Aritzia as ATZ; Yahoo only knows the US line, ATZAF
 KEITH_SOURCES = {"The Call", "Macro Show", "KM's Top 3 Things", "Real-Time Alerts"}
-CRYPTO_PRODUCTS = ("crypto_quant", "digital_assets_position_monitor")
 
 
 def _tradable(t: str) -> bool:
-    return bool(t) and t.isalpha() and t.isupper() and len(t) <= 5 and t not in RR_SKIP and t not in CASH
+    return (bool(t) and t.isalpha() and t.isupper() and len(t) <= 5 and t not in RR_SKIP and t not in CASH
+            and t not in COINS)
 
 
 def extra_inventory(today: dt.date | None = None) -> dict:
     """The rest of Hedgeye's inventory (Kris 11/20: "the whole universe"): ticker -> 'long' | 'short'.
 
     Later sources fill in only names the earlier ones don't have:
-    1. the latest daily Risk Range table (BULLISH = long, BEARISH = short);
-    2. Crypto Quant and the Digital Assets Position Monitor calls of the last 14 days;
-    3. the sector-call ledger (data/stalk/ledger.csv), last 30 days;
-    4. the Risk Range's index, yield and commodity rows, passed to the fund that tracks each (INDEX_FUND).
+    1. every table in SOURCES, in its order (Keith's books, his alerts and daily signal, the analysts' lists,
+       research mentions);
+    2. the sector-call ledger (data/stalk/ledger.csv), last 30 days;
+    3. the Risk Range's index, yield and commodity rows, passed to the fund that tracks each (INDEX_FUND).
     Every source is optional: a failure in one never stops the scan.
     """
     today = today or dt.date.today()
@@ -158,29 +210,20 @@ def extra_inventory(today: dt.date | None = None) -> dict:
             cur.execute("""select ticker, trend from hedgeye_risk_ranges
                            where signal_date = (select max(signal_date) from hedgeye_risk_ranges)""")
             rows = cur.fetchall()
-            for t, trend in rows:
-                side = {"BULLISH": "long", "BEARISH": "short"}.get((trend or "").upper())
-                if side and _tradable(t):
-                    out.setdefault(t, side)
             row_side = {t: (trend or "").upper() for t, trend in rows}
-            # Keith's own books (Kris 11/22: Portfolio Solutions shows his lean): the latest dashboard
-            # snapshot of Portfolio Solutions and the Go Anywhere portfolio, if it is under a week old.
-            cur.execute("""select ticker, position from hedgeye_dashboard_positions d
-                           where product = any(%s) and as_of >= %s
-                             and as_of = (select max(as_of) from hedgeye_dashboard_positions where product = d.product)""",
-                        (list(KEITH_BOOKS), today - dt.timedelta(days=7)))
-            for t, pos in cur.fetchall():
-                side = {"long": "long", "short": "short"}.get((pos or "").strip().lower())
-                if side and _tradable(t):
-                    out.setdefault(t, side)
-            cur.execute("""select distinct on (name) name, direction from research_calls
-                           where product = any(%s) and signal_date >= %s
-                           order by name, signal_date desc, id desc""",
-                        (list(CRYPTO_PRODUCTS), today - dt.timedelta(days=14)))
-            for t, direction in cur.fetchall():
-                side = {"long": "long", "bullish": "long", "short": "short", "bearish": "short"}.get(direction)
-                if side and _tradable(t):
-                    out.setdefault(t, side)
+            for label, sql in SOURCES:              # each one fills only names the ones before it don't have
+                try:
+                    cur.execute(sql, {"d7": today - dt.timedelta(days=7), "d14": today - dt.timedelta(days=14),
+                                      "d35": today - dt.timedelta(days=35)})
+                    for t, raw in cur.fetchall():
+                        side = _SIDE.get((raw or "").strip().lower())
+                        t = (t or "").strip().upper()
+                        if side and _tradable(t) and t not in out:
+                            out[t] = side
+                            EXTRA_SRC[t] = label
+                except Exception as e:                               # noqa: BLE001
+                    c.rollback()
+                    print(f"extra_inventory: {label} skipped ({type(e).__name__})", file=sys.stderr)
     except Exception as e:                                           # noqa: BLE001
         print(f"extra_inventory: database sources skipped ({type(e).__name__})", file=sys.stderr)
     try:
@@ -208,7 +251,9 @@ def extra_inventory(today: dt.date | None = None) -> dict:
                     if d >= keith.get(t, (dt.date.min, None))[0]:
                         keith[t] = (d, k)
         for t, (_, side) in latest.items():
-            out.setdefault(t, side)
+            if t not in out:
+                out[t] = side
+                EXTRA_SRC[t] = "sector-call ledger"
     except OSError:
         pass
     # Keith's daily trend call on an index row is the signal for its fund, and the signal wins (Kris 11/22):
@@ -230,7 +275,14 @@ def extra_inventory(today: dt.date | None = None) -> dict:
 
 
 def sides(t, ss, pm, etf, watch):
-    """Which side Hedgeye's inventory has this ticker on: 'long', 'short', 'both' or None."""
+    """Which side Hedgeye's inventory has this ticker on: 'long', 'short', 'both' or None.
+
+    Signal Strength is primary (Kris 11/22; the card: it outranks the Position Monitor): a name on one
+    Signal Strength list takes that side, whatever the other lists say.
+    """
+    ss_l, ss_s = (t, "long") in ss, (t, "short") in ss
+    if ss_l != ss_s:
+        return "long" if ss_l else "short"
     lg = (t, "long") in ss or pm.get(t) in LONG_PM or etf.get(t) == "long" or watch.get(t) == "long"
     sh = (t, "short") in ss or pm.get(t) in SHORT_PM or etf.get(t) == "short" or watch.get(t) == "short"
     if not lg and not sh:
@@ -436,13 +488,14 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         ivrv = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
     lv = lookup(T)
     rs = structure(T)
-    d = yf.download(T, period="3mo", interval="1d", progress=False, threads=True, group_by="ticker")
+    d = yf.download([YF_KEY.get(t, t) for t in T], period="3mo", interval="1d", progress=False, threads=True,
+                    group_by="ticker")
     fr = _vol_frac(now)
     closing = now.hour * 60 + now.minute >= 15 * 60 + 40
     out = []
     for t in T:
         try:
-            h = d[t].dropna()
+            h = d[YF_KEY.get(t, t)].dropna()
         except Exception:
             continue
         if len(h) < 25:
@@ -489,6 +542,9 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                     ivrv=ivrv.get(t), rtag=rtag)
         side = sides(t, ss, pm, etf, watch)
         src = "; PM bench only" if bench_only(t, ss, pm, etf, watch) else ""
+        if (not src and t in EXTRA_SRC and t not in etf and pm.get(t) is None
+                and (t, "long") not in ss and (t, "short") not in ss):
+            src = f"; from {EXTRA_SRC[t]}"
 
         for a, q, cb in held.get(t, []):
             mv = q * p
