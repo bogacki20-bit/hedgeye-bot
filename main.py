@@ -493,6 +493,27 @@ if __name__ == "__main__":
     else:
         log.info("Quad early-warning disabled (QUAD_EARLYWARN_ENABLED=false).")
 
+    # Feed-down alert (Kris 11/22): every 15 min, weekdays 7:15 AM-8 PM ET, check the
+    # database feeds and Telegram ONLY when one goes down (stale two checks in a row) or
+    # comes back. Runs here so it works when the laptop is off. Toggle: FEED_ALERT_ENABLED.
+    if os.getenv("FEED_ALERT_ENABLED", "true").lower() in ("true", "1", "yes"):
+        def _feed_alert_loop():
+            import time
+            time.sleep(300)   # let the other loops start first
+            while True:
+                try:
+                    from tools.feed_health import run_server_alert
+                    st = run_server_alert()
+                    if st not in ("no change", "quiet hours"):
+                        log.info("feed_alert: %s", st)
+                except Exception as e:
+                    log.error("feed_alert loop error: %s", e)
+                time.sleep(900)
+        threading.Thread(target=_feed_alert_loop, daemon=True, name="feed-alert").start()
+        log.info("Feed alert thread started.")
+    else:
+        log.info("Feed alert disabled (FEED_ALERT_ENABLED=false).")
+
     # Morning quad-staleness ping (~6:00am ET). If the quad hasn't been confirmed in
     # QUAD_CONFIRM_MAX_AGE_DAYS (default 1), Telegram a reminder â€” reply OK to
     # confirm (stamps last-confirmed; does NOT change the quad) or QUAD: to change.

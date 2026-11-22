@@ -422,6 +422,54 @@ def alert_message(rows: list[dict], now: dt.datetime, state_path: pathlib.Path =
     return "\n".join(parts)
 
 
+def db_rows(now: dt.datetime) -> list[dict]:
+    """Only the feeds that live in the database (the FEEDS list and the intraday tape age).
+    Safe on Railway: no local files, no laptop paths."""
+    import db_pg
+    out = []
+    with db_pg.get_conn() as conn, conn.cursor() as cur:
+        for label, src, table, col, allowed in FEEDS:
+            try:
+                cur.execute("SELECT data_type FROM information_schema.columns "
+                            "WHERE table_name=%s AND column_name=%s", (table, col))
+                (dtype,) = cur.fetchone()
+                expr = f"({col} AT TIME ZONE 'America/New_York')::date" if "with time zone" in dtype else f"{col}::date"
+                if table in MIN_ROWS:
+                    cur.execute(f"SELECT max(d) FROM (SELECT {expr} d FROM {table} GROUP BY 1 "
+                                f"HAVING count(*) >= %s) x", (MIN_ROWS[table],))
+                else:
+                    cur.execute(f"SELECT max({expr}) FROM {table}")
+                last = cur.fetchone()[0]
+            except Exception as e:
+                conn.rollback()
+                out.append({"label": label, "src": src, "last": None, "lag": None, "ok": False, "err": str(e)[:80]})
+                continue
+            lag = _weekday_lag(last, now.replace(hour=0) if table in PRIOR_BAR_TABLES else now)
+            out.append({"label": label, "src": src, "last": last, "lag": lag,
+                        "ok": lag is not None and lag <= allowed})
+    out.extend(_tape_age_check(now))
+    return out
+
+
+DB_LABELS = {f[0] for f in FEEDS} | {"SpotGamma tape (intraday age)"}
+
+
+def run_server_alert(now: dt.datetime | None = None) -> str:
+    """Called by the always-on bot (main.py) every 15 minutes, so a dead feed is texted
+    even when the laptop and the capture desk are off (Kris 11/22). Weekdays 7:15 AM to
+    8:00 PM ET only: no Hedgeye mail lands overnight, so a night check would only make noise."""
+    now = now or dt.datetime.now(ET)
+    if now.weekday() >= 5 or not (dt.time(7, 15) <= now.time() <= dt.time(20, 0)):
+        return "quiet hours"
+    vol = pathlib.Path("/data")
+    state = (vol if vol.is_dir() else ROOT / "data") / "feed_alert_state_server.json"
+    msg = alert_message(db_rows(now), now, state)
+    if msg is None:
+        return "no change"
+    from notifier import send_telegram
+    return "sent" if send_telegram("Feed alert", msg) else "send failed"
+
+
 def _cli() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--send", action="store_true", help="text the verdict to Telegram")
@@ -447,7 +495,10 @@ def _cli() -> int:
             print("Telegram send failed")
             return 1
     if a.alert or a.alert_dry:
-        msg = alert_message(rows, now)
+        # The bot on Railway texts the database feeds itself (run_server_alert); the laptop
+        # only covers what lives on this computer, so a dead feed is texted once, not twice.
+        local = rows if os.getenv("FEED_ALERT_ALL") else [r for r in rows if r["label"] not in DB_LABELS]
+        msg = alert_message(local, now)
         if msg is None:
             print("feed alert: no change")
         elif a.alert_dry:
