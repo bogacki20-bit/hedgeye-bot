@@ -16,7 +16,7 @@ alerts (each ticker+action fires once a day; exits fire again at the 3:45 confir
 Our own lines (Vola Trade, 89-day EMA) get the 2% buffer; Keith's numbers don't.
 
 rp uses the bot's one canonical range per name (v_screener, the same one tools/rp_resolve.py and the
-other desk tools read): Hedgeye's Risk Range (7 days) > Investing Ideas (7 days) > MFR (5 days) >
+other desk tools read): Hedgeye's Risk Range > Hedgeye's Crypto Quant range > Investing Ideas > MFR (5 days) >
 TradingView (10 days). Every line prints which one it used and its date (Kris 11/21).
 One difference from v_screener (Kris 11/21): a Hedgeye range is used the day it is published and the next
 trading day (a weekly Monday range: through Tuesday); after that the name falls through to MFR.
@@ -32,6 +32,7 @@ import datetime as dt
 import json
 import math
 import os
+import re
 import sys
 import warnings
 
@@ -200,7 +201,30 @@ _FALLBACK = (       # same order as v_screener, for names outside its universe (
 )
 
 
-HEDGEYE_SRC = ("hdg", "iin")
+HEDGEYE_SRC = ("hdg", "cq", "iin")
+COINS = {"BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "ADA", "BNB", "LINK", "SUI", "HYPE"}   # coin labels, not stock tickers
+_RANGE_RE = re.compile(r"(?<![\d.,/$-])(\d[\d,]*\.?\d*)\s*[-–]\s*(\d[\d,]*\.?\d*)(?![\d/])")
+
+
+def crypto_quant_ranges(cur, T) -> dict:
+    """Hedgeye's daily Crypto Quant ranges (Kris 11/21: MARA, COIN, MSTR, IBIT... get a range every day there).
+
+    The numbers live only in the research digest's text ("Bearish TREND; 5.67-7.43 (from 5.70-7.54), price
+    6.25"), so the first low-high pair in the latest note is read, and dropped if it doesn't look like a range.
+    """
+    out: dict = {}
+    names = [t for t in T if t not in COINS]
+    cur.execute("""select distinct on (name) name, signal_date, thesis from research_calls
+                   where product='crypto_quant' and name=any(%s) and signal_date >= current_date - 7
+                   order by name, signal_date desc, id desc""", (names,))
+    for t, d, thesis in cur.fetchall():
+        m = _RANGE_RE.search(thesis or "")
+        if not m:
+            continue
+        lo, hi = (float(x.replace(",", "")) for x in m.groups())
+        if 0 < lo < hi < lo * 2 and _hedgeye_fresh(d):
+            out[t] = (hi, lo, "cq", d)
+    return out
 HEDGEYE_RANGE_DAYS = 1      # Kris 11/21: the daily Risk Range always wins; a weekly range (Monday) is good through
                             # Tuesday, then MFR's is used. One weekday of age covers both.
 
@@ -228,6 +252,12 @@ def load_ranges(T) -> dict:
     import db_pg
     out: dict = {}
     with db_pg.get_conn() as c, c.cursor() as cur:
+        try:
+            cq = crypto_quant_ranges(cur, T)
+        except Exception as e:                                      # noqa: BLE001
+            c.rollback()
+            cq = {}
+            print(f"load_ranges: Crypto Quant ranges skipped ({type(e).__name__})", file=sys.stderr)
         cur.execute("""select ticker, range_high, range_low, band_source, range_asof from v_screener
                        where ticker=any(%s) and range_low is not null and range_high > range_low""", (list(T),))
         for t, hi, lo, src, asof in cur.fetchall():
@@ -235,7 +265,11 @@ def load_ranges(T) -> dict:
                 continue
             if src in HEDGEYE_SRC and not _hedgeye_fresh(asof):
                 continue                                # too old: falls through to MFR below
+            if t in cq and src != "hdg":
+                continue                                # a daily Crypto Quant range beats everything but the daily Risk Range
             out[t] = (float(hi), float(lo), src or "?", asof)
+        for t, v in cq.items():
+            out.setdefault(t, v)
         for src, sql in _FALLBACK:
             need = [t for t in T if t not in out and not (src == "hdg" and t in RR_SKIP)]
             if not need:
