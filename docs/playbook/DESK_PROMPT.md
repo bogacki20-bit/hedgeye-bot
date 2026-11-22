@@ -93,6 +93,7 @@ HOW EVERY CHECK-IN LOOKS
   - the grade and score with its breakdown, e.g. "A 86 (card 50 / HE 15 / picture 15 / setup 6)" (the card's CONVICTION SCORE section). I choose; there's no daily cap.
   - BUY/SELL/SHORT/COVER, ticker, size (bp and $), trigger price, and the card rule it follows (e.g. "green-day trim", "Trend break -> out", "-5% stop").
   - A one-line "what it is / what drives it", tied to Keith's view.
+  - THE WHY (Kris 11/22: "I want to grow as a trader, not just blindly follow orders"): in the pre-open game plan and in the four FULL check-ins, each action also gets one short "why:" sentence, the process reason behind the rule in Keith's terms (for example "why: he trims winners on green so there is cash to buy the next red day low in the range"). When Keith moved the same name that day, say what he did and how it compares with the call. Glances and Telegram lines stay as short as they are now: no "why" there.
   - Every buy/short line also shows rp, the bounce or selloff day count, and same-clock volume across those days.
 - Then the rotation: where the capital comes OUT and where it goes IN.
 - Then the stalk list, also sorted by score: names that don't pass every check yet (e.g. day 1-2 of a bounce), each with the exact trigger you're waiting on.
