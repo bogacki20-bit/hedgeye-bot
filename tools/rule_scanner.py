@@ -21,6 +21,11 @@ TradingView (10 days). Every line prints which one it used and its date (Kris 11
 One difference from v_screener (Kris 11/21): a Hedgeye range is used the day it is published and the next
 trading day (a weekly Monday range: through Tuesday); after that the name falls through to MFR.
 
+Index rows of the Risk Range (Kris 11/22: "EWG is the DAX"): a fund with no daily Hedgeye range of its own
+is read on the index, yield or commodity row it tracks (INDEX_FUND). rp is the index's own price inside
+Keith's range for the index, and the side comes from his trend call on the index. A Treasury yield row is
+turned upside down for its bond fund (yield at the top of its range = the bond at the bottom).
+
     py -m tools.rule_scanner --dry-run      # print, don't send or record
     py -m tools.rule_scanner                # send new alerts to Telegram
 """
@@ -109,6 +114,18 @@ def load_universe():
 # "USD" there is the dollar index; in the book USD is ProShares Ultra Semis, so it is skipped too.
 RR_SKIP = {"SPX", "COMPQ", "RUT", "VIX", "USD", "WTIC", "BRENT", "GOLD", "SILVER", "COPPER", "NATGAS",
            "BITCOIN", "NIKK", "DAX", "SSEC", "KOSPI", "UST2Y", "UST10Y", "UST30Y"}
+# fund -> (Risk Range row, Yahoo symbol for that row's live price, inverted). Kris approved the map 11/22 and
+# asked for the yield rows as the signal for TLT and the other bond funds. Inverted = the fund moves against
+# the row (bond prices vs yields): rp becomes 1 - rp and BULLISH on the row means short the fund.
+INDEX_FUND = {
+    "EWG": ("DAX", "^GDAXI", False), "SPY": ("SPX", "^GSPC", False), "QQQ": ("COMPQ", "^IXIC", False),
+    "IWM": ("RUT", "^RUT", False), "EWJ": ("NIKK", "^N225", False), "EWY": ("KOSPI", "^KS11", False),
+    "ASHR": ("SSEC", "000001.SS", False), "GLD": ("GOLD", "GC=F", False), "SLV": ("SILVER", "SI=F", False),
+    "CPER": ("COPPER", "HG=F", False), "USO": ("WTIC", "CL=F", False), "BNO": ("BRENT", "BZ=F", False),
+    "UNG": ("NATGAS", "NG=F", False), "IBIT": ("BITCOIN", "BTC-USD", False), "UUP": ("USD", "DX-Y.NYB", False),
+    "TLT": ("UST30Y", "^TYX", True), "ZROZ": ("UST30Y", "^TYX", True), "EDV": ("UST30Y", "^TYX", True),
+    "IEF": ("UST10Y", "^TNX", True), "SHY": ("UST2Y", None, True),      # no live 2-year yield on Yahoo
+}
 LEDGER = os.path.join(ROOT, "data", "stalk", "ledger.csv")
 CRYPTO_PRODUCTS = ("crypto_quant", "digital_assets_position_monitor")
 
@@ -123,20 +140,24 @@ def extra_inventory(today: dt.date | None = None) -> dict:
     Later sources fill in only names the earlier ones don't have:
     1. the latest daily Risk Range table (BULLISH = long, BEARISH = short);
     2. Crypto Quant and the Digital Assets Position Monitor calls of the last 14 days;
-    3. the sector-call ledger (data/stalk/ledger.csv), last 30 days.
+    3. the sector-call ledger (data/stalk/ledger.csv), last 30 days;
+    4. the Risk Range's index, yield and commodity rows, passed to the fund that tracks each (INDEX_FUND).
     Every source is optional: a failure in one never stops the scan.
     """
     today = today or dt.date.today()
     out: dict = {}
+    row_side: dict = {}
     try:
         import db_pg
         with db_pg.get_conn() as c, c.cursor() as cur:
             cur.execute("""select ticker, trend from hedgeye_risk_ranges
                            where signal_date = (select max(signal_date) from hedgeye_risk_ranges)""")
-            for t, trend in cur.fetchall():
+            rows = cur.fetchall()
+            for t, trend in rows:
                 side = {"BULLISH": "long", "BEARISH": "short"}.get((trend or "").upper())
                 if side and _tradable(t):
                     out.setdefault(t, side)
+            row_side = {t: (trend or "").upper() for t, trend in rows}
             cur.execute("""select distinct on (name) name, direction from research_calls
                            where product = any(%s) and signal_date >= %s
                            order by name, signal_date desc, id desc""",
@@ -167,6 +188,11 @@ def extra_inventory(today: dt.date | None = None) -> dict:
             out.setdefault(t, side)
     except OSError:
         pass
+    # Last: Keith's trend call on an index row gives its fund a side when nothing above lists the fund.
+    for fund, (row, _, inverted) in INDEX_FUND.items():
+        side = {"BULLISH": "long", "BEARISH": "short"}.get(row_side.get(row))
+        if side:
+            out.setdefault(fund, {"long": "short", "short": "long"}[side] if inverted else side)
     return out
 
 
@@ -283,6 +309,51 @@ def load_ranges(T) -> dict:
     return out
 
 
+def index_ranges(T, rng) -> dict:
+    """fund -> dict(hi, lo, row, asof, sym, inv) for funds read on a Risk Range index row.
+
+    Only for a fund with no fresh daily Hedgeye range of its own (its own Risk Range or Crypto Quant range
+    wins).
+    """
+    import db_pg
+    funds = [t for t in T if t in INDEX_FUND and rng.get(t, (None,) * 4)[2] not in ("hdg", "cq")]
+    if not funds:
+        return {}
+    out: dict = {}
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("""select distinct on (ticker) ticker, sell_trade, buy_trade, signal_date
+                       from hedgeye_risk_ranges
+                       where ticker=any(%s) and buy_trade is not null and sell_trade > buy_trade
+                         and signal_date >= current_date - 7 order by ticker, signal_date desc""",
+                    (sorted({INDEX_FUND[f][0] for f in funds}),))
+        rows = {r[0]: r[1:] for r in cur.fetchall()}
+    for f in funds:
+        row, sym, inv = INDEX_FUND[f]
+        if row in rows and _hedgeye_fresh(rows[row][2]):
+            hi, lo, asof = rows[row]
+            out[f] = dict(hi=float(hi), lo=float(lo), row=row, asof=asof, sym=sym, inv=inv)
+    return out
+
+
+def index_prices(idx: dict) -> dict:
+    """Risk Range row -> its price now: Yahoo's last print for the row's symbol.
+
+    Hedgeye's metals are spot and Yahoo's are the front future, so those can sit a few tenths of a percent
+    apart. A row with no symbol (the 2-year yield: Yahoo has no live one) gets no price, so no rp.
+    """
+    import yfinance as yf
+    out: dict = {}
+    for v in {x["row"]: x for x in idx.values()}.values():
+        if not v["sym"]:
+            continue
+        try:
+            h = yf.Ticker(v["sym"]).history(period="5d", interval="1d").Close.dropna()
+            out[v["row"]] = float(h.iloc[-1])
+        except Exception:                                           # noqa: BLE001
+            continue
+    return out
+
+
 def earnings_soon(t: str, days: int = 2) -> bool:
     import yfinance as yf
     try:
@@ -320,7 +391,9 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
     rng = load_ranges(T)
     # A bench-only name with no fresh range can't produce a line (rp is unknown), and each extra name costs
     # about a second of lookups, so leave those out. They come in once the capture desk has a range for them.
-    T = [t for t in T if t in held or t in rng or not bench_only(t, ss, pm, etf, watch)]
+    idx = index_ranges(T, rng)
+    idx_px = index_prices(idx)
+    T = [t for t in T if t in held or t in rng or t in idx or not bench_only(t, ss, pm, etf, watch)]
     with db_pg.get_conn() as c, c.cursor() as cur:
         # MFR implied vs realized vol (Kris 11/20): context on every line, never a gate
         cur.execute("""select distinct on (ticker) ticker, iv, rv from mfr_snapshots
@@ -356,6 +429,15 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         rtag = f"{r_src} {r_asof:%m/%d}" if r_src and r_asof else (r_src or "")
         if rp is not None and is_low_signal(rl, rh, p):     # range under 2% of price: rp is noise (cash-like funds)
             rp, rtag = None, "range too narrow"
+        if t in idx:            # read on the index row itself: its price in Keith's range (card: never mix the two)
+            x = idx[t]
+            ip = idx_px.get(x["row"])
+            rh = rl = None      # the index's range is not in the fund's prices
+            rp = (ip - x["lo"]) / (x["hi"] - x["lo"]) if ip else None
+            if rp is not None and x["inv"]:
+                rp = 1 - rp
+            rtag = (f"hdg {x['row']}{' upside down' if x['inv'] else ''} {x['asof']:%m/%d}" if ip
+                    else f"no live price for {x['row']}")
         tb = 0 if _keith(tr_src) else BUF
         nb_l = BUF if tn_l_src.endswith("EMA") else 0       # the buffer is only for the EMA fallback
         nb_s = BUF if tn_s_src.endswith("EMA") else 0

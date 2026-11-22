@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press, options note, stop candidate and 2-day range rule 11/21)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press, options note, stop candidate and 2-day range rule 11/21; index rows and yields 11/22)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -18,6 +18,8 @@ Tools: `tools/desk_rot.py`, `tools/desk_shorts.py`, `tools/desk_sizing.py`, `too
 - **A range low or high is never a Trade or Trend line.** Ranges are context and rp only.
 - **rp** = (price − range low) / (range high − range low).
   - **Which range (Kris 11/21):** a name that gets a new range from Hedgeye every day uses that one first: the Risk Range, and the Crypto Quant tracker for crypto names (MARA, COIN, MSTR, IBIT, ETHA). A name that gets one once a week on Monday (Investing Ideas, ETF Pro) uses it Monday and Tuesday; **from Wednesday rp uses MFR's range**, then TradingView's. A weekly range that a dashboard re-shows each day is still the Monday range. Every rp shows its source and date.
+  - **Index rows (Kris 11/22: "EWG is the DAX"):** a fund with no daily Hedgeye range of its own is read on the Risk Range row it tracks. rp is the index's own price inside Keith's range for the index. EWG = DAX, SPY = SPX, QQQ = COMPQ, IWM = RUT, EWJ = Nikkei, EWY = KOSPI, ASHR = Shanghai, GLD = gold, SLV = silver, CPER = copper, USO = WTI, BNO = Brent, UNG = natural gas, IBIT = bitcoin, UUP = the dollar index.
+  - **Treasury yields are the signal for bond funds, upside down (Kris 11/22):** the 30-year yield for TLT, ZROZ and EDV, the 10-year for IEF, the 2-year for SHY. A yield at the top of its range is the bond at the bottom of its range, and a bullish yield trend is a bearish bond trend.
 - **Range structure** = today's range vs 5 sessions ago: HH/HL, LH, etc.
 - **Proxies:** an ETF can use a close proxy's levels (SCHA uses IWM). **Read price and every line on the proxy alone; never mix the two** (Kris 11/14).
 - **Formations:**
