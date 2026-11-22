@@ -36,10 +36,31 @@ ASSETS = {"Gold": "XAU", "Silver": "XAG", "EUR": "EURUSD", "GBP": "GBPUSD", "CAD
           "BTC": "BTC", "ETH": "ETH", "SOL": "SOL", "XRP": "XRP", "AVAX": "AVAX"}
 FLIP = {"JPY"}          # Hedgeye quotes USD/YEN; the yen itself is that row turned upside down
 USD_ONLY = {"AVAX"}     # trades against the dollar only on Kinesis: no metal pair
-# What the order books looked like on Sunday 11/22/2026 (one look; re-check before leaning on it).
-SPREAD_NOTE = ("Order books seen 11/22: BTC/USD about 0.01% wide; gold/USD about 1.1%; gold/silver about 5.5%. "
-               "24-hour volume was thin: silver/USD $39k, gold/USD $34k, XRP/USD $28k, BTC/USD $6k, SOL/USD $3k, "
-               "gold/silver $1.7k, ETH/USD almost none. A swap has to clear the spread to gain anything.")
+KCODE = {"Gold": "KAU", "Silver": "KAG", "EUR": "C1EUR", "GBP": "C1GBP", "CAD": "C1CAD", "JPY": "C1JPY"}   # coins: as is
+
+
+def _quote(snap: dict, a: str, b: str):
+    """The live Kinesis quote for a against b, either way round, or None."""
+    for x, y in ((a, b), (b, a)):
+        for p in (f"{x}_{y}", f"{x}_C1{y}" if y == "USD" else None):
+            if p and p in snap:
+                return snap[p]
+    return None
+
+
+def swap_cost(snap: dict, a: str, b: str):
+    """Cheapest one-way cost (%) of swapping label a into label b on Kinesis, and the route.
+
+    One trade costs half the spread plus the fee. Direct pair if it exists, or two trades through the dollar.
+    """
+    from tools.kinesis_api import FEE
+    ca, cb = KCODE.get(a, a), KCODE.get(b, b)
+    one = lambda q: q["spread_pct"] / 2 + FEE * 100 if q else None      # noqa: E731
+    direct = one(_quote(snap, ca, cb))
+    la, lb = one(_quote(snap, ca, "USD")), one(_quote(snap, cb, "USD"))
+    via = la + lb if la is not None and lb is not None else None
+    opts = [(c, r) for c, r in ((direct, "direct"), (via, "through USD")) if c is not None]
+    return min(opts) if opts else (None, None)
 
 
 REL_GAP = 0.40      # how far apart two legs' rp must be before a holdings swap is listed
@@ -89,6 +110,11 @@ def _num(x) -> str:
 
 
 def report(rows: list[dict], now: dt.datetime) -> str:
+    try:
+        from tools.kinesis_api import snapshots
+        snap = snapshots()
+    except Exception:                                               # noqa: BLE001
+        snap = {}
     bull = sorted((o for o in rows if o["side"] == "long"), key=lambda o: 9 if o["rp"] is None else o["rp"])
     bear = sorted((o for o in rows if o["side"] == "short"), key=lambda o: -9 if o["rp"] is None else -o["rp"])
     none = [o for o in rows if o["side"] not in ("long", "short")]
@@ -139,8 +165,10 @@ def report(rows: list[dict], now: dt.datetime) -> str:
             if a["rp"] is None or b["rp"] is None or rank.get(b["side"], 1) < rank.get(a["side"], 1):
                 continue
             if a["rp"] - b["rp"] >= REL_GAP:
+                cost, route = swap_cost(snap, a["label"], b["label"])
+                c = f"; costs about {cost:.1f}% {route}, each way" if cost is not None else "; no live quote"
                 rel.append((a["rp"] - b["rp"], f"  {a['label']} -> {b['label']}: {a['label']} rp {a['rp']:.2f}, "
-                                               f"{b['label']} rp {b['rp']:.2f} (gap {a['rp'] - b['rp']:.2f})"))
+                                               f"{b['label']} rp {b['rp']:.2f} (gap {a['rp'] - b['rp']:.2f}){c}"))
     out += ["", f"Swaps to gain holdings (out of the leg high in its range, into the leg low in its range; gap {REL_GAP}+):"]
     out += [x for _, x in sorted(rel, reverse=True)] or ["  none"]
     out.append("  This is our own read of two Hedgeye ranges, not a card rule.")
@@ -151,7 +179,19 @@ def report(rows: list[dict], now: dt.datetime) -> str:
         out += ["", f"Gold/silver ratio: {g['px'] / s['px']:.1f} ({lean}; gold rp {g['rp']:.2f}, silver rp {s['rp']:.2f})"
                 if g["rp"] is not None and s["rp"] is not None else f"Gold/silver ratio: {g['px'] / s['px']:.1f} ({lean})"]
     out += ["", "Metals are priced off the front future and Hedgeye's range is spot, so their rp can be a little off.",
-            SPREAD_NOTE, "No sizes: the bot has no Kinesis holdings."]
+            "No sizes: the bot has no Kinesis holdings."]
+    if snap:
+        out += ["", "Kinesis live, against the dollar (bid / ask, spread, 24-hour volume); fee 0.22% per trade on top:"]
+        for o in rows:
+            q = _quote(snap, KCODE.get(o["label"], o["label"]), "USD")
+            if q:
+                out.append(f"  {o['label']:7} {_num(q['bid'])} / {_num(q['ask'])}  spread {q['spread_pct']:.2f}%  ${q['vol_usd']:,.0f}")
+        q = _quote(snap, "KAU", "KAG")
+        if q:
+            out.append(f"  Gold/Silver direct: spread {q['spread_pct']:.2f}%  ${q['vol_usd']:,.0f}")
+        out.append("  Gold is quoted per gram (KAU) and silver per ounce (KAG).")
+    else:
+        out += ["", "Kinesis live quotes unavailable right now."]
     return "\n".join(out)
 
 
