@@ -28,8 +28,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 warnings.filterwarnings("ignore")
 
 # label shown -> scanner name. USD is the yardstick and has no row of its own here.
-ASSETS = {"Gold": "XAU", "Silver": "XAG", "EUR": "EURUSD", "GBP": "GBPUSD", "CAD": "CADUSD",
-          "BTC": "BTC", "ETH": "ETH", "SOL": "SOL"}
+# Read off the exchange's own Markets list on 11/22/2026 (132+ pairs): gold (KAU, 1 gram) and silver (KAG,
+# 1 oz) each trade against USD, EUR, GBP, CAD, JPY and other currencies, and against BTC, ETH, SOL, XRP and
+# a few smaller coins; gold trades against silver; the coins also trade against USD. Only assets Hedgeye
+# gives a daily range for are ranked here.
+ASSETS = {"Gold": "XAU", "Silver": "XAG", "EUR": "EURUSD", "GBP": "GBPUSD", "CAD": "CADUSD", "JPY": "USDJPY",
+          "BTC": "BTC", "ETH": "ETH", "SOL": "SOL", "XRP": "XRP", "AVAX": "AVAX"}
+FLIP = {"JPY"}          # Hedgeye quotes USD/YEN; the yen itself is that row turned upside down
+USD_ONLY = {"AVAX"}     # trades against the dollar only on Kinesis: no metal pair
+# What the order books looked like on Sunday 11/22/2026 (one look; re-check before leaning on it).
+SPREAD_NOTE = ("Order books seen 11/22: BTC/USD about 0.01% wide; gold/USD about 1.1%; gold/silver about 5.5%. "
+               "24-hour volume was thin: silver/USD $39k, gold/USD $34k, XRP/USD $28k, BTC/USD $6k, SOL/USD $3k, "
+               "gold/silver $1.7k, ETH/USD almost none. A swap has to clear the spread to gain anything.")
 
 
 REL_GAP = 0.40      # how far apart two legs' rp must be before a holdings swap is listed
@@ -54,8 +64,14 @@ def read() -> list[dict]:
         hi, lo, src, asof = rng.get(n, (None,) * 4)
         rp = (p - lo) / (hi - lo) if p and hi and lo else None
         k = lv[R._line_key(n)]
-        out.append(dict(label=label, side=side.get(n), px=p, day=day, lo=lo, hi=hi, src=src, asof=asof, rp=rp,
-                        trade=k["trade"][0], trend_lo=k["trend_long"][0], trend_hi=k["trend_short"][0]))
+        o = dict(label=label, side=side.get(n), px=p, day=day, lo=lo, hi=hi, src=src, asof=asof, rp=rp,
+                 trade=k["trade"][0], trend_lo=k["trend_long"][0], trend_hi=k["trend_short"][0])
+        if label in FLIP:       # turn the USD/YEN row into the yen: every price is 1/x, high and low trade places
+            inv = lambda x: 1 / x if x else None                    # noqa: E731
+            o.update(side={"long": "short", "short": "long"}.get(o["side"]), px=inv(p), lo=inv(hi), hi=inv(lo),
+                     day=-day if day is not None else None, rp=1 - rp if rp is not None else None,
+                     trade=inv(o["trade"]), trend_lo=inv(o["trend_hi"]), trend_hi=inv(o["trend_lo"]))
+        out.append(o)
     return out
 
 
@@ -69,7 +85,7 @@ def _lines(o: dict) -> str:
 
 
 def _num(x) -> str:
-    return "-" if x is None else f"{x:,.4f}" if x < 10 else f"{x:,.2f}" if x < 1000 else f"{x:,.0f}"
+    return "-" if x is None else f"{x:.5f}" if x < 0.1 else f"{x:,.4f}" if x < 10 else f"{x:,.2f}" if x < 1000 else f"{x:,.0f}"
 
 
 def report(rows: list[dict], now: dt.datetime) -> str:
@@ -118,6 +134,8 @@ def report(rows: list[dict], now: dt.datetime) -> str:
         for b in rows:
             if a is b or "Gold" not in (a["label"], b["label"]) and "Silver" not in (a["label"], b["label"]):
                 continue
+            if a["label"] in USD_ONLY or b["label"] in USD_ONLY:
+                continue
             if a["rp"] is None or b["rp"] is None or rank.get(b["side"], 1) < rank.get(a["side"], 1):
                 continue
             if a["rp"] - b["rp"] >= REL_GAP:
@@ -133,7 +151,7 @@ def report(rows: list[dict], now: dt.datetime) -> str:
         out += ["", f"Gold/silver ratio: {g['px'] / s['px']:.1f} ({lean}; gold rp {g['rp']:.2f}, silver rp {s['rp']:.2f})"
                 if g["rp"] is not None and s["rp"] is not None else f"Gold/silver ratio: {g['px'] / s['px']:.1f} ({lean})"]
     out += ["", "Metals are priced off the front future and Hedgeye's range is spot, so their rp can be a little off.",
-            "No sizes: the bot has no Kinesis holdings."]
+            SPREAD_NOTE, "No sizes: the bot has no Kinesis holdings."]
     return "\n".join(out)
 
 
