@@ -9,7 +9,7 @@ THE ACCOUNTS
 - Roth IRA: long only; mostly BUXX cash parking and CLOX.
 - Kinesis (Kris 11/22): physical gold and silver, plus coins. Gold trades against silver, and either metal trades against USD, EUR, GBP, CAD, BTC, ETH and SOL. Nothing is shorted there: a bearish view is a swap out of the weak asset into a strong one. It is small and I let it sit; I want to be active in it again. The goal there is to gain holdings (more ounces, more coins), not only dollars.
 - Forex.com (Kris 11/22): currencies, long and short. Empty for now and easy to fund.
-- The bot holds no positions for Kinesis or Forex.com, so their lines carry no dollar size. Ask me for the holdings when a call needs them.
+- Kinesis holdings are read live (py -m tools.kinesis_pairs ends with "What you hold on Kinesis"; read-only key, 11/22). Forex.com has no positions in the bot, so its lines carry no dollar size.
 
 READ FIRST, EVERY SESSION AND AFTER EVERY COMPACTION
 0. docs/playbook/DESK_HANDOFF.md: yesterday's end-of-day handoff (open items, stalk list, picture, what to watch). Read it first.
@@ -126,7 +126,7 @@ KEEPING THE CARD STRAIGHT ALL DAY
 SEND EVERY LIST TO MY TELEGRAM (Kris 11/21)
 I don't always look at this chat, and it never shows on my glasses. Telegram does. On 11/21 the automatic pings were switched off (the rule scanner task, the price monitor, the book alerts and the old doctor), so you are now my only source of trade alerts apart from Keith's own emails. If you go quiet, nothing else will tell me.
 - After EVERY glance and EVERY check-in, send the same list to Telegram right after you post it here.
-- What to send: EVERY action on the list, with no line cap (Kris 11/22: "why have a cap"; he takes what he sees, and can work about 250 calls a week). Plain text, no tables, one action per line. Order: "BUYS: ..." first, then any "STOP:" line, then every new or changed action, highest score first, each starting with its grade and score (Kris 11/22), like "A 86 | Individual SELL 25bp XLP at 91.46 | green-day trim": grade and score, account, side, size, ticker, trigger, rule. A stop or a Trend break has no veto from its score, so it still leads. then one line for the picture if it changed. The first three lines are what my glasses show, so the most urgent thing goes first. A long list goes out as several messages; the sender splits it by itself.
+- What to send: EVERY action on the list, with no line cap (Kris 11/22: "why have a cap"; he takes what he sees, and can work about 250 calls a week). Plain text, no tables, one action per line. Order: "BUYS: ..." first, then any "STOP:" line, then every new or changed action, highest score first, each starting with its grade and score (Kris 11/22), like "A 86 | Individual SELL 25bp XLP at 91.46 | green-day trim": grade and score, account, side, size, ticker, trigger, rule. A stop or a Trend break has no veto from its score, so it still leads. Then one line for the picture if it changed. The first three lines are what my glasses show, so the most urgent thing goes first. A long list goes out as several messages; the sender splits it by itself.
 - Nothing changed: still send one line, "HH:MM no change". A half hour with no Telegram from you means the desk is down.
 - Between glances: a STOP, a new passing BUY, or a Keith alert verdict goes out on its own the moment you have it.
 - How: write the text to data/stalk/telegram_out.txt, then run
@@ -159,7 +159,7 @@ I want to trade these two accounts off the same Hedgeye process, every day.
 - "Swaps to gain holdings" is our own read, not a card rule: move out of the leg that is high in its Hedgeye range into the leg that is low in its range, and swap back when it flips, never into a weaker trend. Show them on their own line, marked "holdings swap, not a card rule". I decide.
 - In a glance, mention Kinesis only when a swap appears or goes away.
 - Currencies: the scanner prints "Forex.com:" lines for EUR/USD, GBP/USD, CAD/USD and USD/YEN off Keith's daily Risk Range rows, long or short. They have no volume data, so the volume check can't be read; say so on the line.
-- No sizes on either account until I give you the holdings. Say "one step" and let me size it.
+- Sizes: on Kinesis, size a swap from the holdings the tool prints (a step is about a quarter of the leg being sold; I decide the final amount). On Forex.com say "one step" and let me size it. Never put Kinesis balances or dollar amounts in Telegram.
 
 DATA
 - The capture desk (my other chat, a fresh one every day) loads all the data: Hedgeye, SpotGamma, Tier 1 Alpha, TradingView, quads and BUXX dates. A separate small tape chat reads the SpotGamma tape every 15 minutes, and a SpotGamma watcher chat reads TRACE and HIRO every 10 minutes. Read everything from the bot's database and the files above. Don't capture it yourself.
