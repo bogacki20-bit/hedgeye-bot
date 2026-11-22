@@ -17,7 +17,7 @@ Tools: `tools/desk_rot.py`, `tools/desk_shorts.py`, `tools/desk_sizing.py`, `too
 - **2% buffer** on Vola Trade or an EMA only: call a break only when price is about 2% through. **No buffer on the cloud** (Kris 11/14): a 3:45 close through its edge counts.
 - **A range low or high is never a Trade or Trend line.** Ranges are context and rp only.
 - **rp** = (price − range low) / (range high − range low).
-  - **Which range (Kris 11/21):** Hedgeye's own published range first (Risk Range, Investing Ideas, ETF Pro), but **only for 2 trading days** after it was published. After that, rp uses MFR's range, then TradingView's. Every rp shows its source and date.
+  - **Which range (Kris 11/21):** a name that gets a new range from Hedgeye every day (the Risk Range) uses that one first. A name that gets one once a week (Investing Ideas, ETF Pro) uses it **through Tuesday**; after Tuesday rp uses MFR's range, then TradingView's. A weekly range that a dashboard re-shows each day is still the Monday range. Every rp shows its source and date.
 - **Range structure** = today's range vs 5 sessions ago: HH/HL, LH, etc.
 - **Proxies:** an ETF can use a close proxy's levels (SCHA uses IWM). **Read price and every line on the proxy alone; never mix the two** (Kris 11/14).
 - **Formations:**

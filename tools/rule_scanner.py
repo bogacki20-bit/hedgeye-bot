@@ -18,8 +18,8 @@ Our own lines (Vola Trade, 89-day EMA) get the 2% buffer; Keith's numbers don't.
 rp uses the bot's one canonical range per name (v_screener, the same one tools/rp_resolve.py and the
 other desk tools read): Hedgeye's Risk Range (7 days) > Investing Ideas (7 days) > MFR (5 days) >
 TradingView (10 days). Every line prints which one it used and its date (Kris 11/21).
-One difference from v_screener (Kris 11/21): a Hedgeye-published range is used for 2 trading days only;
-after that the name falls through to MFR.
+One difference from v_screener (Kris 11/21): a Hedgeye range is used the day it is published and the next
+trading day (a weekly Monday range: through Tuesday); after that the name falls through to MFR.
 
     py -m tools.rule_scanner --dry-run      # print, don't send or record
     py -m tools.rule_scanner                # send new alerts to Telegram
@@ -201,7 +201,8 @@ _FALLBACK = (       # same order as v_screener, for names outside its universe (
 
 
 HEDGEYE_SRC = ("hdg", "iin")
-HEDGEYE_RANGE_DAYS = 2      # Kris 11/21: a Hedgeye-published range is fresh for 2 trading days, then MFR's is used
+HEDGEYE_RANGE_DAYS = 1      # Kris 11/21: the daily Risk Range always wins; a weekly range (Monday) is good through
+                            # Tuesday, then MFR's is used. One weekday of age covers both.
 
 
 def _hedgeye_fresh(asof, today: dt.date | None = None) -> bool:
