@@ -186,8 +186,7 @@ KEITH_SOURCES = {"The Call", "Macro Show", "KM's Top 3 Things", "Real-Time Alert
 
 
 def _tradable(t: str) -> bool:
-    return (bool(t) and t.isalpha() and t.isupper() and len(t) <= 5 and t not in RR_SKIP and t not in CASH
-            and t not in COINS)
+    return bool(t) and t.isalpha() and t.isupper() and len(t) <= 5 and t not in RR_SKIP and t not in CASH
 
 
 def extra_inventory(today: dt.date | None = None) -> dict:
@@ -313,7 +312,16 @@ _FALLBACK = (       # same order as v_screener, for names outside its universe (
 
 
 HEDGEYE_SRC = ("hdg", "cq", "iin")
-COINS = {"BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "ADA", "BNB", "LINK", "SUI", "HYPE"}   # coin labels, not stock tickers
+# Coins from Hedgeye's Crypto Quant tracker (Kris 11/22: "we also need the crypto quant in there"). They are
+# on the scanner under the coin's own label: price from Yahoo (BTC-USD), Trade and Trend lines from the bot's
+# BTCUSD rows, rp only from the tracker's daily range. A coin label never means the stock with the same letters.
+COINS = {"BTC", "ETH", "SOL", "AVAX", "XRP", "DOGE", "ADA", "BNB", "LINK", "SUI", "HYPE"}
+COIN_FUND = {"BTC": "IBIT", "ETH": "ETHA", "SOL": "SOLZ"}      # the fund that holds the coin, shown on its line
+YF_KEY.update({c: f"{c}-USD" for c in COINS})
+
+
+def _line_key(t: str) -> str:
+    return f"{t}USD" if t in COINS else t
 _RANGE_RE = re.compile(r"(?<![\d.,/$-])(\d[\d,]*\.?\d*)\s*[-–]\s*(\d[\d,]*\.?\d*)(?![\d/])")
 
 
@@ -324,7 +332,7 @@ def crypto_quant_ranges(cur, T) -> dict:
     6.25"), so the first low-high pair in the latest note is read, and dropped if it doesn't look like a range.
     """
     out: dict = {}
-    names = [t for t in T if t not in COINS]
+    names = list(T)
     cur.execute("""select distinct on (name) name, signal_date, thesis from research_calls
                    where product='crypto_quant' and name=any(%s) and signal_date >= current_date - 7
                    order by name, signal_date desc, id desc""", (names,))
@@ -372,7 +380,7 @@ def load_ranges(T) -> dict:
         cur.execute("""select ticker, range_high, range_low, band_source, range_asof from v_screener
                        where ticker=any(%s) and range_low is not null and range_high > range_low""", (list(T),))
         for t, hi, lo, src, asof in cur.fetchall():
-            if src == "hdg" and t in RR_SKIP:
+            if (src == "hdg" and t in RR_SKIP) or t in COINS:       # a coin's only range is the Crypto Quant one
                 continue
             if src in HEDGEYE_SRC and not _hedgeye_fresh(asof):
                 continue                                # too old: falls through to MFR below
@@ -382,7 +390,7 @@ def load_ranges(T) -> dict:
         for t, v in cq.items():
             out.setdefault(t, v)
         for src, sql in _FALLBACK:
-            need = [t for t in T if t not in out and not (src == "hdg" and t in RR_SKIP)]
+            need = [t for t in T if t not in out and t not in COINS and not (src == "hdg" and t in RR_SKIP)]
             if not need:
                 break
             back = {TV_KEY.get(t, t): t for t in need} if src == "tv" else {t: t for t in need}
@@ -485,9 +493,11 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                        where ticker=any(%s) and iv is not null and rv is not null and rv > 0
                          and snapshot_date >= current_date - 5
                        order by ticker, snapshot_date desc, fetched_at desc""", (T,))
-        ivrv = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
-    lv = lookup(T)
-    rs = structure(T)
+        ivrv = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall() if r[0] not in COINS}
+    lv = lookup([_line_key(t) for t in T])
+    rs = structure([_line_key(t) for t in T])
+    lv.update({t: lv[_line_key(t)] for t in T if t in COINS and _line_key(t) in lv})
+    rs.update({t: rs[_line_key(t)] for t in T if t in COINS and _line_key(t) in rs})
     d = yf.download([YF_KEY.get(t, t) for t in T], period="3mo", interval="1d", progress=False, threads=True,
                     group_by="ticker")
     fr = _vol_frac(now)
@@ -545,6 +555,8 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         if (not src and t in EXTRA_SRC and t not in etf and pm.get(t) is None
                 and (t, "long") not in ss and (t, "short") not in ss):
             src = f"; from {EXTRA_SRC[t]}"
+        if t in COINS:
+            src = "; coin, Crypto Quant" + (f" (fund: {COIN_FUND[t]})" if t in COIN_FUND else "")
 
         for a, q, cb in held.get(t, []):
             mv = q * p
