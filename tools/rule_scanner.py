@@ -15,6 +15,10 @@ alerts (each ticker+action fires once a day; exits fire again at the 3:45 confir
 
 Our own lines (Vola Trade, 89-day EMA) get the 2% buffer; Keith's numbers don't.
 
+rp uses the bot's one canonical range per name (v_screener, the same one tools/rp_resolve.py and the
+other desk tools read): Hedgeye's Risk Range (7 days) > Investing Ideas (7 days) > MFR (5 days) >
+TradingView (10 days). Every line prints which one it used and its date (Kris 11/21).
+
     py -m tools.rule_scanner --dry-run      # print, don't send or record
     py -m tools.rule_scanner                # send new alerts to Telegram
 """
@@ -178,6 +182,49 @@ def bench_only(t, ss, pm, etf, watch) -> bool:
             and (t, "long") not in ss and (t, "short") not in ss)
 
 
+_FALLBACK = (       # same order as v_screener, for names outside its universe (watch-file and ledger names)
+    ("hdg", """select distinct on (ticker) ticker, sell_trade, buy_trade, signal_date from hedgeye_risk_ranges
+               where ticker=any(%s) and buy_trade is not null and sell_trade > buy_trade
+                 and signal_date >= current_date - 7 order by ticker, signal_date desc"""),
+    ("iin", """select distinct on (ticker) ticker, range_high, range_low, signal_date from hedgeye_ii_newsletter
+               where ticker=any(%s) and range_low is not null and range_high > range_low
+                 and signal_date >= current_date - 7 order by ticker, signal_date desc"""),
+    ("mfr", """select distinct on (ticker) ticker, range_high, range_low, snapshot_date from mfr_snapshots
+               where ticker=any(%s) and range_low is not null and range_high > range_low
+                 and snapshot_date >= current_date - 5 order by ticker, snapshot_date desc, fetched_at desc"""),
+    ("tv", """select distinct on (ticker) ticker, range_high, range_low, bar_date from tv_levels
+              where ticker=any(%s) and range_high is not null and range_high > range_low
+                and bar_date >= current_date - 10 order by ticker, bar_date desc"""),
+)
+
+
+def load_ranges(T) -> dict:
+    """ticker -> (range_high, range_low, source, as-of date), from the bot's one canonical range.
+
+    v_screener picks it (hdg 7d > iin 7d > mfr 5d > tv 10d); names it doesn't carry go through the same
+    four sources in the same order. Hedgeye's Risk Range table has index and commodity rows whose labels
+    collide with stock tickers (RR_SKIP), so those never take the 'hdg' range.
+    """
+    import db_pg
+    out: dict = {}
+    with db_pg.get_conn() as c, c.cursor() as cur:
+        cur.execute("""select ticker, range_high, range_low, band_source, range_asof from v_screener
+                       where ticker=any(%s) and range_low is not null and range_high > range_low""", (list(T),))
+        for t, hi, lo, src, asof in cur.fetchall():
+            if src == "hdg" and t in RR_SKIP:
+                continue
+            out[t] = (float(hi), float(lo), src or "?", asof)
+        for src, sql in _FALLBACK:
+            need = [t for t in T if t not in out and not (src == "hdg" and t in RR_SKIP)]
+            if not need:
+                break
+            back = {TV_KEY.get(t, t): t for t in need} if src == "tv" else {t: t for t in need}
+            cur.execute(sql, (list(back),))
+            for k, hi, lo, asof in cur.fetchall():
+                out[back[k]] = (float(hi), float(lo), src, asof)
+    return out
+
+
 def earnings_soon(t: str, days: int = 2) -> bool:
     import yfinance as yf
     try:
@@ -202,6 +249,7 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
     import yfinance as yf
     from tools.level_lines import lookup
     from tools.range_structure import structure
+    from tools.rp_resolve import is_low_signal
 
     now = now or dt.datetime.now()
     acct, book, ss, pm, etf, watch = load_universe()
@@ -211,24 +259,10 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
     inv = ({t for t, _ in ss} | {t for t, b in pm.items() if b in LONG_PM + SHORT_PM + LONG_BENCH + SHORT_BENCH}
            | set(etf) | set(watch))
     T = sorted(t for t in inv | set(held) if t.isalpha() and len(t) <= 5)     # US listings; skips EL.PA, ETHUSD
-    with db_pg.get_conn() as c, c.cursor() as cur:
-        cur.execute("""select distinct on (ticker) ticker, range_high, range_low from tv_levels
-                       where ticker=any(%s) and range_high is not null and bar_date >= current_date - 7
-                       order by ticker, bar_date desc""", ([TV_KEY.get(t, t) for t in T],))
-        rng = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
-        # No TradingView range: use MFR's own range from its nightly snapshot (Kris 11/21). It is the same
-        # range TradingView draws, so rp reads the same. Names with a TV_KEY alias are left to TradingView
-        # ("USD" is 2x semis in the book and something else elsewhere).
-        need = [t for t in T if t not in rng and t not in TV_KEY]
-        cur.execute("""select distinct on (ticker) ticker, range_high, range_low from mfr_snapshots
-                       where ticker=any(%s) and range_high is not null and range_low is not null
-                         and range_high > range_low and snapshot_date >= current_date - 5
-                       order by ticker, snapshot_date desc, fetched_at desc""", (need,))
-        mfr_rng = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
-        rng.update(mfr_rng)
+    rng = load_ranges(T)
     # A bench-only name with no fresh range can't produce a line (rp is unknown), and each extra name costs
     # about a second of lookups, so leave those out. They come in once the capture desk has a range for them.
-    T = [t for t in T if t in held or TV_KEY.get(t, t) in rng or not bench_only(t, ss, pm, etf, watch)]
+    T = [t for t in T if t in held or t in rng or not bench_only(t, ss, pm, etf, watch)]
     with db_pg.get_conn() as c, c.cursor() as cur:
         # MFR implied vs realized vol (Kris 11/20): context on every line, never a gate
         cur.execute("""select distinct on (ticker) ticker, iv, rv from mfr_snapshots
@@ -259,8 +293,11 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         tr, tr_src = lv[t]["trade"][0], lv[t]["trade"][1]
         tn_l, tn_l_src = lv[t]["trend_long"][0], lv[t]["trend_long"][1]     # yellow cloud bottom
         tn_s, tn_s_src = lv[t]["trend_short"][0], lv[t]["trend_short"][1]   # yellow cloud top
-        rh, rl = rng.get(TV_KEY.get(t, t), (None, None))
+        rh, rl, r_src, r_asof = rng.get(t, (None, None, None, None))
         rp = (p - rl) / (rh - rl) if rh and rl and rh > rl else None
+        rtag = f"{r_src} {r_asof:%m/%d}" if r_src and r_asof else (r_src or "")
+        if rp is not None and is_low_signal(rl, rh, p):     # range under 2% of price: rp is noise (cash-like funds)
+            rp, rtag = None, "range too narrow"
         tb = 0 if _keith(tr_src) else BUF
         nb_l = BUF if tn_l_src.endswith("EMA") else 0       # the buffer is only for the EMA fallback
         nb_s = BUF if tn_s_src.endswith("EMA") else 0
@@ -276,11 +313,9 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         vol_falling = vo[-n:].mean() < a20 and vo[-1] < vo[-2]
         base = dict(ticker=t, px=p, day=day, rp=rp, trade=tr, trend=tn_l, rl=rl, rh=rh,
                     vol3="/".join(_fv(x) for x in vo[-3:]), avg=_fv(a20), streak=streak,
-                    ivrv=ivrv.get(t))
+                    ivrv=ivrv.get(t), rtag=rtag)
         side = sides(t, ss, pm, etf, watch)
         src = "; PM bench only" if bench_only(t, ss, pm, etf, watch) else ""
-        if t in mfr_rng:
-            src += "; MFR range"
 
         for a, q, cb in held.get(t, []):
             mv = q * p
@@ -379,6 +414,8 @@ def fmt(alerts, now):
     lines = [f"as of {now:%H:%M}"]
     for o in sorted(alerts, key=lambda o: (not o.get("exit"), o["acct"], o["ticker"])):
         rp = "-" if o["rp"] is None else f"{o['rp']:.2f}"
+        if o.get("rtag"):
+            rp += f" ({o['rtag']})"
         iv = ""
         if o.get("ivrv"):
             i, r = o["ivrv"]
