@@ -32,6 +32,9 @@ ASSETS = {"Gold": "XAU", "Silver": "XAG", "EUR": "EURUSD", "GBP": "GBPUSD", "CAD
           "BTC": "BTC", "ETH": "ETH", "SOL": "SOL"}
 
 
+REL_GAP = 0.40      # how far apart two legs' rp must be before a holdings swap is listed
+
+
 def read() -> list[dict]:
     import yfinance as yf
     from tools import rule_scanner as R
@@ -85,7 +88,8 @@ def report(rows: list[dict], now: dt.datetime) -> str:
         return (o["px"] / o["trend_lo"] - 1) if o["px"] and o["trend_lo"] else -9
     strong = sorted(bull, key=gap, reverse=True)
     weak = sorted(bear, key=gap, reverse=True)
-    order = [f"{o['label']} ({gap(o) * 100:+.0f}% vs Trend)" for o in strong] + ["USD"] +             [f"{o['label']} ({gap(o) * 100:+.0f}% vs Trend)" for o in weak]
+    order = ([f"{o['label']} ({gap(o) * 100:+.0f}% vs Trend)" for o in strong] + ["USD"]
+             + [f"{o['label']} ({gap(o) * 100:+.0f}% vs Trend)" for o in weak])
     out += ["", "Strongest to weakest: " + " > ".join(order)]
     best = strong[0]["label"] if strong else "USD"
     worst = weak[-1]["label"] if weak else "USD"
@@ -105,6 +109,23 @@ def report(rows: list[dict], now: dt.datetime) -> str:
     stalk = [f"{o['label']} (rp {o['rp']:.2f})" for o in bear if o["rp"] is not None and 0.15 < o["rp"] < 0.65]
     if stalk:
         out.append("  Bearish, sell on a bounce to rp 0.65+: " + ", ".join(stalk))
+    # Swaps to gain holdings, not dollars (Kris 11/22). Every Kinesis pair has a metal on one side. Move out of
+    # the leg that is high in its own Hedgeye range into the leg that is low in its range, and swap back when
+    # that flips: more ounces or coins either way. Never into a leg with a weaker trend call.
+    rank = {"long": 2, "short": 0}
+    rel = []
+    for a in rows:
+        for b in rows:
+            if a is b or "Gold" not in (a["label"], b["label"]) and "Silver" not in (a["label"], b["label"]):
+                continue
+            if a["rp"] is None or b["rp"] is None or rank.get(b["side"], 1) < rank.get(a["side"], 1):
+                continue
+            if a["rp"] - b["rp"] >= REL_GAP:
+                rel.append((a["rp"] - b["rp"], f"  {a['label']} -> {b['label']}: {a['label']} rp {a['rp']:.2f}, "
+                                               f"{b['label']} rp {b['rp']:.2f} (gap {a['rp'] - b['rp']:.2f})"))
+    out += ["", f"Swaps to gain holdings (out of the leg high in its range, into the leg low in its range; gap {REL_GAP}+):"]
+    out += [x for _, x in sorted(rel, reverse=True)] or ["  none"]
+    out.append("  This is our own read of two Hedgeye ranges, not a card rule.")
     g, s = (next((o for o in rows if o["label"] == x), None) for x in ("Gold", "Silver"))
     if g and s and g["px"] and s["px"]:
         lean = ("no lean: same trend on both" if g["side"] == s["side"]
