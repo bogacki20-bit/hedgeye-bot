@@ -76,9 +76,37 @@ def holdings():
     pub, prv = _keys()
     if not pub or not prv:
         return None
-    nonce = str(int(time.time() * 1000))
+    # Kinesis rejects (403) any nonce not above the last one it saw for the key. Microseconds worked on
+    # 11/22 where milliseconds were refused, and now that it has seen one, it must stay microseconds.
+    nonce = str(int(time.time() * 1_000_000))
     sig = hmac.new(prv.encode(), f"{nonce}GET{HOLDINGS_PATH}".encode(), hashlib.sha256).hexdigest().upper()
     return _get(ACCOUNT_URL + HOLDINGS_PATH, {"X-API-Key": pub, "X-Nonce": nonce, "X-Signature": sig})
+
+
+def usd_price(snap: dict, code: str):
+    """Kinesis's own mid price of an asset in dollars, or None."""
+    if code in ("USD", "C1USD"):
+        return 1.0
+    for p in (f"{code}_USD", f"{code}_C1USD"):
+        if p in snap:
+            return snap[p]["mid"]
+    return None
+
+
+def valued_holdings(snap: dict | None = None):
+    """[(code, amount, usd value or None)] for every balance above dust, biggest first; None when no key."""
+    h = holdings()
+    if h is None:
+        return None
+    snap = snap if snap is not None else snapshots()
+    rows = []
+    for code, v in h.items():
+        amt = (v.get("available") or 0) + (v.get("allocatedOnExchange") or 0)
+        px = usd_price(snap, code)
+        val = amt * px if px is not None else None
+        if amt > 0 and (val is None or val >= 0.50):
+            rows.append((code, amt, val))
+    return sorted(rows, key=lambda r: -(r[2] or 0))
 
 
 def main() -> int:
@@ -95,7 +123,12 @@ def main() -> int:
         if h is None:
             print("No Kinesis key saved yet (KINESIS_PUBLIC_KEY and KINESIS_PRIVATE_KEY in .env).")
             return 0
-        print(json.dumps(h, indent=1)[:4000])
+        rows = valued_holdings()
+        total = sum(v for _, _, v in rows if v)
+        print(f"Kinesis holdings (balances under $0.50 left out), about ${total:,.0f} in all:")
+        for code, amt, val in rows:
+            share = f"{val / total * 100:5.1f}%" if val and total else "     -"
+            print(f"  {code:7} {amt:>16,.6f}  " + (f"${val:>10,.2f}  {share}" if val is not None else "no dollar price"))
         return 0
     snap = snapshots()
     print(f"Kinesis live quotes, {len(snap)} two-sided pairs. Fee {FEE * 100:.2f}% per trade on top of the spread.")

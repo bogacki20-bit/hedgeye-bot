@@ -179,7 +179,37 @@ def report(rows: list[dict], now: dt.datetime) -> str:
         out += ["", f"Gold/silver ratio: {g['px'] / s['px']:.1f} ({lean}; gold rp {g['rp']:.2f}, silver rp {s['rp']:.2f})"
                 if g["rp"] is not None and s["rp"] is not None else f"Gold/silver ratio: {g['px'] / s['px']:.1f} ({lean})"]
     out += ["", "Metals are priced off the front future and Hedgeye's range is spot, so their rp can be a little off.",
-            "No sizes: the bot has no Kinesis holdings."]
+            ]
+    try:                                    # Kris's balances, once his read-only key is in .env (local only)
+        from tools.kinesis_api import valued_holdings
+        held = valued_holdings(snap) if snap else None
+    except Exception as e:                                          # noqa: BLE001
+        held = None
+        out.append(f"Kinesis holdings read failed ({type(e).__name__}).")
+    if held:
+        code_label = {KCODE.get(o["label"], o["label"]): o["label"] for o in rows}
+        code_label.update({"C1USD": "USD", "USD": "USD"})
+        by: dict = {}
+        other, other_names = 0.0, []
+        for code, amt, val in held:
+            if code in code_label:
+                by[code_label[code]] = by.get(code_label[code], 0) + (val or 0)
+            elif val:
+                other += val
+                other_names.append(code)
+        total = sum(by.values()) + other
+        out += ["", f"What you hold on Kinesis (about ${total:,.0f}; never send these numbers to Telegram):"]
+        tag = {o["label"]: ("Bullish" if o["side"] == "long" else "Bearish" if o["side"] == "short" else "no call")
+               + (f", rp {o['rp']:.2f}" if o["rp"] is not None else "") for o in rows}
+        for label, val in sorted(by.items(), key=lambda kv: -kv[1]):
+            out.append(f"  {label:7} ${val:>8,.0f}  {val / total * 100:4.0f}%  {tag.get(label, 'the yardstick')}")
+        if other:
+            out.append(f"  other   ${other:>8,.0f}  {other / total * 100:4.0f}%  no Hedgeye range: {', '.join(other_names[:8])}")
+        bear = sum(v for k, v in by.items() if tag.get(k, "").startswith("Bearish"))
+        out.append(f"  In assets Hedgeye has Bearish against the dollar: ${bear:,.0f} ({bear / total * 100:.0f}%). "
+                   f"In dollars: ${by.get('USD', 0):,.0f} ({by.get('USD', 0) / total * 100:.0f}%).")
+    elif held is None:
+        out.append("No sizes: no Kinesis key saved, so the bot can't see the holdings.")
     if snap:
         out += ["", "Kinesis live, against the dollar (bid / ask, spread, 24-hour volume); fee 0.22% per trade on top:"]
         for o in rows:
