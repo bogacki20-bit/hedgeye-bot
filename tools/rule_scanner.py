@@ -261,6 +261,11 @@ def extra_inventory(today: dt.date | None = None) -> dict:
     # with it, and then sides() returns 'both': hold what's there, no new entries, until Keith breaks the tie.
     # Keith breaks it by saying so (Kris 11/22, TLT: "keith said long bonds"): a long or short call of his own
     # on the fund in the last 7 days (The Call, Macro Show, Top 3 Things, Real-Time Alerts) is the side.
+    for name, (row, _, _) in MACRO.items():
+        side = {"BULLISH": "long", "BEARISH": "short"}.get(row_side.get(row))
+        if side:
+            out[name] = side
+            EXTRA_SRC[name] = "Risk Range"
     for fund, (row, _, inverted) in INDEX_FUND.items():
         side = {"BULLISH": "long", "BEARISH": "short"}.get(row_side.get(row))
         if side:
@@ -320,8 +325,25 @@ COIN_FUND = {"BTC": "IBIT", "ETH": "ETHA", "SOL": "SOLZ"}      # the fund that h
 YF_KEY.update({c: f"{c}-USD" for c in COINS})
 
 
+# Kris's other accounts (11/22): Kinesis holds coins and physical gold and silver; Forex.com trades currencies.
+# These are read straight off the Risk Range row: scanner name -> (Risk Range row, Yahoo symbol, venue).
+# The row label is also the key of the bot's Trade and Trend lines.
+MACRO = {
+    "XAU": ("GOLD", "GC=F", "Kinesis"), "XAG": ("SILVER", "SI=F", "Kinesis"),
+    "EURUSD": ("EUR/USD", "EURUSD=X", "Forex.com"), "GBPUSD": ("GBP/USD", "GBPUSD=X", "Forex.com"),
+    "CADUSD": ("CAD/USD", "CADUSD=X", "Forex.com"), "USDJPY": ("USD/YEN", "JPY=X", "Forex.com"),
+}
+YF_KEY.update({k: v[1] for k, v in MACRO.items()})
+NO_SHORT_VENUE = {"Kinesis"}        # physical metal and coins held outright: nothing to short there
+
+
+def venue(t: str):
+    """The account outside Fidelity where this name trades, or None."""
+    return "Kinesis" if t in COINS else MACRO[t][2] if t in MACRO else None
+
+
 def _line_key(t: str) -> str:
-    return f"{t}USD" if t in COINS else t
+    return f"{t}USD" if t in COINS else MACRO[t][0] if t in MACRO else t
 _RANGE_RE = re.compile(r"(?<![\d.,/$-])(\d[\d,]*\.?\d*)\s*[-–]\s*(\d[\d,]*\.?\d*)(?![\d/])")
 
 
@@ -380,7 +402,7 @@ def load_ranges(T) -> dict:
         cur.execute("""select ticker, range_high, range_low, band_source, range_asof from v_screener
                        where ticker=any(%s) and range_low is not null and range_high > range_low""", (list(T),))
         for t, hi, lo, src, asof in cur.fetchall():
-            if (src == "hdg" and t in RR_SKIP) or t in COINS:       # a coin's only range is the Crypto Quant one
+            if (src == "hdg" and t in RR_SKIP) or t in COINS or t in MACRO:   # coins: Crypto Quant only; MACRO: below
                 continue
             if src in HEDGEYE_SRC and not _hedgeye_fresh(asof):
                 continue                                # too old: falls through to MFR below
@@ -389,8 +411,17 @@ def load_ranges(T) -> dict:
             out[t] = (float(hi), float(lo), src or "?", asof)
         for t, v in cq.items():
             out.setdefault(t, v)
+        rows = {MACRO[t][0]: t for t in T if t in MACRO}
+        if rows:
+            cur.execute("""select distinct on (ticker) ticker, sell_trade, buy_trade, signal_date from hedgeye_risk_ranges
+                           where ticker=any(%s) and buy_trade is not null and sell_trade > buy_trade
+                             and signal_date >= current_date - 7 order by ticker, signal_date desc""", (list(rows),))
+            for row, hi, lo, asof in cur.fetchall():
+                if _hedgeye_fresh(asof):
+                    out[rows[row]] = (float(hi), float(lo), "hdg", asof)
         for src, sql in _FALLBACK:
-            need = [t for t in T if t not in out and t not in COINS and not (src == "hdg" and t in RR_SKIP)]
+            need = [t for t in T if t not in out and t not in COINS and t not in MACRO
+                    and not (src == "hdg" and t in RR_SKIP)]
             if not need:
                 break
             back = {TV_KEY.get(t, t): t for t in need} if src == "tv" else {t: t for t in need}
@@ -480,7 +511,7 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         held.setdefault(s, []).append((a, q, cb))
     inv = ({t for t, _ in ss} | {t for t, b in pm.items() if b in LONG_PM + SHORT_PM + LONG_BENCH + SHORT_BENCH}
            | set(etf) | set(watch))
-    T = sorted(t for t in inv | set(held) if t.isalpha() and len(t) <= 5)     # US listings; skips EL.PA, ETHUSD
+    T = sorted(t for t in inv | set(held) if (t.isalpha() and len(t) <= 5) or t in MACRO)   # skips EL.PA, ETHUSD
     rng = load_ranges(T)
     # A bench-only name with no fresh range can't produce a line (rp is unknown), and each extra name costs
     # about a second of lookups, so leave those out. They come in once the capture desk has a range for them.
@@ -493,11 +524,11 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                        where ticker=any(%s) and iv is not null and rv is not null and rv > 0
                          and snapshot_date >= current_date - 5
                        order by ticker, snapshot_date desc, fetched_at desc""", (T,))
-        ivrv = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall() if r[0] not in COINS}
+        ivrv = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall() if not venue(r[0])}
     lv = lookup([_line_key(t) for t in T])
     rs = structure([_line_key(t) for t in T])
-    lv.update({t: lv[_line_key(t)] for t in T if t in COINS and _line_key(t) in lv})
-    rs.update({t: rs[_line_key(t)] for t in T if t in COINS and _line_key(t) in rs})
+    lv.update({t: lv[_line_key(t)] for t in T if venue(t) and _line_key(t) in lv})
+    rs.update({t: rs[_line_key(t)] for t in T if venue(t) and _line_key(t) in rs})
     d = yf.download([YF_KEY.get(t, t) for t in T], period="3mo", interval="1d", progress=False, threads=True,
                     group_by="ticker")
     fr = _vol_frac(now)
@@ -547,6 +578,8 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
         # decreasing volume (Kris 11/6): the pullback/bounce days average under the 20-day and today is lighter than yesterday
         n = max(streak, 2)
         vol_falling = vo[-n:].mean() < a20 and vo[-1] < vo[-2]
+        if a20 == 0:                    # no volume series (currencies): the volume check can't be read
+            vol_falling = True
         base = dict(ticker=t, px=p, day=day, rp=rp, trade=tr, trend=tn_l, rl=rl, rh=rh,
                     vol3="/".join(_fv(x) for x in vo[-3:]), avg=_fv(a20), streak=streak,
                     ivrv=ivrv.get(t), rtag=rtag)
@@ -557,6 +590,8 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
             src = f"; from {EXTRA_SRC[t]}"
         if t in COINS:
             src = "; coin, Crypto Quant" + (f" (fund: {COIN_FUND[t]})" if t in COIN_FUND else "")
+        if t in MACRO:
+            src = f"; {MACRO[t][0]} on the Risk Range" + ("; no volume data" if a20 == 0 else "")
 
         for a, q, cb in held.get(t, []):
             mv = q * p
@@ -617,11 +652,21 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                 longs = [x for x in held.get(t, []) if x[1] > 0]
                 a = longs[0][0] if longs else "Rollover IRA"
                 size = 0.005 * acct[a] if longs else 0.01 * acct[a]
+                if venue(t):            # Kinesis / Forex.com: the bot has no holdings there, so no dollar size
+                    out.append(dict(base, acct=venue(t), action="BUY (one step)",
+                                    why=f"rp {rp:.2f}, red, vol falling; out under {tn_l:.4g}{src}", entry=True))
+                    continue
                 out.append(dict(base, acct=a, action=f"{'ADD' if longs else 'BUY'} ~${size:.0f}",
                                 why=f"rp {rp:.2f}, red, vol falling; out under {tn_l:.2f}{src}", entry=True))
         if side in ("short",) and rp is not None and tr and tn_s and not any(x[1] < 0 for x in held.get(t, [])):
             if p < tn_s and p < tr and streak >= 3 and day > 0 and rp >= 0.65 and vol_falling:
                 a = "Individual"
+                if venue(t) in NO_SHORT_VENUE:
+                    continue
+                if venue(t):
+                    out.append(dict(base, acct=venue(t), action="SHORT (one step)",
+                                    why=f"day {streak} bounce, rp {rp:.2f}, vol falling; stop {tr:.4g}{src}", entry=True))
+                    continue
                 out.append(dict(base, acct=a, action=f"SHORT ~${0.006 * acct[a]:.0f}",
                                 why=f"day {streak} bounce, rp {rp:.2f}, vol falling; stop {tr:.2f}{src}", entry=True))
     for o in out:
@@ -661,7 +706,8 @@ def fmt(alerts, now):
         if o.get("ivrv"):
             i, r = o["ivrv"]
             iv = f" | IV {i * 100:.0f} vs RV {r * 100:.0f} ({(i / r - 1) * 100:+.0f}%)"
-        lines.append(f"{o['acct'].split()[0]}: {o['action']} {o['ticker']} @ {o['px']:.2f} | rp {rp} | "
+        px = f"{o['px']:.4f}" if o["ticker"] in MACRO and o["px"] < 10 else f"{o['px']:.2f}"    # currency pairs
+        lines.append(f"{o['acct'].split()[0]}: {o['action']} {o['ticker']} @ {px} | rp {rp} | "
                      f"vol {o['vol3']} (avg {o['avg']}){iv} | {o['why']}")
     return "\n".join(lines)
 
