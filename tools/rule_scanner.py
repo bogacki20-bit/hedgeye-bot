@@ -129,6 +129,7 @@ INDEX_FUND = {
     "IEF": ("UST10Y", "^TNX", True), "SHY": ("UST2Y", None, True),      # no live 2-year yield on Yahoo
 }
 LEDGER = os.path.join(ROOT, "data", "stalk", "ledger.csv")
+KEITH_SOURCES = {"The Call", "Macro Show", "KM's Top 3 Things", "Real-Time Alerts"}
 CRYPTO_PRODUCTS = ("crypto_quant", "digital_assets_position_monitor")
 
 
@@ -149,6 +150,7 @@ def extra_inventory(today: dt.date | None = None) -> dict:
     today = today or dt.date.today()
     out: dict = {}
     row_side: dict = {}
+    keith: dict = {}
     try:
         import db_pg
         with db_pg.get_conn() as c, c.cursor() as cur:
@@ -172,6 +174,7 @@ def extra_inventory(today: dt.date | None = None) -> dict:
         print(f"extra_inventory: database sources skipped ({type(e).__name__})", file=sys.stderr)
     try:
         latest: dict = {}
+        # keith: ticker -> (date, side), what Keith himself last said about an index fund, within a week
         with open(LEDGER, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 try:
@@ -186,6 +189,13 @@ def extra_inventory(today: dt.date | None = None) -> dict:
                 t = (r.get("ticker") or "").strip()
                 if side and _tradable(t) and d >= latest.get(t, (dt.date.min, None))[0]:
                     latest[t] = (d, side)
+                if (r.get("source") or "").strip() in KEITH_SOURCES and (today - d).days <= 7 and t in INDEX_FUND:
+                    c2 = re.sub(r"\(.*?\)", "", call)          # "Long (from Short)" is a long
+                    k = (None if re.search(r"remove|closed|sold|exit|cover|trim|watch", c2)
+                         else "long" if "long" in c2 and "short" not in c2
+                         else "short" if "short" in c2 and "long" not in c2 else None)
+                    if d >= keith.get(t, (dt.date.min, None))[0]:
+                        keith[t] = (d, k)
         for t, (_, side) in latest.items():
             out.setdefault(t, side)
     except OSError:
@@ -194,10 +204,17 @@ def extra_inventory(today: dt.date | None = None) -> dict:
     # it replaces the side from the ledger and the other sources above. load_universe() also puts it over
     # the watch file. Only Hedgeye's own lists (Signal Strength, Position Monitor, ETF Pro) can disagree
     # with it, and then sides() returns 'both': hold what's there, no new entries, until Keith breaks the tie.
+    # Keith breaks it by saying so (Kris 11/22, TLT: "keith said long bonds"): a long or short call of his own
+    # on the fund in the last 7 days (The Call, Macro Show, Top 3 Things, Real-Time Alerts) is the side.
     for fund, (row, _, inverted) in INDEX_FUND.items():
         side = {"BULLISH": "long", "BEARISH": "short"}.get(row_side.get(row))
         if side:
             out[fund] = {"long": "short", "short": "long"}[side] if inverted else side
+        # "long bonds" covers every Treasury fund: the bond funds share Keith's latest call on any of them
+        said = (max((keith[f] for f, v in INDEX_FUND.items() if v[2] and f in keith), default=(None, None),
+                    key=lambda x: x[0]) if inverted else keith.get(fund, (None, None)))
+        if said[1]:
+            out[fund] = said[1]
     return out
 
 
