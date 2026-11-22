@@ -129,6 +129,7 @@ INDEX_FUND = {
     "IEF": ("UST10Y", "^TNX", True), "SHY": ("UST2Y", None, True),      # no live 2-year yield on Yahoo
 }
 LEDGER = os.path.join(ROOT, "data", "stalk", "ledger.csv")
+KEITH_BOOKS = ("portfolio_solutions", "go_anywhere_portfolio")
 KEITH_SOURCES = {"The Call", "Macro Show", "KM's Top 3 Things", "Real-Time Alerts"}
 CRYPTO_PRODUCTS = ("crypto_quant", "digital_assets_position_monitor")
 
@@ -162,6 +163,16 @@ def extra_inventory(today: dt.date | None = None) -> dict:
                 if side and _tradable(t):
                     out.setdefault(t, side)
             row_side = {t: (trend or "").upper() for t, trend in rows}
+            # Keith's own books (Kris 11/22: Portfolio Solutions shows his lean): the latest dashboard
+            # snapshot of Portfolio Solutions and the Go Anywhere portfolio, if it is under a week old.
+            cur.execute("""select ticker, position from hedgeye_dashboard_positions d
+                           where product = any(%s) and as_of >= %s
+                             and as_of = (select max(as_of) from hedgeye_dashboard_positions where product = d.product)""",
+                        (list(KEITH_BOOKS), today - dt.timedelta(days=7)))
+            for t, pos in cur.fetchall():
+                side = {"long": "long", "short": "short"}.get((pos or "").strip().lower())
+                if side and _tradable(t):
+                    out.setdefault(t, side)
             cur.execute("""select distinct on (name) name, direction from research_calls
                            where product = any(%s) and signal_date >= %s
                            order by name, signal_date desc, id desc""",
