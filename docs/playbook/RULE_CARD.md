@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press and options note 11/21)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press, options note and stop candidate 11/21)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -286,6 +286,7 @@ Every action and stalk line carries a score out of 100. Lists sort highest first
   - whether to add time windows (Kris: not yet);
   - day-1 shorts at the SPX backboard;
   - the short press (11/21): set the HIRO and Stability Gauge numbers after the first live week of the SpotGamma watcher (starts 11/23), then check its hit rate.
+  - a tighter long stop than −5% (Kris 11/21, candidate only): `py -m tools.execution_report --days 90` showed a typical winner never went more than about 1.5% against, a typical loser went to about −5%, and about two in three losers were up 1%+ first. On paper a −3% or −4% stop beat −5% over 90 days, but that test uses daily bars and is rough. Re-run it for the review, and also look at a stop moved to cost once a long is up 1%+.
 - **Talked through 11/21, not ruled (SpotGamma Alpha is live; waiting on the first live week):** (1) use the live S&P read to time trims, covers and adds the card already calls for; (2) a separate index sleeve that trades the move itself (long beta up, inverse funds or UVXY down) with its own products, size, stop and time limit. Neither is a rule yet.
 - **Options paper study (Kris 11/20 and 11/21): paper only.** For every A-grade call the desk logs what the option version cost at that moment, off live TradingView quotes, and compares the outcome with cash (`data/stalk/options_study.csv`; the desk prompt has the steps). SpotGamma (cheap or expensive options, the walls) is context for it. Review after 30 finished calls; until Kris rules, no options.
 - Audit round 3 batches 2–3 (16 items, single-source or low confidence) are parked in `PROCESS_AUDIT_ROUND3.md`.
