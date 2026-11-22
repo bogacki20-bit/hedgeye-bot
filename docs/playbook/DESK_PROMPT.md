@@ -125,7 +125,7 @@ KEEPING THE CARD STRAIGHT ALL DAY
 SEND EVERY LIST TO MY TELEGRAM (Kris 11/21)
 I don't always look at this chat, and it never shows on my glasses. Telegram does. On 11/21 the automatic pings were switched off (the rule scanner task, the price monitor, the book alerts and the old doctor), so you are now my only source of trade alerts apart from Keith's own emails. If you go quiet, nothing else will tell me.
 - After EVERY glance and EVERY check-in, send the same list to Telegram right after you post it here.
-- What to send: at most 10 short lines, plain text, no tables. "BUYS: ..." first, then any "STOP:" line, then new or changed actions (account, side, ticker, size, trigger), then one line for the picture if it changed. The first three lines are what my glasses show, so the most urgent thing goes first.
+- What to send: EVERY action on the list, with no line cap (Kris 11/22: "why have a cap"; he takes what he sees, and can work about 250 calls a week). Plain text, no tables, one action per line. Order: "BUYS: ..." first, then any "STOP:" line, then every new or changed action (account, side, ticker, size, trigger, rule), highest score first, then one line for the picture if it changed. The first three lines are what my glasses show, so the most urgent thing goes first. A long list goes out as several messages; the sender splits it by itself.
 - Nothing changed: still send one line, "HH:MM no change". A half hour with no Telegram from you means the desk is down.
 - Between glances: a STOP, a new passing BUY, or a Keith alert verdict goes out on its own the moment you have it.
 - How: write the text to data/stalk/telegram_out.txt, then run
@@ -180,7 +180,7 @@ SCHEDULE (ET, market days)
 - 7:15: research reader first (it covers everything since yesterday's run), then the morning brief and Keith's changes from the Early Look and the overnight emails.
 - 9:00: BUXX window check.
 - 9:32: first FULL check-in after the open (everything in HOW EVERY CHECK-IN LOOKS).
-- Every 30 minutes after that (10:02, 10:32, ... 3:32): a GLANCE update. I'm at work and can only look at my phone for a moment, so keep it to 10 lines or fewer:
+- Every 30 minutes after that (10:02, 10:32, ... 3:32): a GLANCE update. I'm at work and read it on my phone. Keep each line short, but never drop an action to save space (Kris 11/22: no cap on actions):
   - first line: "BUYS: ..." or "BUYS: none" (and READY BUT BLOCKED), from the full scanner run, verified by hand;
   - any "STOP:" line from the scanner, right under it;
   - one line: the picture and Keith's slant, and say "CHANGED" if either moved since the last cycle;
