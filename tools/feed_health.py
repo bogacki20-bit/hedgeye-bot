@@ -6,6 +6,7 @@ and the SpotGamma equity hub had been dead since 11/4.
 
     py -m tools.feed_health            # print the report
     py -m tools.feed_health --send     # also text the one-line verdict to Telegram
+    py -m tools.feed_health --alert    # text Telegram ONLY when a feed goes down or comes back
 
 Lag = weekdays with no new data. Before 10:00 ET today doesn't count yet.
 No LLM calls, read-only.
@@ -200,9 +201,30 @@ def check(now: dt.datetime | None = None) -> list[dict]:
     except Exception as e:  # noqa: BLE001
         out.append({"label": "Database backup (Drive)", "src": "Railway DB", "last": None, "lag": None, "ok": False,
                     "err": str(e)[:80]})
+    out.extend(_tape_age_check(now))
     out.extend(_capture_desk_checks(now))
     out.extend(_content_checks())
     return out
+
+
+def _tape_age_check(now: dt.datetime) -> list[dict]:
+    """11/20: the day-level tape check said "ok" while the 15-min reads had stopped for 2 h
+    (09:54 -> 12:08). In market hours on a weekday the newest read must be < 25 min old."""
+    if now.weekday() >= 5 or not (dt.time(9, 50) <= now.time() <= dt.time(16, 20)):
+        return []
+    try:
+        import db_pg
+        with db_pg.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT max(read_at) FROM sg_tape_reads")
+            last = cur.fetchone()[0]
+        if last is None:
+            return [{"label": "SpotGamma tape (intraday age)", "src": "SpotGamma", "last": None, "lag": None, "ok": False}]
+        age = (now - last.astimezone(ET)).total_seconds() / 60
+        return [{"label": "SpotGamma tape (intraday age)", "src": "SpotGamma",
+                 "last": f"{last.astimezone(ET):%H:%M}, {age:.0f} min old", "lag": round(age), "ok": age < 25}]
+    except Exception as e:  # noqa: BLE001
+        return [{"label": "SpotGamma tape (intraday age)", "src": "SpotGamma", "last": None, "lag": None, "ok": False,
+                 "err": str(e)[:80]}]
 
 
 def _capture_desk_checks(now: dt.datetime) -> list[dict]:
@@ -358,9 +380,54 @@ def verdict(rows: list[dict], now: dt.datetime) -> str:
     return f"Feeds {now:%H:%M}: {len(bad)} STALE: " + "; ".join(parts)
 
 
+ALERT_STATE = ROOT / "data" / "feed_alert_state.json"
+
+
+def alert_message(rows: list[dict], now: dt.datetime, state_path: pathlib.Path = ALERT_STATE) -> str | None:
+    """Feed-down alert (Kris 11/22: "an alert that goes to telegram if any feed is down").
+    Texts only on a CHANGE, so it can run after every capture block without spamming:
+      - a feed is STALE on two runs in a row (one stale run can be a job still landing) -> DOWN
+      - a feed that was alerted DOWN is ok again -> BACK
+    State is a small local file: {label: {"runs": n, "alerted": bool, "last": str}}."""
+    import json
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        state = {}
+    down, back, new_state = [], [], {}
+    for r in rows:
+        prev = state.get(r["label"], {})
+        if r["ok"]:
+            if prev.get("alerted"):
+                back.append(r["label"])
+            continue
+        runs = int(prev.get("runs", 0)) + 1
+        alerted = bool(prev.get("alerted"))
+        if runs >= 2 and not alerted:
+            down.append(f"{r['label']} (last {r['last'] or r.get('err', 'none')})")
+            alerted = True
+        new_state[r["label"]] = {"runs": runs, "alerted": alerted, "last": str(r["last"])}
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(new_state, indent=1), encoding="utf-8")
+    if not down and not back:
+        return None
+    parts = []
+    if down:
+        parts.append(f"FEED DOWN {now:%H:%M} ET: " + "; ".join(down))
+    if back:
+        parts.append(f"FEED BACK {now:%H:%M} ET: " + "; ".join(back))
+    still = sum(1 for v in new_state.values() if v["alerted"]) - len(down)
+    if still > 0:
+        parts.append(f"({still} other feed(s) still down)")
+    return "\n".join(parts)
+
+
 def _cli() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--send", action="store_true", help="text the verdict to Telegram")
+    ap.add_argument("--alert", action="store_true",
+                    help="text Telegram only when a feed goes down (2 runs in a row) or comes back")
+    ap.add_argument("--alert-dry", action="store_true", help="like --alert but print instead of texting")
     a = ap.parse_args()
     import db_pg
     db_pg._load_dotenv_fallback()
@@ -379,6 +446,20 @@ def _cli() -> int:
         if not send_telegram("Feed health", v):
             print("Telegram send failed")
             return 1
+    if a.alert or a.alert_dry:
+        msg = alert_message(rows, now)
+        if msg is None:
+            print("feed alert: no change")
+        elif a.alert_dry:
+            print("feed alert (dry):\n" + msg)
+        else:
+            from parser_tms_deck import load_telegram_env
+            load_telegram_env()
+            from notifier import send_telegram
+            ok = send_telegram("Feed alert", msg)
+            print("feed alert sent" if ok else "feed alert: Telegram send failed")
+            if not ok:
+                return 1
     return 0
 
 
