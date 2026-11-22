@@ -106,6 +106,8 @@ def load_universe():
     for t, side in extra_inventory().items():      # desk_watch.csv wins on a conflict
         if (t, side) in ss_removed:                # card: removed from Signal Strength = off the stalk
             continue
+        if t in INDEX_FUND:                        # the index's daily signal beats a watch-file side (Kris 11/22)
+            watch[t] = side
         watch.setdefault(t, side)
     return acct, book, ss, pm, etf, watch
 
@@ -188,11 +190,14 @@ def extra_inventory(today: dt.date | None = None) -> dict:
             out.setdefault(t, side)
     except OSError:
         pass
-    # Last: Keith's trend call on an index row gives its fund a side when nothing above lists the fund.
+    # Keith's daily trend call on an index row is the signal for its fund, and the signal wins (Kris 11/22):
+    # it replaces the side from the ledger and the other sources above. load_universe() also puts it over
+    # the watch file. Only Hedgeye's own lists (Signal Strength, Position Monitor, ETF Pro) can disagree
+    # with it, and then sides() returns 'both': hold what's there, no new entries, until Keith breaks the tie.
     for fund, (row, _, inverted) in INDEX_FUND.items():
         side = {"BULLISH": "long", "BEARISH": "short"}.get(row_side.get(row))
         if side:
-            out.setdefault(fund, {"long": "short", "short": "long"}[side] if inverted else side)
+            out[fund] = {"long": "short", "short": "long"}[side] if inverted else side
     return out
 
 
