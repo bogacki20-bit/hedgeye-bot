@@ -8,7 +8,7 @@ alerts (each ticker+action fires once a day; exits fire again at the 3:45 confir
   Book longs   below Trend -> OUT · lower high + below Trade -> TO MIN · rp > 1 -> TRIM
   Book shorts  above Trend -> COVER ALL · above Trade -> COVER HALF ·
                +3% / rp <= .25 / range low -> COVER 1/3 (1-share = all)
-  New / add long   SS or PM long side, price above Trade and Trend, 0 <= rp <= .35, red day,
+  New / add long   SS or PM long side (bench included since 11/21, tagged "PM bench only"), price above Trade and Trend, 0 <= rp <= .35, red day,
                    volume falling and under the 20-day average, no earnings within 2 days
   New short        SS or PM short side (or a watch short), below Trade and Trend, 3+ green
                    days, rp >= .65, green today, volume falling, no earnings within 2 days
@@ -39,6 +39,8 @@ CASH = {"SPAXX", "FDRXX", "BUXX", "CORE"}
 TV_KEY = {"USD": "USD_SEMI"}
 LONG_PM = ("active_long", "top_idea_long")
 SHORT_PM = ("active_short", "top_idea_short")
+LONG_BENCH = ("long_bench",)       # Position Monitor bench (Kris 11/21: read the whole Position Monitor).
+SHORT_BENCH = ("short_bench",)     # The weakest source: it only sets a side when nothing else lists the name.
 BUF = 0.02
 STOP_LONG = 0.05        # card: -5% from cost = close
 STOP_SHORT = 0.04       # card: 4% against = cover half
@@ -165,7 +167,15 @@ def sides(t, ss, pm, etf, watch):
     """Which side Hedgeye's inventory has this ticker on: 'long', 'short', 'both' or None."""
     lg = (t, "long") in ss or pm.get(t) in LONG_PM or etf.get(t) == "long" or watch.get(t) == "long"
     sh = (t, "short") in ss or pm.get(t) in SHORT_PM or etf.get(t) == "short" or watch.get(t) == "short"
+    if not lg and not sh:
+        return "long" if pm.get(t) in LONG_BENCH else "short" if pm.get(t) in SHORT_BENCH else None
     return "both" if lg and sh else "long" if lg else "short" if sh else None
+
+
+def bench_only(t, ss, pm, etf, watch) -> bool:
+    """True when the Position Monitor bench is the only place Hedgeye's inventory lists this ticker."""
+    return (pm.get(t) in LONG_BENCH + SHORT_BENCH and t not in etf and t not in watch
+            and (t, "long") not in ss and (t, "short") not in ss)
 
 
 def earnings_soon(t: str, days: int = 2) -> bool:
@@ -198,13 +208,18 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
     held = {}
     for s, a, q, cb in book:
         held.setdefault(s, []).append((a, q, cb))
-    inv = {t for t, _ in ss} | {t for t, b in pm.items() if b in LONG_PM + SHORT_PM} | set(etf) | set(watch)
+    inv = ({t for t, _ in ss} | {t for t, b in pm.items() if b in LONG_PM + SHORT_PM + LONG_BENCH + SHORT_BENCH}
+           | set(etf) | set(watch))
     T = sorted(t for t in inv | set(held) if t.isalpha() and len(t) <= 5)     # US listings; skips EL.PA, ETHUSD
     with db_pg.get_conn() as c, c.cursor() as cur:
         cur.execute("""select distinct on (ticker) ticker, range_high, range_low from tv_levels
                        where ticker=any(%s) and range_high is not null and bar_date >= current_date - 7
                        order by ticker, bar_date desc""", ([TV_KEY.get(t, t) for t in T],))
         rng = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
+    # A bench-only name with no fresh range can't produce a line (rp is unknown), and each extra name costs
+    # about a second of lookups, so leave those out. They come in once the capture desk has a range for them.
+    T = [t for t in T if t in held or TV_KEY.get(t, t) in rng or not bench_only(t, ss, pm, etf, watch)]
+    with db_pg.get_conn() as c, c.cursor() as cur:
         # MFR implied vs realized vol (Kris 11/20): context on every line, never a gate
         cur.execute("""select distinct on (ticker) ticker, iv, rv from mfr_snapshots
                        where ticker=any(%s) and iv is not null and rv is not null and rv > 0
@@ -253,6 +268,7 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                     vol3="/".join(_fv(x) for x in vo[-3:]), avg=_fv(a20), streak=streak,
                     ivrv=ivrv.get(t))
         side = sides(t, ss, pm, etf, watch)
+        src = "; PM bench only" if bench_only(t, ss, pm, etf, watch) else ""
 
         for a, q, cb in held.get(t, []):
             mv = q * p
@@ -314,12 +330,12 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                 a = longs[0][0] if longs else "Rollover IRA"
                 size = 0.005 * acct[a] if longs else 0.01 * acct[a]
                 out.append(dict(base, acct=a, action=f"{'ADD' if longs else 'BUY'} ~${size:.0f}",
-                                why=f"rp {rp:.2f}, red, vol falling; out under {tn_l:.2f}", entry=True))
+                                why=f"rp {rp:.2f}, red, vol falling; out under {tn_l:.2f}{src}", entry=True))
         if side in ("short",) and rp is not None and tr and tn_s and not any(x[1] < 0 for x in held.get(t, [])):
             if p < tn_s and p < tr and streak >= 3 and day > 0 and rp >= 0.65 and vol_falling:
                 a = "Individual"
                 out.append(dict(base, acct=a, action=f"SHORT ~${0.006 * acct[a]:.0f}",
-                                why=f"day {streak} bounce, rp {rp:.2f}, vol falling; stop {tr:.2f}", entry=True))
+                                why=f"day {streak} bounce, rp {rp:.2f}, vol falling; stop {tr:.2f}{src}", entry=True))
     for o in out:
         if o.get("entry") and earnings_soon(o["ticker"]):
             o["skip"] = "earnings within 2 days"
