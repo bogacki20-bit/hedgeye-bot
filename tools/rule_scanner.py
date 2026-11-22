@@ -216,6 +216,16 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                        where ticker=any(%s) and range_high is not null and bar_date >= current_date - 7
                        order by ticker, bar_date desc""", ([TV_KEY.get(t, t) for t in T],))
         rng = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
+        # No TradingView range: use MFR's own range from its nightly snapshot (Kris 11/21). It is the same
+        # range TradingView draws, so rp reads the same. Names with a TV_KEY alias are left to TradingView
+        # ("USD" is 2x semis in the book and something else elsewhere).
+        need = [t for t in T if t not in rng and t not in TV_KEY]
+        cur.execute("""select distinct on (ticker) ticker, range_high, range_low from mfr_snapshots
+                       where ticker=any(%s) and range_high is not null and range_low is not null
+                         and range_high > range_low and snapshot_date >= current_date - 5
+                       order by ticker, snapshot_date desc, fetched_at desc""", (need,))
+        mfr_rng = {r[0]: (float(r[1]), float(r[2])) for r in cur.fetchall()}
+        rng.update(mfr_rng)
     # A bench-only name with no fresh range can't produce a line (rp is unknown), and each extra name costs
     # about a second of lookups, so leave those out. They come in once the capture desk has a range for them.
     T = [t for t in T if t in held or TV_KEY.get(t, t) in rng or not bench_only(t, ss, pm, etf, watch)]
@@ -269,6 +279,8 @@ def scan(now: dt.datetime | None = None) -> list[dict]:
                     ivrv=ivrv.get(t))
         side = sides(t, ss, pm, etf, watch)
         src = "; PM bench only" if bench_only(t, ss, pm, etf, watch) else ""
+        if t in mfr_rng:
+            src += "; MFR range"
 
         for a, q, cb in held.get(t, []):
             mv = q * p
