@@ -1,4 +1,4 @@
-# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press, options note and stop candidate 11/21)
+# Rule card (Kris; rewritten 11/14/2026, plus audit round 3 rulings the same evening; SpotGamma rules 11/15; VXN scope 11/16; VIX 30+ ruling 11/20; short press, options note, stop candidate and 2-day range rule 11/21)
 
 This is the source of truth for every desk call. It is built on Keith's *Master The Market* (ch. 3–4), his Real-Time Alerts, and Kris's rulings.
 "Laggard / rotate out" or a macro view never overrides it.
@@ -17,6 +17,7 @@ Tools: `tools/desk_rot.py`, `tools/desk_shorts.py`, `tools/desk_sizing.py`, `too
 - **2% buffer** on Vola Trade or an EMA only: call a break only when price is about 2% through. **No buffer on the cloud** (Kris 11/14): a 3:45 close through its edge counts.
 - **A range low or high is never a Trade or Trend line.** Ranges are context and rp only.
 - **rp** = (price − range low) / (range high − range low).
+  - **Which range (Kris 11/21):** Hedgeye's own published range first (Risk Range, Investing Ideas, ETF Pro), but **only for 2 trading days** after it was published. After that, rp uses MFR's range, then TradingView's. Every rp shows its source and date.
 - **Range structure** = today's range vs 5 sessions ago: HH/HL, LH, etc.
 - **Proxies:** an ETF can use a close proxy's levels (SCHA uses IWM). **Read price and every line on the proxy alone; never mix the two** (Kris 11/14).
 - **Formations:**

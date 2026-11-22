@@ -18,6 +18,8 @@ Our own lines (Vola Trade, 89-day EMA) get the 2% buffer; Keith's numbers don't.
 rp uses the bot's one canonical range per name (v_screener, the same one tools/rp_resolve.py and the
 other desk tools read): Hedgeye's Risk Range (7 days) > Investing Ideas (7 days) > MFR (5 days) >
 TradingView (10 days). Every line prints which one it used and its date (Kris 11/21).
+One difference from v_screener (Kris 11/21): a Hedgeye-published range is used for 2 trading days only;
+after that the name falls through to MFR.
 
     py -m tools.rule_scanner --dry-run      # print, don't send or record
     py -m tools.rule_scanner                # send new alerts to Telegram
@@ -198,6 +200,23 @@ _FALLBACK = (       # same order as v_screener, for names outside its universe (
 )
 
 
+HEDGEYE_SRC = ("hdg", "iin")
+HEDGEYE_RANGE_DAYS = 2      # Kris 11/21: a Hedgeye-published range is fresh for 2 trading days, then MFR's is used
+
+
+def _hedgeye_fresh(asof, today: dt.date | None = None) -> bool:
+    """True when a Hedgeye-published range is at most HEDGEYE_RANGE_DAYS weekdays old."""
+    if asof is None:
+        return False
+    today = today or dt.date.today()
+    age, d = 0, asof
+    while d < today:
+        d += dt.timedelta(days=1)
+        if d.weekday() < 5:
+            age += 1
+    return age <= HEDGEYE_RANGE_DAYS
+
+
 def load_ranges(T) -> dict:
     """ticker -> (range_high, range_low, source, as-of date), from the bot's one canonical range.
 
@@ -213,6 +232,8 @@ def load_ranges(T) -> dict:
         for t, hi, lo, src, asof in cur.fetchall():
             if src == "hdg" and t in RR_SKIP:
                 continue
+            if src in HEDGEYE_SRC and not _hedgeye_fresh(asof):
+                continue                                # too old: falls through to MFR below
             out[t] = (float(hi), float(lo), src or "?", asof)
         for src, sql in _FALLBACK:
             need = [t for t in T if t not in out and not (src == "hdg" and t in RR_SKIP)]
@@ -221,6 +242,8 @@ def load_ranges(T) -> dict:
             back = {TV_KEY.get(t, t): t for t in need} if src == "tv" else {t: t for t in need}
             cur.execute(sql, (list(back),))
             for k, hi, lo, asof in cur.fetchall():
+                if src in HEDGEYE_SRC and not _hedgeye_fresh(asof):
+                    continue
                 out[back[k]] = (float(hi), float(lo), src, asof)
     return out
 
