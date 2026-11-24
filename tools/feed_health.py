@@ -133,11 +133,17 @@ def check(now: dt.datetime | None = None) -> list[dict]:
                                 ("FRED Treasury yields (10Y)", "DGS10", 2)):
         try:
             with db_pg.get_conn() as conn, conn.cursor() as cur:
-                cur.execute("SELECT max(obs_date) FROM fred_observations WHERE series_id=%s", (sid,))
-                last = cur.fetchone()[0]
+                cur.execute("SELECT max(obs_date), max(fetched_at) FROM fred_observations WHERE series_id=%s", (sid,))
+                last, fetched = cur.fetchone()
             lag = _weekday_lag(last, now)
-            out.append({"label": label, "src": "FRED", "last": last, "lag": lag,
-                        "ok": lag is not None and lag <= allowed})
+            ok = lag is not None and lag <= allowed
+            # 11/24: FRED itself posts late some days (11/19, 11/24: ICE spreads not up by 11 AM) and skips
+            # holidays. If OUR loader ran in the last 8 hours and the data is one day past the limit, the
+            # feed is not down, FRED is late. A loader that stopped running still fails.
+            late = (not ok and lag is not None and lag == allowed + 1 and fetched is not None
+                    and (now - fetched.astimezone(ET)).total_seconds() <= 8 * 3600)
+            out.append({"label": label, "src": "FRED", "last": last, "lag": lag, "ok": ok or late,
+                        "note": "FRED posting late; our loader ran" if late else ""})
         except Exception as e:
             out.append({"label": label, "src": "FRED", "last": None, "lag": None, "ok": False, "err": str(e)[:80]})
     # 11/15: the MFR "track" group (Buy/Sell, BTFD, Momentum, Vola, Matrix) runs after "core" in
@@ -488,7 +494,8 @@ def _cli() -> int:
     for r in rows:
         mark = "ok   " if r["ok"] else "STALE"
         lag = "" if r["lag"] is None else f"lag {r['lag']}"
-        print(f"{mark} {r['src']:12} {r['label']:30} last {r['last']}  {lag}")
+        note = f"  ({r['note']})" if r.get("note") else ""
+        print(f"{mark} {r['src']:12} {r['label']:30} last {r['last']}  {lag}{note}")
     v = verdict(rows, now)
     print(v)
     if a.send:
