@@ -48,6 +48,8 @@ FEEDS = [
     ("SpotGamma tape (15-min reads)", "SpotGamma", "sg_tape_reads", "read_at", 1),
     # 11/24: the watcher chat's TRACE/HIRO reads, loaded from data/sg_watch by tools/sg_watch_load.py
     ("SpotGamma watch (TRACE/HIRO reads)", "SpotGamma", "sg_watch_reads", "read_date", 1),
+    # 11/24: the Volatility Dashboard per name, once a day after the close (tools/sg_vol_capture.js -> tools/sg_vol.py)
+    ("SpotGamma volatility dashboard", "SpotGamma", "sg_vol_daily", "trade_date", 1),
     # 11/15: the rest of the dashboard (tools/sg_daily_capture.js, sg_report_capture.js -> tools/sg_pages.py).
     # sg_index_daily.trade_date is the session the levels were computed from (one session behind the page date).
     ("SpotGamma dashboard pages (daily run)", "SpotGamma", "sg_page_captures", "captured_at", 1),

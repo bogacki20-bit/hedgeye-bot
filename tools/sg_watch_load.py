@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS sg_watch_reads (
     loaded_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (read_date, read_time)
 );
+ALTER TABLE sg_watch_reads ADD COLUMN IF NOT EXISTS vix numeric;
 CREATE TABLE IF NOT EXISTS sg_watch_days (
     read_date date PRIMARY KEY,
     red_reads int,
@@ -110,6 +111,7 @@ def parse_watch(path: str) -> list[dict]:
                 "alerts": _txt(r.get("alerts")), "test_below": num(r.get("test_below")),
                 "balance": num(r.get("balance")), "test_above": num(r.get("test_above")),
                 "drift": _txt(r.get("drift")), "hiro_vs_map": _txt(r.get("hiro_vs_map")),
+                "vix": num(r.get("vix")),   # 11/24: added to the watcher's line; blank on older files
             })
     return out
 
