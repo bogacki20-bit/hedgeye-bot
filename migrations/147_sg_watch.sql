@@ -1,0 +1,40 @@
+-- 11/24/2026: the SpotGamma watcher chat's TRACE/HIRO reads (tools/sg_watch_load.py creates these too).
+CREATE TABLE IF NOT EXISTS sg_watch_reads (
+    read_date date NOT NULL,
+    read_time text NOT NULL,
+    read_at timestamp,
+    is_setup boolean NOT NULL DEFAULT false,
+    spx numeric,
+    vs_vol_trigger text,
+    stability numeric,
+    gamma_zone text,
+    floor_below numeric,
+    ceiling_above numeric,
+    hiro_raw text,
+    hiro_usd numeric,
+    hiro_30m text,
+    charm_pin numeric,
+    alerts text,
+    test_below numeric,
+    balance numeric,
+    test_above numeric,
+    drift text,
+    hiro_vs_map text,
+    loaded_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (read_date, read_time)
+);
+CREATE TABLE IF NOT EXISTS sg_watch_days (
+    read_date date PRIMARY KEY,
+    red_reads int,
+    total_reads int,
+    hiro_open_raw text,
+    hiro_open_usd numeric,
+    hiro_close_raw text,
+    hiro_close_usd numeric,
+    spx_close numeric,
+    below_vol_trigger text,
+    below_put_wall text,
+    verdict text,
+    in_a_row int,
+    loaded_at timestamptz NOT NULL DEFAULT now()
+);
