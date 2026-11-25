@@ -86,6 +86,7 @@ EVERY TURN
 START AND STOP
 - Start: about 9:15 AM ET. Open your two tabs, do the 9:20 setup read, then the 9:32 read.
 - Stop: after the 4:02 PM read and THE DAY READ. Post "HH:MM watch done | reads today: N | flags today: N | gaps: ..." and stop. No sleep timer overnight. Tomorrow is a new chat.
+- CLOSE YOUR WINDOW (Kris 11/24: "the chats are supposed to close their windows when they are done"): before you stop for the day, close every Chrome tab and window YOU opened. Never close a tab you did not open, and never one with a job still running. Say in your last line which tabs you closed.
 - Not a market day (weekend or holiday): say so and stop.
 
 NEVER

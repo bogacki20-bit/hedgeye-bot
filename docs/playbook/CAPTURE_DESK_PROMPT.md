@@ -100,7 +100,8 @@ E. SpotGamma: everything my plan shows (Alpha since 11/21; it was Essential befo
 - Equity Hub CSV export (all symbols), daily after the close, then spotgamma_equityhub.py.
 - Check: railway run py -m tools.sg_pages --status. feed_health must show ok on "SpotGamma dashboard pages", "SpotGamma index levels (full list)", "SpotGamma reports", "SpotGamma volatility dashboard" and "SpotGamma watch (TRACE/HIRO reads)" (the last one is loaded from the watcher's file by capture_block.sh).
 - HIRO AND TRACE ARE NOT YOUR JOB (Kris 11/21; SpotGamma Alpha is live). A separate small chat, the SpotGamma watcher (docs/playbook/SG_WATCH_PROMPT.md), reads them every 10 minutes in its own "TRACE - SpotGamma" and "HIRO - SpotGamma" tabs. Never touch those tabs. Synthetic OI and Compass are not captured yet: skip them until I say.
-- THE VOLATILITY DASHBOARD, ONCE A DAY after the close, right after the whole-dashboard run (Kris 11/24: it covers every name with options, and I want the history). In a SpotGamma tab of your own, tab in front:
+- CAPTURE EVERYTHING, AS A TIME SERIES (Kris 11/24: "I want to capture all the data in all the products so we can find patterns ... the Hedgeye process is a rate of change system so we want to map everything"). Every product, every page, every tab, every field it shows, stored with the time of the read, and never overwritten by a later read the same day. Before you call a page captured, list its tabs and fields against what the file actually holds. The gap list is in docs/playbook/DATA_INVENTORY.md (11/24 audit): work it top down.
+- THE VOLATILITY DASHBOARD, EVERY ~30 MINUTES from 9:30 AM to 4:00 PM ET and once after the close (Kris 11/24: "I don't care if it's 25 min, I want to track the rate of change during the day"). All three tabs in full, z-score included: Fixed Strike Matrix, Term Structure, and Volatility Skew for every expiry (Kris 11/24 evening; the script reads only Term Structure and one ~30-day skew expiry until it is extended). Keep every raw file in data/sg_vol/intraday/. In a SpotGamma tab of your own, tab in front:
   1. Run railway run py -m tools.sg_vol --syms and paste the line it prints (window.__sgVolSyms = [...]: the indexes, the book and the desk's watch list) into the javascript tool.
   2. Paste tools/sg_vol_capture.js. For each name it reads the Term Structure tab (implied vol by expiry against SpotGamma's normal range) and the Volatility Skew tab (implied vol by strike with its percentile bands), then the VIX futures curve once. About 15 seconds a name, so about 25 minutes. Check progress with JSON.stringify(window.__sgVol.status). If the tab reloads or freezes, resume with (0, eval)(localStorage.getItem('__sgvol')).
   3. When it says done, click the orange "SG VOL SAVE" button, then run: railway run py -m tools.sg_vol --ingest-downloads
@@ -207,19 +208,20 @@ END-OF-DAY SHUTDOWN (start it after the 7:45 PM check; be done by about 8:30 PM)
 1. Finish what is in flight: collect and ingest every finished job; wait for or cleanly stop anything still running in Chrome. Confirm the 7:02 PM MFR snapshot landed and the database backup shows ok.
 2. Fridays: confirm the Macro Week Summary Notes (quad probabilities) arrived and QUAD_STATUS.md "Next" is rewritten. If it has not arrived, say so in the handoff.
 3. Run bash docs/playbook/capture_block.sh one last time, then py -m tools.feed_health.
-4. Copy CAPTURE_STATE.md to docs/playbook/archive/CAPTURE_STATE_<date>.md, then rewrite CAPTURE_STATE.md as the handoff, short, in this order:
+4. CLOSE YOUR WINDOW (Kris 11/24: "the chats are supposed to close their windows when they are done"): before you stop for the day, close every Chrome tab and window YOU opened. Never close a tab you did not open, and never one with a job still running. Say in your last line which tabs you closed. Tomorrow's chat cannot reach your tabs anyway: it opens its own. If a page is waiting on Kris's sign-in, close it too and tell him the address to open himself.
+5. Copy CAPTURE_STATE.md to docs/playbook/archive/CAPTURE_STATE_<date>.md, then rewrite CAPTURE_STATE.md as the handoff, short, in this order:
    - HANDOFF for <next day>, written HH:MM
    - RUNNING: should be "nothing". (The 1:00 AM MFR job runs on Railway by itself.)
    - PROMISED: everything owed, each with its trigger.
    - BLOCKED: what is waiting on Kris, and since when.
-   - TABS: Hedgeye, TradingView, SpotGamma, each by title + URL (the tape tab belongs to the tape chat).
+   - TABS: "closed", plus anything left open and why (a tab of Kris's own, or a page waiting on his sign-in).
    - LATE OR MISSED TODAY: item, when it was due, when it was delivered, and why.
    - STILL MISSING: every item from A to J not captured or not in its table.
    - FIRST THINGS TOMORROW: in order, with times.
    - WHAT I LEARNED TODAY: routes that worked, traps, fixes (so tomorrow's chat doesn't relearn them).
-5. Post the shutdown line to me:
+6. Post the shutdown line to me:
    Shutdown HH:MM | landed: ... | still missing: ... | late today: ... | backup: ok/not | first things tomorrow: ... | start a new capture chat at 5:00 AM
-6. Then stop: do not re-arm the sleep. Leave every Chrome tab open.
+7. Then stop: do not re-arm the sleep. Your own tabs are closed by now (step 4).
 If I have not started a new chat and you are still the only capture chat at 5:00 AM, carry on with the day and remind me once.
 
 STAY AWAKE ALL DAY
@@ -266,7 +268,7 @@ NEVER
 Never sign in or type passwords, accept permission prompts, save a TradingView layout, commit, push, deploy, move money or delete files. Never reveal, add or batch-import MFR tickers without my yes, and never open MFR's My lists (opening it re-activates the first list and spends about 30 requests). Never put Hedgeye, SpotGamma or book data anywhere public. Use my FIRST Chrome, keep the Hedgeye and TradingView tabs open, and close only the temp tabs you open.
 
 START NOW (you are a new chat today)
-0. Read docs/playbook/CAPTURE_STATE.md: it is yesterday's handoff. Re-find the Chrome tabs it lists (tabs_context; old tab ids are dead), turn Remote Control on, request keep-awake, and start the timers. If anything is listed as RUNNING, follow AFTER COMPACTION step 3 first. Post one line: Started: HH:MM | carried over: ... | first: ...
+0. Read docs/playbook/CAPTURE_STATE.md: it is yesterday's handoff. Open your own Hedgeye, TradingView and SpotGamma tabs in my first Chrome (yesterday's chat closed its own; if its handoff lists one left open, leave that one alone), turn Remote Control on, request keep-awake, and start the timers. If anything is listed as RUNNING, follow AFTER COMPACTION step 3 first. Post one line: Started: HH:MM | carried over: ... | first: ...
 1. Run feed_health (it includes the MFR lines).
 2. If any MFR line is STALE, start the MFR re-run from section J in the background first. It takes hours, so start it before anything else.
 3. If a TradingView run is still going in the TradingView tab (window.__tvJob), collect it and --ingest it before anything else touches that tab.

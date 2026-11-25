@@ -216,6 +216,7 @@ SCHEDULE (ET, market days)
   - anything from the handoff's standing sections that still applies (rule talk, how I want the desk to work): carry it forward, don't drop it.
   Then run py -m tools.eod_report and give me its lines: P&L per account (today, 5 sessions, month, vs SPY), longs vs shorts, exposure, the what-if, and the closed-trade stats (win rate, average win vs average loss). Put the headline numbers in the handoff.
   Then update PORTFOLIO_DIRECTION.md and log the day's conviction-log outcomes (+3% reached or stop hit, and days taken) so each grade gets a hit rate. Mark yesterday's desk calls still unfilled as taken = no. After that, stop: no heartbeat overnight. Tomorrow is a new chat.
+- CLOSE YOUR WINDOW (Kris 11/24: "the chats are supposed to close their windows when they are done"): before you stop for the day, close every Chrome tab and window YOU opened. Never close a tab you did not open, and never one with a job still running. Say in your last line which tabs you closed. (The desk only opens temp tabs for option quotes: close each one as soon as the quote is read.)
 - Sundays: the Macro Sunday game plan for the week (py -m tools.macro_sunday), read against QUAD_STATUS.md.
 Stay awake between cycles until the 4:15 handoff: re-arm a background sleep timed to the next :02 or :32 (max 1500 s per sleep; chain two if needed). Until then, never end a turn without one running. Time every glance off the machine clock (date +%H:%M), never your own count.
 

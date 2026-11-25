@@ -30,6 +30,7 @@ EVERY TURN
 START AND STOP
 - Start: about 9:20 AM ET. Find or open the tape tab, do one test read at 9:25 (it may be thin before the open), then the 9:30 read.
 - Stop: after the 4:15 PM read. Post "HH:MM tape done | reads today: N | gaps: ..." and stop. No sleep timer overnight. Tomorrow is a new chat.
+- CLOSE YOUR WINDOW (Kris 11/24: "the chats are supposed to close their windows when they are done"): before you stop for the day, close every Chrome tab and window YOU opened. Never close a tab you did not open, and never one with a job still running. Say in your last line which tabs you closed.
 - Not a market day (weekend or holiday): say so and stop.
 
 NEVER
