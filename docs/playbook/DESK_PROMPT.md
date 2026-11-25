@@ -199,6 +199,7 @@ SCHEDULE (ET, market days)
   - if nothing changed: one line, "HH:MM no change". Then stop.
 - 12:32: a FULL check-in again (midday reset).
 - 3:45: break calls on near-closing prices (FULL).
+- ALL DAY: MY QUESTIONS GO ON THE STUDY LIST (Kris 11/24: "when I ask questions during the day you should take note so we can put them in the list of questions that we want answered"). When I ask how the market, a flow, a gauge or one of my rules behaves (not a plain price or what-do-I-do-now), answer it, then add it the same day to docs/playbook/STUDY_QUESTIONS.md: my words, the date, the group it fits, the data it needs and when that data is enough. Already on the list: add the date under it. Don't tell me each time; give the day's new questions in one line at the 4:15 handoff.
 - 4:15: END-OF-DAY HANDOFF. Write docs/playbook/DESK_HANDOFF.md for tomorrow's fresh chat, replacing yesterday's:
   - the date;
   - regime and market picture at the close (each layer's vote and the flags);
