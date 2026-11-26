@@ -16,24 +16,29 @@ VOL CONTROL  (S&P 500)
   exp_t10/12/15 = equity weight of a plain 10 / 12 / 15 % target fund (S&P Risk Control rule,
                   capped at 150 %).
 
-CTA TREND  (13 markets)
+CTA TREND  (every market in tools/sys_flows_markets.py: stocks, bonds, currencies, commodities, bitcoin)
   Four lookbacks: 21, 63, 126, 252 bars. Signal = +1 if the close is above the close N bars
-  ago, else -1. score = average x 100 (-100 full short ... +100 full long).
+  ago, else -1. score = weighted average x 100 (-100 full short ... +100 full long). The weights
+  are the blend that best matches real managed-futures fund returns (tools/sys_flows_fit.py
+  --weights); equal weights until that has been run.
   levels  = for the NEXT bar, the close each lookback will be compared with. A close through
-            one flips that signal: next_sell is the nearest one below, next_buy the nearest above.
-  Equities use the cash index (no roll gap). Bonds, oil, gold, copper use Yahoo's front-month
-  future, which jumps at each roll: read those levels as approximate.
+            one flips that signal: next_sell is the nearest one below, next_buy the nearest above
+            (only lookbacks that carry weight).
+  Stocks use the cash index or ETF. Bonds and commodities use Yahoo's front-month future, which
+  jumps at each roll: read those levels as approximate.
 
-DBMF HOLDINGS  (real positions, not a model)
-  DBMF is built to copy the big CTA index and prints its futures book every day on its own
-  page. We read that table: each line's notional as % of the fund, and the change since the
-  prior holdings date we have. Negative = short. Bills and cash are stored but not shown.
+HARD DATA NEXT TO THE MODEL  (four reads per market, one row)
+  funds  : printed daily futures books of DBMF, KMLM and Simplify CTA (tools/sys_flows_funds.py)
+  fit    : exposures solved from a dozen funds' real daily returns (tools/sys_flows_fit.py)
+  CFTC   : the regulator's weekly count, leveraged funds / managed money (tools/sys_flows_cot.py)
+  read   : LONG / SHORT n/n when every available read points the same way, else MIXED.
+  The follow-through test (does price keep going after a flip?) prints at the bottom.
 
 Check against T1A: every run prints how close our numbers are to theirs on the days we have both.
 
 Usage: py -m tools.sys_flows [--days 120] [--no-save]
-Writes sys_flow_volcontrol, sys_flow_cta (upsert per bar), sys_flow_fund_holdings (per holdings date),
-data/sys_flows/dbmf_<date>.csv and outputs/sys_flows/sys_flows_<date>.txt.
+Writes sys_flow_volcontrol, sys_flow_cta, sys_flow_fund_holdings, sys_flow_cot, sys_flow_fit,
+data/sys_flows/<fund>_<date>.csv and outputs/sys_flows/sys_flows_<date>.txt.
 Read-only on everything else. No Telegram: the desk reads it at check-ins.
 """
 from __future__ import annotations
@@ -58,18 +63,9 @@ MOVES = list(range(-5, 6))
 TARGETS = (10, 12, 15)
 LOOKBACKS = (21, 63, 126, 252)
 
-# (label, yahoo symbol, asset class)
-CTA_UNIVERSE = [
-    ("S&P 500", "^GSPC", "equity"), ("Nasdaq 100", "^NDX", "equity"),
-    ("Russell 2000", "^RUT", "equity"), ("Euro Stoxx 50", "^STOXX50E", "equity"),
-    ("Japan Nikkei", "^N225", "equity"),
-    ("UST 10y future", "ZN=F", "bond"), ("UST 30y future", "ZB=F", "bond"),
-    ("Dollar DXY", "DX-Y.NYB", "fx"), ("EUR/USD", "EURUSD=X", "fx"), ("USD/JPY", "JPY=X", "fx"),
-    ("WTI crude", "CL=F", "commodity"), ("Gold", "GC=F", "commodity"),
-    ("Copper", "HG=F", "commodity"),
-]
-DBMF_URL = "https://www.imgp.com/us/fund/US53700T8273-imgp-dbi-managed-futures-strategy-etf/"
-ROLL_GAP = {"ZN=F", "ZB=F", "CL=F", "GC=F", "HG=F"}
+from tools.sys_flows_markets import BY_KEY, CLASSES, MARKETS   # noqa: E402
+
+TREND_MARKETS = [m for m in MARKETS if m.get("yahoo")]
 
 
 def _closes(symbols):
@@ -157,9 +153,21 @@ def fit_k(t1a):
 
 # ── CTA trend ────────────────────────────────────────────────────────────────
 
-def cta_rows(closes, days):
+def lookback_w():
+    """{lookback: weight} summing to 1. From the fitted blend if present, else equal."""
+    from tools.sys_flows_fit import load_weights
+    w = load_weights()
+    raw = {n: float((w or {}).get("weights", {}).get(str(n), 0.0)) for n in LOOKBACKS}
+    tot = sum(raw.values())
+    return {n: v / tot for n, v in raw.items()} if tot > 0 else {n: 1.0 / len(LOOKBACKS) for n in LOOKBACKS}
+
+
+def cta_rows(closes, days, weights=None):
+    weights = weights or lookback_w()
+    live = [n for n in LOOKBACKS if weights[n] > 0]
     rows = []
-    for label, sym, cls in CTA_UNIVERSE:
+    for m in TREND_MARKETS:
+        sym = m["yahoo"]
         if sym not in closes:
             continue
         s = closes[sym].dropna()
@@ -170,11 +178,12 @@ def cta_rows(closes, days):
         for i in range(max(max(LOOKBACKS), len(v) - days), len(v)):
             px = float(v[i])
             sig = {str(n): (1 if px > v[i - n] else -1) for n in LOOKBACKS}
-            lev = {str(n): round(float(v[i - n + 1]), 4) for n in LOOKBACKS}   # next bar's reference
-            below = [x for x in lev.values() if x < px]
-            above = [x for x in lev.values() if x > px]
-            rows.append({"bar_date": idx[i].date(), "symbol": sym, "label": label, "asset_class": cls,
-                         "close": round(px, 4), "score": 100.0 * sum(sig.values()) / len(LOOKBACKS),
+            lev = {str(n): round(float(v[i - n + 1]), 6) for n in LOOKBACKS}   # next bar's reference
+            below = [lev[str(n)] for n in live if lev[str(n)] < px]
+            above = [lev[str(n)] for n in live if lev[str(n)] > px]
+            rows.append({"bar_date": idx[i].date(), "symbol": sym, "label": m["label"], "asset_class": m["cls"],
+                         "market": m["key"], "close": round(px, 6),
+                         "score": round(100.0 * sum(weights[n] * sig[str(n)] for n in LOOKBACKS), 1),
                          "signals": sig, "levels": lev,
                          "next_sell": max(below) if below else None,
                          "next_buy": min(above) if above else None})
@@ -231,96 +240,6 @@ def t1a_check(t1a, vc, cta):
     return out or ["  no shared days with Tier 1 Alpha yet"]
 
 
-# ── DBMF holdings ────────────────────────────────────────────────────────────
-
-def _num(txt):
-    t = re.sub(r"[^0-9.\-]", "", txt or "")
-    try:
-        return float(t)
-    except ValueError:
-        return None
-
-
-def fetch_dbmf():
-    """[(as_of, security, cusip, ticker, quantity, market_value, weight_pct)] from the fund page."""
-    import urllib.request
-    req = urllib.request.Request(DBMF_URL, headers={"User-Agent": "Mozilla/5.0"})
-    html = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "ignore")
-    m = re.search(r'<table id="breakdown-holdings-us".*?</table>', html, re.S)
-    if not m:
-        return []
-    rows = []
-    for tr in re.findall(r'<tr class="holding row">(.*?)</tr>', m.group(0), re.S):
-        c = {k: re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", v)).strip()
-             for k, v in re.findall(r'<td class="([a-z_]+)">(.*?)</td>', tr, re.S)}
-        try:
-            as_of = datetime.strptime(c.get("value_date", ""), "%m/%d/%Y").date()
-        except ValueError:
-            continue                      # the header row
-        w = _num(c.get("weight"))
-        rows.append((as_of, c.get("security_name", ""), c.get("isin", "") or "",
-                     None if c.get("ticker") in (None, "", "-") else c["ticker"],
-                     _num(c.get("shares_qty")), _num(c.get("market_value")),
-                     None if w is None else round(w * 100, 2)))
-    return rows
-
-
-def save_dbmf(conn, rows):
-    cur = conn.cursor()
-    for r in rows:
-        cur.execute("""INSERT INTO sys_flow_fund_holdings (fund, as_of, security, cusip, ticker, quantity,
-                         market_value, weight_pct) VALUES ('DBMF',%s,%s,%s,%s,%s,%s,%s)
-                       ON CONFLICT (fund, as_of, security, cusip) DO UPDATE SET ticker=EXCLUDED.ticker,
-                         quantity=EXCLUDED.quantity, market_value=EXCLUDED.market_value,
-                         weight_pct=EXCLUDED.weight_pct, captured_at=now()""", r)
-    conn.commit()
-    if rows:
-        import csv
-        os.makedirs("data/sys_flows", exist_ok=True)
-        with open(f"data/sys_flows/dbmf_{rows[0][0]}.csv", "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["as_of", "security", "cusip", "ticker", "quantity", "market_value", "weight_pct"])
-            w.writerows(rows)
-
-
-def _root(security):
-    """'US 2YR NOTE (CBT) MAR27' -> 'US 2YR NOTE (CBT)': the market without the contract month."""
-    return re.sub(r"\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s?\d{2}$", "", security.strip()).strip()
-
-
-def dbmf_lines(conn, rows):
-    """Report lines: each futures market's weight and the change vs the prior holdings date in the bot."""
-    if not rows:
-        return ["", "DBMF HOLDINGS", "  FAILED - no holdings table on the fund page"]
-    as_of = rows[0][0]
-    now_w = {}
-    for _, sec, _, tk, _, _, w in rows:
-        if tk and w is not None:                       # futures have a ticker; bills and cash do not
-            now_w[_root(sec)] = now_w.get(_root(sec), 0.0) + w
-    prev_w, prev_date = {}, None
-    try:
-        cur = conn.cursor()
-        cur.execute("""SELECT as_of, security, weight_pct FROM sys_flow_fund_holdings
-                       WHERE fund='DBMF' AND ticker IS NOT NULL AND as_of =
-                         (SELECT max(as_of) FROM sys_flow_fund_holdings WHERE fund='DBMF' AND as_of < %s)""", (as_of,))
-        for d, sec, w in cur.fetchall():
-            prev_date = d
-            if w is not None:
-                prev_w[_root(sec)] = prev_w.get(_root(sec), 0.0) + float(w)
-    except Exception:
-        conn.rollback()
-    L = ["", f"DBMF HOLDINGS  as of {as_of}  (notional % of fund, - = short)"
-         + (f"  change vs {prev_date}" if prev_date else "  first capture: changes start next holdings date")]
-    for k in sorted(set(now_w) | set(prev_w), key=lambda k: -abs(now_w.get(k, 0.0))):
-        w = now_w.get(k, 0.0)
-        chg = ""
-        if prev_date:
-            d = w - prev_w.get(k, 0.0)
-            chg = f"  {d:+.0f}" + ("  NEW" if k not in prev_w else "  CLOSED" if k not in now_w else "") if abs(d) >= 1 else ""
-        L.append(f"  {k:<28}{w:>+6.0f}%{chg}")
-    return L
-
-
 # ── report ───────────────────────────────────────────────────────────────────
 
 def _px(x):
@@ -329,8 +248,140 @@ def _px(x):
     return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:,.2f}" if abs(x) >= 10 else f"{x:.4f}"
 
 
-def build_report(vc, cta, check, now, dbmf=()):
-    L = [f"SYSTEMATIC FLOWS (our model)  run {now:%Y-%m-%d %H:%M} ET"]
+def _latest(cta):
+    """({market: last row}, {market: row before it})."""
+    last, prev = {}, {}
+    for r in sorted(cta, key=lambda r: r["bar_date"]):
+        k = r["market"]
+        if k in last:
+            prev[k] = last[k]
+        last[k] = r
+    return last, prev
+
+
+def _read(score, fund_w, fit, cot, cls):
+    """LONG / SHORT n/n when every read that has a view points one way, else MIXED."""
+    signs = []
+    if score is not None and abs(score) >= 20:
+        signs.append(1 if score > 0 else -1)
+    for w in (fund_w or {}).values():                    # each fund's printed book is its own read
+        if abs(w) >= 2:
+            signs.append(1 if w > 0 else -1)
+    if fit is not None and abs(fit) >= 5:
+        signs.append(1 if fit > 0 else -1)
+    if cot and cls == "commodity" and cot.get("pct_oi") is not None and abs(cot["pct_oi"]) >= 3:
+        signs.append(1 if cot["net"] > 0 else -1)       # financial futures: level is muddied by basis trades
+    if len(signs) < 2:
+        return ""
+    if all(x > 0 for x in signs):
+        return f"LONG {len(signs)}/{len(signs)}"
+    if all(x < 0 for x in signs):
+        return f"SHORT {len(signs)}/{len(signs)}"
+    return "MIXED"
+
+
+def _cell(v, width, fmt="{:+.0f}"):
+    return f"{'' if v is None else fmt.format(v):>{width}}"
+
+
+def positions_lines(cta, hold, fit, cot):
+    """The all-assets table: trend score, three funds' books, returns fit, CFTC, and whether they agree."""
+    from tools.sys_flows_funds import FUNDS
+    last, _ = _latest(cta)
+    pos, chg, dates, notes = hold
+    now_fit = (fit or {}).get("now") or {}
+    b_now = now_fit.get("beta", {})
+    b_prev = ((fit or {}).get("prev") or {}).get("beta", {})
+    cot_date = max((c["date"] for c in cot.values()), default=None)
+    L = ["", "POSITIONS, ALL ASSETS  (four independent reads per market)",
+         "  trend = our score -100..+100 | funds = printed futures book, % of fund | fit = solved from real fund",
+         "  returns, % of fund (5d = change in 5 bars) | CFTC = net % of open interest, week change in contracts,",
+         "  rank in 3 years (0 most short, 100 most long)",
+         "  fund holdings dates: " + (", ".join(f"{f} {dates[f]}" for f in FUNDS if f in dates) or "none")
+         + f" | fit {now_fit.get('bar_date', '-')}, r2 {now_fit.get('r2', 0):.2f} | CFTC {cot_date or '-'}",
+         f"  {'market':<18}{'trend':>6} |{'DBMF':>6}{'KMLM':>6}{'CTA':>6} |{'fit':>5}{'5d':>5} |"
+         f"{'%OI':>6}{'wk chg':>9}{'rank':>5} | read"]
+    for cls in CLASSES:
+        rows = []
+        for m in [m for m in MARKETS if m["cls"] == cls]:
+            k = m["key"]
+            sc = last[k]["score"] if k in last else None
+            fw, c = pos.get(k, {}), cot.get(k)
+            ft = b_now.get(k)
+            if sc is None and not fw and ft is None and not c:
+                continue
+            d5 = None if ft is None or k not in b_prev else ft - b_prev[k]
+            if d5 is not None and abs(d5) < 3:
+                d5 = None
+            if c and c.get("pct_oi") is not None and c.get("chg1w") is not None:
+                cot_txt = _cell(c["pct_oi"], 6) + _cell(c["chg1w"], 9, "{:+,}") + _cell(c["pctile"], 5, "{}")
+            else:
+                cot_txt = " " * 20
+            rows.append(f"  {m['label']:<18}{_cell(sc, 6)} |" + "".join(_cell(fw.get(f), 6) for f in FUNDS) + " |"
+                        + _cell(ft, 5) + _cell(d5, 5) + " |" + cot_txt + f" | {_read(sc, fw, ft, c, cls)}")
+        if rows:
+            L += [f"  -- {cls}"] + rows
+    moves = []
+    for k, d in chg.items():
+        for f, v in d.items():
+            moves.append((abs(v), f"{BY_KEY[k]['label']} {f} {v:+.0f}"))
+    if moves:
+        L.append("  fund changes since their prior holdings date (actual buying / selling, % of fund): "
+                 + ", ".join(t for _, t in sorted(moves, reverse=True)[:14]))
+    else:
+        L.append("  fund changes: none yet (they show from each fund's second captured holdings date)")
+    L += [f"  note - {n}" for n in notes]
+    return L
+
+
+def trend_lines(cta, weights):
+    last, prev = _latest(cta)
+    live = [n for n in LOOKBACKS if weights[n] > 0]
+    L = ["", "CTA TREND LEVELS  (signals 1m 3m 6m 12m; weights "
+         + " ".join(f"{n}d {weights[n] * 100:.0f}%" for n in LOOKBACKS) + ")",
+         "  a close below 'sell below' turns one weighted signal short; above 'buy above' turns one long",
+         f"  {'market':<18}{'close':>10} {'score':>6} {'chg':>5}  sig   {'sell below':>11} {'buy above':>11}"]
+    for cls in CLASSES:
+        L.append(f"  -- {cls}")
+        for m in [m for m in TREND_MARKETS if m["cls"] == cls]:
+            r = last.get(m["key"])
+            if not r:
+                continue
+            p = prev.get(m["key"])
+            chg = "" if not p or abs(p["score"] - r["score"]) < 0.5 else f"{r['score'] - p['score']:+.0f}"
+            sig = "".join("+" if r["signals"][str(n)] > 0 else "-" for n in LOOKBACKS)
+            L.append(f"  {m['label']:<18}{_px(r['close']):>10} {r['score']:>+6.0f} {chg:>5}  {sig}  "
+                     f"{_px(r['next_sell']):>11} {_px(r['next_buy']):>11}" + (" ~" if m.get("roll") else ""))
+    L.append("  ~ = front-month future, levels approximate across contract rolls")
+    if len(live) < len(LOOKBACKS):
+        L.append("  lookbacks with 0% weight are shown in sig but do not move the score or the levels")
+    return L
+
+
+def checks_lines(t1a_lines, fit, hold, weights_meta):
+    L = ["", "CHECKS", "  vs Tier 1 Alpha:"] + ["  " + x for x in t1a_lines]
+    d = (fit or {}).get("dbmf")
+    book = hold[0]
+    if d:
+        pairs = [(k, v, book[k]["DBMF"]) for k, v in d["beta"].items() if "DBMF" in book.get(k, {})]
+        if pairs:
+            ok = [p for p in pairs if (p[1] > 0) == (p[2] > 0) or abs(p[1]) < 5 or abs(p[2]) < 5]
+            bad = [p for p in pairs if p not in ok]
+            L.append(f"  returns fit vs DBMF's printed book: same side on {len(ok)} of {len(pairs)} markets, "
+                     f"average miss {sum(abs(p[1] - p[2]) for p in ok) / max(1, len(ok)):.0f} pts (fit r2 {d['r2']:.2f})")
+            for k, v, w in bad:
+                L.append(f"    MISMATCH {BY_KEY[k]['label']}: its returns behave {v:+.0f}%, its page prints {w:+.0f}%. "
+                         "Treat that printed line as unverified.")
+    if weights_meta:
+        L.append(f"  lookback blend fitted on {weights_meta['days']} days of real fund returns "
+                 f"({weights_meta['from']} to {weights_meta['to']}): correlation {weights_meta['corr']:.2f} with the funds")
+    else:
+        L.append("  lookback blend: equal weights (not fitted yet: py -m tools.sys_flows_fit --weights)")
+    return L
+
+
+def build_report(vc, now, sections):
+    L = [f"SYSTEMATIC FLOWS (our model + hard data)  run {now:%Y-%m-%d %H:%M} ET"]
     if vc:
         v = vc[-1]
         wk = vc[-6]["notional_bn"] if len(vc) >= 6 else None
@@ -349,30 +400,8 @@ def build_report(vc, cta, check, now, dbmf=()):
                      + ", ".join(f"in {d['t']} bars {d['drop1m']:+.1f}% ({d['d1m'][5:]})" for d in big))
         else:
             L.append("  no day of 1.5%+ leaves the 1M window in the next 10 bars")
-    last = {}
-    for r in cta:
-        if r["symbol"] not in last or r["bar_date"] >= last[r["symbol"]]["bar_date"]:
-            last[r["symbol"]] = r
-    prev = {}
-    for r in cta:
-        if r["bar_date"] < last[r["symbol"]]["bar_date"]:
-            if r["symbol"] not in prev or r["bar_date"] > prev[r["symbol"]]["bar_date"]:
-                prev[r["symbol"]] = r
-    if last:
-        L += ["", "CTA TREND  score -100 short .. +100 long  (1m 3m 6m 12m signals)",
-              f"  {'market':<16}{'close':>10} {'score':>6} {'chg':>5}  sig   {'sell below':>11} {'buy above':>11}"]
-        for label, sym, _ in CTA_UNIVERSE:
-            r = last.get(sym)
-            if not r:
-                continue
-            p = prev.get(sym)
-            chg = "" if not p or p["score"] == r["score"] else f"{r['score'] - p['score']:+.0f}"
-            sig = "".join("+" if r["signals"][str(n)] > 0 else "-" for n in LOOKBACKS)
-            L.append(f"  {label:<16}{_px(r['close']):>10} {r['score']:>+6.0f} {chg:>5}  {sig}  "
-                     f"{_px(r['next_sell']):>11} {_px(r['next_buy']):>11}" + (" ~" if sym in ROLL_GAP else ""))
-        L.append("  ~ = front-month future, levels approximate across contract rolls")
-    L += list(dbmf)
-    L += ["", "CHECK vs Tier 1 Alpha"] + check
+    for sec in sections:
+        L += sec
     return "\n".join(L)
 
 
@@ -392,16 +421,24 @@ def save(conn, vc, cta):
                     (r["bar_date"], r["spx_close"], r["rv_1m"], r["rv_3m"], r["rv_used"], r["notional_bn"],
                      r["notional_chg_bn"], r["exp_t10"], r["exp_t12"], r["exp_t15"],
                      json.dumps(r["flow_by_move"]), json.dumps(r["dropoff"]), r["k_fit"]))
-    for r in cta:
-        cur.execute("""INSERT INTO sys_flow_cta (bar_date, symbol, label, asset_class, close, score, signals, levels,
-                         next_sell, next_buy, computed_at)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
-                       ON CONFLICT (bar_date, symbol) DO UPDATE SET close=EXCLUDED.close, score=EXCLUDED.score,
-                         signals=EXCLUDED.signals, levels=EXCLUDED.levels, next_sell=EXCLUDED.next_sell,
-                         next_buy=EXCLUDED.next_buy, computed_at=now()""",
-                    (r["bar_date"], r["symbol"], r["label"], r["asset_class"], r["close"], r["score"],
-                     json.dumps(r["signals"]), json.dumps(r["levels"]), r["next_sell"], r["next_buy"]))
+    from psycopg2.extras import execute_values
+    execute_values(cur, """INSERT INTO sys_flow_cta (bar_date, symbol, label, asset_class, close, score, signals, levels,
+                         next_sell, next_buy, computed_at) VALUES %s
+                       ON CONFLICT (bar_date, symbol) DO UPDATE SET label=EXCLUDED.label, close=EXCLUDED.close,
+                         score=EXCLUDED.score, signals=EXCLUDED.signals, levels=EXCLUDED.levels,
+                         next_sell=EXCLUDED.next_sell, next_buy=EXCLUDED.next_buy, computed_at=now()""",
+                   [(r["bar_date"], r["symbol"], r["label"], r["asset_class"], r["close"], r["score"],
+                     json.dumps(r["signals"]), json.dumps(r["levels"]), r["next_sell"], r["next_buy"]) for r in cta],
+                   template="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())", page_size=1000)
     conn.commit()
+
+
+def _try(label, fn, default):
+    try:
+        return fn()
+    except Exception as e:
+        print(f"sys_flows: {label} failed ({str(e)[:100]})")
+        return default
 
 
 def main(argv=None):
@@ -410,32 +447,47 @@ def main(argv=None):
     ap.add_argument("--no-save", action="store_true")
     a = ap.parse_args(argv)
     now = datetime.now(ET).replace(tzinfo=None)
+    from tools import sys_flows_cot as cot_mod
+    from tools import sys_flows_fit as fit_mod
+    from tools import sys_flows_funds as funds_mod
 
-    closes = _closes([s for _, s, _ in CTA_UNIVERSE])
+    closes = _closes([m["yahoo"] for m in TREND_MARKETS])
     if closes.empty or SPX not in closes:
         print("sys_flows: FAILED - no price data from Yahoo")
         return 1
     conn = _conn()
     t1a = load_t1a(conn)
-    k = fit_k(t1a)
-    vc = vol_control_rows(closes[SPX], k, a.days)
-    cta = cta_rows(closes, a.days)
-    try:
-        holdings = fetch_dbmf()
-    except Exception as e:
-        print(f"sys_flows: DBMF page fetch failed ({e})")
-        holdings = []
-    report = build_report(vc, cta, t1a_check(t1a, vc, cta), now, dbmf_lines(conn, holdings))
+    vc = vol_control_rows(closes[SPX], fit_k(t1a), a.days)
+    weights = lookback_w()
+    cta = cta_rows(closes, a.days, weights)
+
+    by_fund, errors = _try("fund holdings", funds_mod.fetch_all, ({}, {}))
+    for f, e in errors.items():
+        print(f"sys_flows: {f} holdings failed ({e})")
+    hold = funds_mod.positions(conn, by_fund)
+    cot_rows = _try("CFTC", cot_mod.fetch, [])
+    fit = _try("returns fit", fit_mod.daily_fit, {})
+
+    spx_rows = [dict(r, symbol=SPX) for r in cta if r["market"] == "spx"]
+    sections = [positions_lines(cta, hold, fit, cot_mod.summary(cot_rows)),
+                trend_lines(cta, weights),
+                ["", "FOLLOW-THROUGH TEST  (does price keep going after a flip?)"]
+                + fit_mod.study_lines(fit_mod.load_study()),
+                checks_lines(t1a_check(t1a, vc, spx_rows), fit, hold, fit_mod.load_weights())]
+    report = build_report(vc, now, sections)
     print(report)
     if not a.no_save:
         save(conn, vc, cta)
-        save_dbmf(conn, holdings)
+        funds_mod.save(conn, by_fund)
+        if cot_rows:
+            cot_mod.save(conn, cot_rows)
+        fit_mod.save_fit(conn, fit)
         os.makedirs("outputs/sys_flows", exist_ok=True)
         path = f"outputs/sys_flows/sys_flows_{now:%Y-%m-%d}.txt"
         with open(path, "w", encoding="utf-8") as f:
             f.write(report + "\n")
-        print(f"\nsys_flows: saved {len(vc)} vol-control bars, {len(cta)} CTA rows, "
-              f"{len(holdings)} DBMF lines, {path}")
+        print(f"\nsys_flows: saved {len(vc)} vol-control bars, {len(cta)} trend rows, "
+              f"{sum(len(v) for v in by_fund.values())} fund lines, {len(cot_rows)} CFTC rows, {path}")
     conn.close()
     return 0
 
