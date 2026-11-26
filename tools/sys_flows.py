@@ -24,10 +24,16 @@ CTA TREND  (13 markets)
   Equities use the cash index (no roll gap). Bonds, oil, gold, copper use Yahoo's front-month
   future, which jumps at each roll: read those levels as approximate.
 
+DBMF HOLDINGS  (real positions, not a model)
+  DBMF is built to copy the big CTA index and prints its futures book every day on its own
+  page. We read that table: each line's notional as % of the fund, and the change since the
+  prior holdings date we have. Negative = short. Bills and cash are stored but not shown.
+
 Check against T1A: every run prints how close our numbers are to theirs on the days we have both.
 
 Usage: py -m tools.sys_flows [--days 120] [--no-save]
-Writes sys_flow_volcontrol, sys_flow_cta (upsert per bar) and outputs/sys_flows/sys_flows_<date>.txt.
+Writes sys_flow_volcontrol, sys_flow_cta (upsert per bar), sys_flow_fund_holdings (per holdings date),
+data/sys_flows/dbmf_<date>.csv and outputs/sys_flows/sys_flows_<date>.txt.
 Read-only on everything else. No Telegram: the desk reads it at check-ins.
 """
 from __future__ import annotations
@@ -35,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import statistics
 import sys
 import warnings
@@ -61,6 +68,7 @@ CTA_UNIVERSE = [
     ("WTI crude", "CL=F", "commodity"), ("Gold", "GC=F", "commodity"),
     ("Copper", "HG=F", "commodity"),
 ]
+DBMF_URL = "https://www.imgp.com/us/fund/US53700T8273-imgp-dbi-managed-futures-strategy-etf/"
 ROLL_GAP = {"ZN=F", "ZB=F", "CL=F", "GC=F", "HG=F"}
 
 
@@ -223,6 +231,96 @@ def t1a_check(t1a, vc, cta):
     return out or ["  no shared days with Tier 1 Alpha yet"]
 
 
+# ── DBMF holdings ────────────────────────────────────────────────────────────
+
+def _num(txt):
+    t = re.sub(r"[^0-9.\-]", "", txt or "")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def fetch_dbmf():
+    """[(as_of, security, cusip, ticker, quantity, market_value, weight_pct)] from the fund page."""
+    import urllib.request
+    req = urllib.request.Request(DBMF_URL, headers={"User-Agent": "Mozilla/5.0"})
+    html = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "ignore")
+    m = re.search(r'<table id="breakdown-holdings-us".*?</table>', html, re.S)
+    if not m:
+        return []
+    rows = []
+    for tr in re.findall(r'<tr class="holding row">(.*?)</tr>', m.group(0), re.S):
+        c = {k: re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", v)).strip()
+             for k, v in re.findall(r'<td class="([a-z_]+)">(.*?)</td>', tr, re.S)}
+        try:
+            as_of = datetime.strptime(c.get("value_date", ""), "%m/%d/%Y").date()
+        except ValueError:
+            continue                      # the header row
+        w = _num(c.get("weight"))
+        rows.append((as_of, c.get("security_name", ""), c.get("isin", "") or "",
+                     None if c.get("ticker") in (None, "", "-") else c["ticker"],
+                     _num(c.get("shares_qty")), _num(c.get("market_value")),
+                     None if w is None else round(w * 100, 2)))
+    return rows
+
+
+def save_dbmf(conn, rows):
+    cur = conn.cursor()
+    for r in rows:
+        cur.execute("""INSERT INTO sys_flow_fund_holdings (fund, as_of, security, cusip, ticker, quantity,
+                         market_value, weight_pct) VALUES ('DBMF',%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (fund, as_of, security, cusip) DO UPDATE SET ticker=EXCLUDED.ticker,
+                         quantity=EXCLUDED.quantity, market_value=EXCLUDED.market_value,
+                         weight_pct=EXCLUDED.weight_pct, captured_at=now()""", r)
+    conn.commit()
+    if rows:
+        import csv
+        os.makedirs("data/sys_flows", exist_ok=True)
+        with open(f"data/sys_flows/dbmf_{rows[0][0]}.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["as_of", "security", "cusip", "ticker", "quantity", "market_value", "weight_pct"])
+            w.writerows(rows)
+
+
+def _root(security):
+    """'US 2YR NOTE (CBT) MAR27' -> 'US 2YR NOTE (CBT)': the market without the contract month."""
+    return re.sub(r"\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s?\d{2}$", "", security.strip()).strip()
+
+
+def dbmf_lines(conn, rows):
+    """Report lines: each futures market's weight and the change vs the prior holdings date in the bot."""
+    if not rows:
+        return ["", "DBMF HOLDINGS", "  FAILED - no holdings table on the fund page"]
+    as_of = rows[0][0]
+    now_w = {}
+    for _, sec, _, tk, _, _, w in rows:
+        if tk and w is not None:                       # futures have a ticker; bills and cash do not
+            now_w[_root(sec)] = now_w.get(_root(sec), 0.0) + w
+    prev_w, prev_date = {}, None
+    try:
+        cur = conn.cursor()
+        cur.execute("""SELECT as_of, security, weight_pct FROM sys_flow_fund_holdings
+                       WHERE fund='DBMF' AND ticker IS NOT NULL AND as_of =
+                         (SELECT max(as_of) FROM sys_flow_fund_holdings WHERE fund='DBMF' AND as_of < %s)""", (as_of,))
+        for d, sec, w in cur.fetchall():
+            prev_date = d
+            if w is not None:
+                prev_w[_root(sec)] = prev_w.get(_root(sec), 0.0) + float(w)
+    except Exception:
+        conn.rollback()
+    L = ["", f"DBMF HOLDINGS  as of {as_of}  (notional % of fund, - = short)"
+         + (f"  change vs {prev_date}" if prev_date else "  first capture: changes start next holdings date")]
+    for k in sorted(set(now_w) | set(prev_w), key=lambda k: -abs(now_w.get(k, 0.0))):
+        w = now_w.get(k, 0.0)
+        chg = ""
+        if prev_date:
+            d = w - prev_w.get(k, 0.0)
+            chg = f"  {d:+.0f}" + ("  NEW" if k not in prev_w else "  CLOSED" if k not in now_w else "") if abs(d) >= 1 else ""
+        L.append(f"  {k:<28}{w:>+6.0f}%{chg}")
+    return L
+
+
 # ── report ───────────────────────────────────────────────────────────────────
 
 def _px(x):
@@ -231,7 +329,7 @@ def _px(x):
     return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:,.2f}" if abs(x) >= 10 else f"{x:.4f}"
 
 
-def build_report(vc, cta, check, now):
+def build_report(vc, cta, check, now, dbmf=()):
     L = [f"SYSTEMATIC FLOWS (our model)  run {now:%Y-%m-%d %H:%M} ET"]
     if vc:
         v = vc[-1]
@@ -273,6 +371,7 @@ def build_report(vc, cta, check, now):
             L.append(f"  {label:<16}{_px(r['close']):>10} {r['score']:>+6.0f} {chg:>5}  {sig}  "
                      f"{_px(r['next_sell']):>11} {_px(r['next_buy']):>11}" + (" ~" if sym in ROLL_GAP else ""))
         L.append("  ~ = front-month future, levels approximate across contract rolls")
+    L += list(dbmf)
     L += ["", "CHECK vs Tier 1 Alpha"] + check
     return "\n".join(L)
 
@@ -321,15 +420,22 @@ def main(argv=None):
     k = fit_k(t1a)
     vc = vol_control_rows(closes[SPX], k, a.days)
     cta = cta_rows(closes, a.days)
-    report = build_report(vc, cta, t1a_check(t1a, vc, cta), now)
+    try:
+        holdings = fetch_dbmf()
+    except Exception as e:
+        print(f"sys_flows: DBMF page fetch failed ({e})")
+        holdings = []
+    report = build_report(vc, cta, t1a_check(t1a, vc, cta), now, dbmf_lines(conn, holdings))
     print(report)
     if not a.no_save:
         save(conn, vc, cta)
+        save_dbmf(conn, holdings)
         os.makedirs("outputs/sys_flows", exist_ok=True)
         path = f"outputs/sys_flows/sys_flows_{now:%Y-%m-%d}.txt"
         with open(path, "w", encoding="utf-8") as f:
             f.write(report + "\n")
-        print(f"\nsys_flows: saved {len(vc)} vol-control bars, {len(cta)} CTA rows, {path}")
+        print(f"\nsys_flows: saved {len(vc)} vol-control bars, {len(cta)} CTA rows, "
+              f"{len(holdings)} DBMF lines, {path}")
     conn.close()
     return 0
 
